@@ -17,12 +17,13 @@ impl Hash for CacheKey {
     }
 }
 
-pub trait CacheKeyProvider {
-    fn cache_key(&self) -> CacheKey;
-}
-
 impl Into<CacheKey> for &str {
     fn into(self) -> CacheKey {
         CacheKey::new(String::from(self))
+    }
+}
+impl Into<CacheKey> for String {
+    fn into(self) -> CacheKey {
+        CacheKey::new(self)
     }
 }

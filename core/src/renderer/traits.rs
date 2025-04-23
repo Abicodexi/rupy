@@ -1,5 +1,10 @@
-use crate::{texture::TextureManager, BindGroupLayouts, GpuContext};
+use crate::{
+    camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, GpuContext,
+    WgpuBufferCache,
+};
 use wgpu::SurfaceTexture;
+
+use super::mesh::Mesh;
 
 pub trait Renderer {
     fn resize(&mut self, new_config: &wgpu::SurfaceConfiguration);
@@ -10,8 +15,17 @@ pub trait Renderer {
         surface_texture: SurfaceTexture,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &TextureManager,
-        camera_buffer: &wgpu::Buffer,
+        wgpu_buffer_cache: &mut WgpuBufferCache,
+        camera_uniform: &CameraUniform,
     );
-
+    fn render_mesh(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        camera_bg: &wgpu::BindGroup,
+        texture_bg: &wgpu::BindGroup,
+        wgpu_buffer_cache: &mut WgpuBufferCache,
+        mesh: &Mesh,
+    );
     fn update(&mut self, dt: f32);
 }

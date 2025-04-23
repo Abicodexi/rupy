@@ -1,8 +1,6 @@
-use core::{gpu::global::get_global_gpu, renderer::traits::Renderer, SurfaceExt};
-
 use crate::state::{AppInnerState, ApplicationState};
+use core::gpu::global::get_global_gpu;
 use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
-
 pub enum ApplicationEvent {/* custom events */}
 
 impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState<'a> {
@@ -17,7 +15,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        window_id: winit::window::WindowId,
+        _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
         if let WindowEvent::CloseRequested = event {
@@ -25,42 +23,21 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
         }
 
         if let AppInnerState::Warm(app) = &mut self.inner {
-            app.camera_controller.process_events(&event);
             let gpu = get_global_gpu();
+            app.camera_controller.process_events(&event);
+
             if let WindowEvent::Resized(new_size) = &event {
-                app.surface
-                    .resize(gpu.device(), &mut app.surface_config, *new_size);
-                app.wgpu_renderer.resize(&app.surface_config);
+                app.resize(gpu, new_size);
             }
+
             if let WindowEvent::RedrawRequested = &event {
-                match app.surface.texture() {
-                    Ok(frame) => {
-                        app.wgpu_renderer.render(
-                            gpu,
-                            frame,
-                            &app.bind_group_layouts,
-                            &app.texture_manager,
-                            &app.camera_buffer,
-                        );
-                        app.window.request_redraw();
-                    }
-                    Err(e) => {
-                        eprintln!("SurfaceError: {}", e);
-                    }
-                };
-                app.camera_controller
-                    .update_camera(&mut app.camera, 1.0 / 60.0);
-                app.camera_uniform.update_view_proj(&app.camera);
-                gpu.queue.write_buffer(
-                    &app.camera_buffer,
-                    0,
-                    bytemuck::cast_slice(&[app.camera_uniform]),
-                );
+                app.update(gpu);
+                app.render(gpu);
             }
         }
     }
 
-    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ApplicationEvent) {
         if let AppInnerState::Warm(..) = &mut self.inner {}
     }
 }

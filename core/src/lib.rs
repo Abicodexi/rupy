@@ -21,7 +21,6 @@ pub use buffer::wgpu_buffer::WgpuBufferCache;
 
 pub mod cache;
 pub use cache::key::CacheKey;
-pub use cache::key::CacheKeyProvider;
 pub use cache::storage::CacheStorage;
 pub use cache::storage::HashCache;
 

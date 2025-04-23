@@ -1,4 +1,4 @@
-use crate::{CacheKey, CacheKeyProvider, CacheStorage, EngineError};
+use crate::{CacheKey, CacheStorage};
 use wgpu::{Buffer, BufferUsages, Device};
 
 /// Wrapper around WGPU buffers
@@ -9,11 +9,7 @@ pub struct WgpuBuffer {
 
 impl WgpuBuffer {
     /// Create a new GPU buffer with given data and usage flags
-    pub fn from_data<T: bytemuck::Pod>(
-        device: &Device,
-        data: &[T],
-        usage: BufferUsages,
-    ) -> Result<Self, EngineError> {
+    pub fn from_data<T: bytemuck::Pod>(device: &Device, data: &[T], usage: BufferUsages) -> Self {
         use wgpu::util::DeviceExt;
         let size = (std::mem::size_of::<T>() * data.len()) as u64;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -21,10 +17,10 @@ impl WgpuBuffer {
             contents: bytemuck::cast_slice(data),
             usage,
         });
-        Ok(WgpuBuffer {
+        WgpuBuffer {
             buffer,
             size: size as usize,
-        })
+        }
     }
 
     /// Update the buffer with new data via queue write
@@ -45,13 +41,17 @@ impl WgpuBufferCache {
             inner: Default::default(),
         }
     }
-
-    pub fn get_or_create_buffer<K, F>(&mut self, key_source: &K, create_fn: F) -> &mut WgpuBuffer
+    pub fn get_buffer(&mut self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
+        self.inner.get(key_source)
+    }
+    pub fn get_or_create_buffer<F>(
+        &mut self,
+        key_source: &CacheKey,
+        create_fn: F,
+    ) -> &mut WgpuBuffer
     where
-        K: CacheKeyProvider,
         F: FnOnce() -> WgpuBuffer,
     {
-        let key = key_source.cache_key();
-        self.inner.get_or_create(key, create_fn)
+        self.inner.get_or_create(key_source.clone(), create_fn)
     }
 }

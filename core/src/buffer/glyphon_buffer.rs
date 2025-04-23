@@ -1,4 +1,4 @@
-use crate::{CacheKey, CacheKeyProvider, CacheStorage};
+use crate::{CacheKey, CacheStorage};
 
 /// Wrapper around Glyphon buffers
 pub struct GlyphonBuffer {
@@ -49,12 +49,14 @@ impl GlyphonBufferCache {
         }
     }
 
-    pub fn get_or_create_buffer<K, F>(&mut self, key_source: &K, create_fn: F) -> &mut GlyphonBuffer
+    pub fn get_or_create_buffer<F>(
+        &mut self,
+        key_source: &CacheKey,
+        create_fn: F,
+    ) -> &mut GlyphonBuffer
     where
-        K: CacheKeyProvider,
         F: FnOnce() -> GlyphonBuffer,
     {
-        let key = key_source.cache_key();
-        self.inner.get_or_create(key, create_fn)
+        self.inner.get_or_create(key_source.clone(), create_fn)
     }
 }

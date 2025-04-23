@@ -70,7 +70,7 @@ impl CameraController {
                 true
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                if let MouseScrollDelta::LineDelta(_, scroll) = delta {}
+                if let MouseScrollDelta::LineDelta(_, _scroll) = delta {}
                 true
             }
             _ => false,

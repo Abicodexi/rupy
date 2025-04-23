@@ -19,9 +19,9 @@ impl Default for VertexColor {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, VertexLayout)]
 pub struct VertexTexture {
-    pub(crate) position: [f32; 3],   // @location(0)
-    pub(crate) color: [f32; 3],      // @location(1)
-    pub(crate) tex_coords: [f32; 2], // @location(2)
+    pub position: [f32; 3],   // @location(0)
+    pub color: [f32; 3],      // @location(1)
+    pub tex_coords: [f32; 2], // @location(2)
 }
 
 impl Default for VertexTexture {
@@ -36,11 +36,11 @@ impl Default for VertexTexture {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, VertexLayout)]
 pub struct VertexNormal {
-    pub(crate) position: [f32; 3],   // @location(0)
-    pub(crate) tex_coords: [f32; 2], // @location(1)
-    pub(crate) normal: [f32; 3],     // @location(2)
-    pub(crate) tangent: [f32; 3],    // @location(3)
-    pub(crate) bitangent: [f32; 3],  // @location(4)
+    pub position: [f32; 3],   // @location(0)
+    pub tex_coords: [f32; 2], // @location(1)
+    pub normal: [f32; 3],     // @location(2)
+    pub tangent: [f32; 3],    // @location(3)
+    pub bitangent: [f32; 3],  // @location(4)
 }
 impl Default for VertexNormal {
     fn default() -> Self {

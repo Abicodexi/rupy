@@ -1,16 +1,15 @@
-use super::vertex::VertexTexture;
+use super::{mesh::Mesh, vertex::VertexTexture};
 use crate::{
-    texture::TextureManager, BindGroupLayouts, EngineError, GpuContext, Renderer, WgpuBuffer,
+    camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, CacheKey,
+    EngineError, GpuContext, Renderer, WgpuBuffer, WgpuBufferCache,
 };
 use wgpu::{
-    BufferUsages, CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment,
-    RenderPassDescriptor, SurfaceConfiguration, SurfaceTexture,
+    CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment, RenderPassDescriptor,
+    SurfaceConfiguration, SurfaceTexture,
 };
 
 pub struct WgpuRenderer {
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: WgpuBuffer,
-    vertex_count: u32,
 }
 
 impl WgpuRenderer {
@@ -27,27 +26,6 @@ impl WgpuRenderer {
                     include_str!("C:\\Users\\abism\\Desktop\\rupy\\v_texture.wgsl").into(),
                 ),
             });
-
-        let vertices = [
-            VertexTexture {
-                position: [-0.5, -0.5, 0.0],
-                color: [1.0, 0.0, 0.0],
-                tex_coords: [0.0, 0.0],
-            },
-            VertexTexture {
-                position: [0.5, -0.5, 0.0],
-                color: [0.0, 1.0, 0.0],
-                tex_coords: [1.0, 0.0],
-            },
-            VertexTexture {
-                position: [0.0, 0.5, 0.0],
-                color: [0.0, 0.0, 1.0],
-                tex_coords: [0.0, 1.0],
-            },
-        ];
-
-        let vertex_count = vertices.len() as u32;
-        let vertex_buffer = WgpuBuffer::from_data(gpu.device(), &vertices, BufferUsages::VERTEX)?;
 
         let pipeline_layout =
             gpu.device()
@@ -85,16 +63,12 @@ impl WgpuRenderer {
                 cache: None,
             });
 
-        Ok(WgpuRenderer {
-            pipeline,
-            vertex_buffer,
-            vertex_count,
-        })
+        Ok(WgpuRenderer { pipeline })
     }
 }
 
 impl Renderer for WgpuRenderer {
-    fn resize(&mut self, config: &SurfaceConfiguration) {}
+    fn resize(&mut self, _config: &SurfaceConfiguration) {}
 
     fn update(&mut self, _dt: f32) {}
 
@@ -104,7 +78,8 @@ impl Renderer for WgpuRenderer {
         surface_texture: SurfaceTexture,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &TextureManager,
-        camera_buffer: &wgpu::Buffer,
+        wgpu_buffer_cache: &mut WgpuBufferCache,
+        camera_uniform: &CameraUniform,
     ) {
         let view = surface_texture
             .texture
@@ -136,7 +111,16 @@ impl Renderer for WgpuRenderer {
                 layout: &bind_group_layouts.camera,
                 entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
+                    resource: wgpu_buffer_cache
+                        .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
+                            WgpuBuffer::from_data(
+                                gpu.device(),
+                                &[*camera_uniform],
+                                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            )
+                        })
+                        .buffer
+                        .as_entire_binding(),
                 }],
             });
             rpass.set_bind_group(0, &camera_bind_group, &[]);
@@ -160,11 +144,51 @@ impl Renderer for WgpuRenderer {
                 rpass.set_bind_group(1, &bind_group, &[]);
             }
             rpass.set_pipeline(&self.pipeline);
-            rpass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(..));
-            rpass.draw(0..self.vertex_count, 0..1);
+            // rpass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(..));
+            // rpass.draw(0..self.vertex_count, 0..1);
         }
 
         gpu.queue().submit(Some(encoder.finish()));
         surface_texture.present();
+    }
+    fn render_mesh(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        camera_bg: &wgpu::BindGroup,
+        texture_bg: &wgpu::BindGroup,
+        wgpu_buffer_cache: &mut WgpuBufferCache,
+        mesh: &Mesh,
+    ) {
+        let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("main pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        rpass.set_pipeline(&self.pipeline);
+        rpass.set_bind_group(0, camera_bg, &[]);
+        rpass.set_bind_group(1, texture_bg, &[]);
+
+        match mesh {
+            Mesh::Shared { key, count } => {
+                let vb = wgpu_buffer_cache.get_buffer(key).unwrap();
+                rpass.set_vertex_buffer(0, vb.buffer.slice(..));
+                rpass.draw(0..*count, 0..1);
+            }
+            Mesh::Unique { buffer, count } => {
+                rpass.set_vertex_buffer(0, buffer.buffer.slice(..));
+                rpass.draw(0..*count, 0..1);
+            }
+        }
     }
 }

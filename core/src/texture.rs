@@ -78,6 +78,7 @@ pub struct TextureManager {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     textures: HashCache<Arc<Texture>>,
+    texture_bgs: std::collections::HashMap<String, wgpu::BindGroup>,
 }
 impl CacheStorage<Arc<Texture>> for TextureManager {
     fn get(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
@@ -109,6 +110,7 @@ impl TextureManager {
             device,
             queue,
             textures: HashCache::new(),
+            texture_bgs: std::collections::HashMap::new(),
         }
     }
 
@@ -132,5 +134,30 @@ impl TextureManager {
     /// Unload a texture from the manager (will free when Arc drops)
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
+    }
+    pub fn bind_group_for(
+        &mut self,
+        key: &str,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Option<&wgpu::BindGroup> {
+        if !self.texture_bgs.contains_key(key) {
+            let tex = self.get(key)?;
+            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("tex_bg:{}", key)),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&tex.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&tex.sampler),
+                    },
+                ],
+            });
+            self.texture_bgs.insert(key.to_string(), bg);
+        }
+        self.texture_bgs.get(key)
     }
 }
