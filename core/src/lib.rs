@@ -6,7 +6,6 @@ pub use gpu::context::GpuContext;
 
 pub mod renderer;
 pub use renderer::traits::Renderer;
-pub use renderer::vertex::VertexColor;
 pub use renderer::wgpu_renderer::WgpuRenderer;
 
 pub mod surface;
@@ -31,3 +30,11 @@ pub use bind_group::BGLBuilder;
 pub use bind_group::BindGroupLayouts;
 
 pub mod camera;
+
+pub mod mesh;
+pub use mesh::Mesh;
+
+pub mod vertex;
+pub use vertex::VertexColor;
+pub use vertex::VertexNormal;
+pub use vertex::VertexTexture;

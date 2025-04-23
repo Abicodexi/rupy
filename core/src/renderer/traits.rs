@@ -1,10 +1,8 @@
 use crate::{
-    camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, GpuContext,
+    camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, GpuContext, Mesh,
     WgpuBufferCache,
 };
 use wgpu::SurfaceTexture;
-
-use super::mesh::Mesh;
 
 pub trait Renderer {
     fn resize(&mut self, new_config: &wgpu::SurfaceConfiguration);

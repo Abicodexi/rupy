@@ -3,10 +3,9 @@ use core::{
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
     gpu::global::get_global_gpu,
-    renderer::{mesh::Mesh, vertex::VertexTexture, wgpu_renderer::WgpuRenderer},
     texture::TextureManager,
-    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Renderer, SurfaceExt, WgpuBuffer,
-    WgpuBufferCache,
+    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Mesh, Renderer, SurfaceExt,
+    VertexTexture, WgpuBuffer, WgpuBufferCache, WgpuRenderer,
 };
 use std::sync::Arc;
 use winit::{

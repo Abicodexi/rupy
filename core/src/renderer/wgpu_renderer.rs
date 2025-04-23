@@ -1,7 +1,6 @@
-use super::{mesh::Mesh, vertex::VertexTexture};
 use crate::{
     camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, CacheKey,
-    EngineError, GpuContext, Renderer, WgpuBuffer, WgpuBufferCache,
+    EngineError, GpuContext, Mesh, Renderer, VertexTexture, WgpuBuffer, WgpuBufferCache,
 };
 use wgpu::{
     CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment, RenderPassDescriptor,
