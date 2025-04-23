@@ -1,0 +1,17 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0"
+once_cell = "1.18"
+pollster = "0.3.0"
+wgpu = { version =  "22.0.0" , features = ["serde"] }
+winit = { version = "0.30.5", features = ["rwh_06", "serde"] }
+glyphon = "0.8"
+bytemuck = "1.22.0"
+wgpu_macros = "=0.1.0"
+anyhow = "1.0.98"
+image = "0.25.6"
+cgmath = "0.18.0"
