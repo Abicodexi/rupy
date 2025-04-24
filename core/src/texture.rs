@@ -1,7 +1,7 @@
+use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, HashCache};
+use image::codecs::hdr::{HdrDecoder, HdrMetadata};
+use std::io::Cursor;
 use std::sync::Arc;
-
-use crate::{CacheKey, CacheStorage, EngineError, HashCache};
-
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -11,6 +11,43 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub async fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
+        let texture = device.create_texture(desc);
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: desc.label,
+            dimension: match desc.size.depth_or_array_layers {
+                6 => Some(wgpu::TextureViewDimension::Cube),
+                _ => Some(wgpu::TextureViewDimension::D2),
+            },
+            array_layer_count: if desc.size.depth_or_array_layers == 6 {
+                Some(6)
+            } else {
+                None
+            },
+            ..Default::default()
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: desc.label,
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        Self {
+            texture,
+            view,
+            sampler,
+            label: desc.label.map(|l| l.to_string()).unwrap_or_default(),
+        }
+    }
+
     pub async fn from_bytes<P: AsRef<std::path::Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -26,6 +63,7 @@ impl Texture {
             height,
             depth_or_array_layers: 1,
         };
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label.as_ref().to_str().unwrap()),
             size,
@@ -70,6 +108,67 @@ impl Texture {
             view,
             sampler,
             label: label.as_ref().to_string_lossy().into_owned(),
+        })
+    }
+
+    pub fn create(
+        device: &wgpu::Device,
+        size: wgpu::Extent3d,
+        format: wgpu::TextureFormat,
+        mip_level_count: u32,
+        view_dim: wgpu::TextureViewDimension,
+        usage: wgpu::TextureUsages,
+        address_mode: Option<wgpu::AddressMode>,
+        mag_filter: wgpu::FilterMode,
+        sampler: Option<wgpu::Sampler>,
+        label: Option<&str>,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label,
+            dimension: Some(view_dim),
+            array_layer_count: if view_dim == wgpu::TextureViewDimension::Cube {
+                Some(6)
+            } else {
+                None
+            },
+            ..Default::default()
+        });
+
+        let sampler = sampler.unwrap_or(device.create_sampler(&wgpu::SamplerDescriptor {
+            label,
+            address_mode_u: address_mode.unwrap_or(wgpu::AddressMode::Repeat),
+            address_mode_v: address_mode.unwrap_or(wgpu::AddressMode::Repeat),
+            address_mode_w: address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
+            mag_filter,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        }));
+
+        Self {
+            texture,
+            view,
+            sampler,
+            label: label.unwrap_or("").to_string(),
+        }
+    }
+
+    pub fn create_projection_view(&self) -> wgpu::TextureView {
+        self.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Cubemap projection view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
         })
     }
 }
@@ -126,6 +225,7 @@ impl TextureManager {
         self.textures.insert(key.into(), arc.clone());
         Ok(arc)
     }
+
     /// Retrieve a previously loaded texture
     pub fn get<K: Into<CacheKey>>(&self, key: K) -> Option<Arc<Texture>> {
         self.textures.get(&key.into()).cloned()
@@ -135,6 +235,7 @@ impl TextureManager {
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
     }
+
     pub fn bind_group_for(
         &mut self,
         key: &str,
@@ -159,5 +260,123 @@ impl TextureManager {
             self.texture_bgs.insert(key.to_string(), bg);
         }
         self.texture_bgs.get(key)
+    }
+    pub fn decode_hdr(data: &[u8]) -> Result<(Vec<[f32; 4]>, HdrMetadata), EngineError> {
+        let decoder = HdrDecoder::new(Cursor::new(data))?;
+        let meta = decoder.metadata();
+        let mut pixels = vec![[0.0; 4]; (meta.width * meta.height) as usize];
+
+        decoder.read_image_transform(
+            |pix| {
+                let rgb = pix.to_hdr();
+                [rgb.0[0], rgb.0[1], rgb.0[2], 1.0]
+            },
+            &mut pixels[..],
+        )?;
+
+        Ok((pixels, meta))
+    }
+
+    pub fn prepare_equirect_projection_textures<P: AsRef<std::path::Path>>(
+        &mut self,
+        bind_group_layouts: &BindGroupLayouts,
+        path: P,
+        dst_size: u32,
+        format: wgpu::TextureFormat,
+    ) -> Result<(), EngineError> {
+        let bytes = std::fs::read(&path)?;
+        let (pixels, meta) = Self::decode_hdr(&bytes)?;
+
+        let src_key = CacheKey::new("equirect_projection_src");
+        let src = Texture::create(
+            &self.device,
+            wgpu::Extent3d {
+                width: meta.width,
+                height: meta.height,
+                depth_or_array_layers: 1,
+            },
+            format,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            None,
+            wgpu::FilterMode::Linear,
+            None,
+            Some(&format!("src:{}", path.as_ref().to_str().unwrap())),
+        );
+
+        let dst_key = CacheKey::new("equirect_projection_dst");
+        let dst = Texture::create(
+            &self.device,
+            wgpu::Extent3d {
+                width: dst_size,
+                height: dst_size,
+                depth_or_array_layers: 6,
+            },
+            format,
+            1,
+            wgpu::TextureViewDimension::Cube,
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Nearest,
+            None,
+            Some(&format!("dst:{}", path.as_ref().to_str().unwrap())),
+        );
+
+        let equirect_src_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layouts.equirect_src,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&src.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dst.create_projection_view()),
+                },
+            ],
+            label: Some("Equirect projection bind group"),
+        });
+
+        let equirect_dst_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layouts.equirect_dst,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&dst.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&dst.sampler),
+                },
+            ],
+            label: Some("Skybox bind group"),
+        });
+
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &src.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&pixels),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(meta.width * std::mem::size_of::<[f32; 4]>() as u32),
+                rows_per_image: Some(meta.height),
+            },
+            src.texture.size(),
+        );
+
+        self.texture_bgs
+            .insert(src_key.id.clone(), equirect_src_bind_group);
+        self.texture_bgs
+            .insert(dst_key.id.clone(), equirect_dst_bind_group);
+
+        self.textures.insert(src_key, src.into());
+        self.textures.insert(dst_key, dst.into());
+
+        Ok(())
     }
 }

@@ -17,13 +17,13 @@ impl Hash for CacheKey {
     }
 }
 
-impl Into<CacheKey> for &str {
-    fn into(self) -> CacheKey {
-        CacheKey::new(String::from(self))
+impl From<String> for CacheKey {
+    fn from(value: String) -> Self {
+        CacheKey::new(value)
     }
 }
-impl Into<CacheKey> for String {
-    fn into(self) -> CacheKey {
-        CacheKey::new(self)
+impl From<&str> for CacheKey {
+    fn from(value: &str) -> Self {
+        CacheKey::new(value)
     }
 }

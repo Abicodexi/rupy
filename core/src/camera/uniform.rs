@@ -4,6 +4,8 @@ use super::Camera;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
+    pub inv_proj: [[f32; 4]; 4],
+    pub inv_view: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
@@ -11,10 +13,15 @@ impl CameraUniform {
         use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
+            inv_proj: cgmath::Matrix4::identity().into(),
+            inv_view: cgmath::Matrix4::identity().into(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+        let (vp, inv_proj, inv_view) = camera.build_view_projection_matrix();
+        self.view_proj = vp.into();
+        self.inv_proj = inv_proj.into();
+        self.inv_view = inv_view.into();
     }
 }

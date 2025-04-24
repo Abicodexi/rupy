@@ -13,5 +13,6 @@ glyphon = "0.8"
 bytemuck = "1.22.0"
 wgpu_macros = "=0.1.0"
 anyhow = "1.0.98"
-image = "0.25.6"
+image = { version = "0.24", features = ["png", "jpeg", "hdr"] }
+
 cgmath = "0.18.0"

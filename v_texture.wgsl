@@ -10,8 +10,14 @@ struct VertexOutput {
     @location(2) tex_coords: vec2<f32>
 };
 
+struct Camera {
+    view_proj: mat4x4<f32>,
+    inv_proj: mat4x4<f32>,
+    inv_view: mat4x4<f32>,
+}
+
 @group(0) @binding(0)
-var<uniform> camera: mat4x4<f32>;
+var<uniform> camera: Camera;
 
 @group(1) @binding(0)
 var t_diffuse: texture_2d<f32>;
@@ -21,7 +27,7 @@ var s_diffuse: sampler;
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.clip_position = camera * vec4<f32>(input.position, 1.0);
+    output.clip_position = camera.view_proj * vec4<f32>(input.position, 1.0);
     output.color = input.color;
     output.tex_coords = input.tex_coords;
     return output;

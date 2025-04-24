@@ -1,10 +1,9 @@
+use super::Camera;
 use cgmath::{Angle, Deg, InnerSpace, Vector3, Zero};
 use winit::{
     event::{ElementState, MouseScrollDelta, WindowEvent},
     keyboard::KeyCode,
 };
-
-use super::Camera;
 
 #[derive(Debug)]
 pub struct CameraController {

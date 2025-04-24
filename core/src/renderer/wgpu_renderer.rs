@@ -1,14 +1,19 @@
 use crate::{
-    camera::uniform::CameraUniform, texture::TextureManager, BindGroupLayouts, CacheKey,
-    EngineError, GpuContext, Mesh, Renderer, VertexTexture, WgpuBuffer, WgpuBufferCache,
+    camera::uniform::CameraUniform,
+    texture::{Texture, TextureManager},
+    BindGroupLayouts, CacheKey, EngineError, GpuContext, Mesh, Renderer, VertexTexture, WgpuBuffer,
+    WgpuBufferCache,
 };
 use wgpu::{
-    CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment, RenderPassDescriptor,
-    SurfaceConfiguration, SurfaceTexture,
+    CommandEncoder, CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment,
+    RenderPassDescriptor, SurfaceConfiguration, SurfaceTexture,
 };
-
+#[warn(dead_code)]
 pub struct WgpuRenderer {
-    pipeline: wgpu::RenderPipeline,
+    pub default_pipeline: wgpu::RenderPipeline,
+    pub equirect_dst_pipeline: wgpu::RenderPipeline,
+    pub equirect_src_pipeline: wgpu::ComputePipeline,
+    pub depth_texture: Texture,
 }
 
 impl WgpuRenderer {
@@ -17,7 +22,15 @@ impl WgpuRenderer {
         config: &SurfaceConfiguration,
         bind_group_layouts: &BindGroupLayouts,
     ) -> Result<Self, EngineError> {
-        let shader = gpu
+        let depth_stencil = wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+
+        let default_shader = gpu
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("default shader"),
@@ -26,7 +39,7 @@ impl WgpuRenderer {
                 ),
             });
 
-        let pipeline_layout =
+        let default_pipeline_layout =
             gpu.device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("pipeline layout"),
@@ -34,35 +47,177 @@ impl WgpuRenderer {
                     push_constant_ranges: &[],
                 });
 
-        let pipeline = gpu
+        let default_pipeline =
+            gpu.device()
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("default pipeline"),
+                    layout: Some(&default_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &default_shader,
+                        entry_point: "vs_main",
+                        buffers: &[VertexTexture::LAYOUT],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &default_shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: config.format,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::default(),
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: Default::default(),
+                    depth_stencil: Some(depth_stencil.clone()),
+                    multisample: Default::default(),
+                    multiview: None,
+                    cache: None,
+                });
+
+        let equirect_src_shader = gpu
             .device()
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("default pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[VertexTexture::LAYOUT],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::default(),
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                multiview: None,
-                cache: None,
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("default shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("C:\\Users\\abism\\Desktop\\rupy\\equirect_src.wgsl").into(),
+                ),
             });
 
-        Ok(WgpuRenderer { pipeline })
+        let equirect_src_pipeline_layout =
+            gpu.device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Equirect src pipeline layout"),
+                    bind_group_layouts: &[&bind_group_layouts.equirect_src],
+                    push_constant_ranges: &[],
+                });
+
+        let equirect_src_pipeline =
+            gpu.device()
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Equirect src pipeline"),
+                    layout: Some(&equirect_src_pipeline_layout),
+                    module: &equirect_src_shader,
+                    entry_point: "compute_equirect_to_cubemap",
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+
+        let equirect_dst_shader = gpu
+            .device()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Equirect dst shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("C:\\Users\\abism\\Desktop\\rupy\\equirect_dst.wgsl").into(),
+                ),
+            });
+
+        let equirect_dst_layout =
+            gpu.device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Equirect dst pipeline layout"),
+                    bind_group_layouts: &[
+                        &bind_group_layouts.camera,
+                        &bind_group_layouts.equirect_dst,
+                    ],
+                    push_constant_ranges: &[],
+                });
+
+        let equirect_dst_pipeline =
+            gpu.device()
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("Equirect dst pipeline"),
+                    layout: Some(&equirect_dst_layout),
+                    vertex: wgpu::VertexState {
+                        module: &equirect_dst_shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &equirect_dst_shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: config.format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(depth_stencil),
+
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview: None,
+                    cache: None,
+                });
+
+        let depth_texture = Texture::create(
+            gpu.device(),
+            wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(gpu.device().create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::LessEqual),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            })),
+            Some("Depth texture"),
+        );
+        Ok(WgpuRenderer {
+            default_pipeline,
+            equirect_dst_pipeline,
+            equirect_src_pipeline,
+            depth_texture,
+        })
+    }
+    pub fn equirect_projection(
+        &self,
+        queue: &wgpu::Queue,
+        mut encoder: CommandEncoder,
+        bind_group: &wgpu::BindGroup,
+        dst_size: u32,
+        label: Option<&str>,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label,
+            timestamp_writes: None,
+        });
+
+        let num_workgroups = (dst_size + 15) / 16;
+        pass.set_pipeline(&self.equirect_src_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.dispatch_workgroups(num_workgroups, num_workgroups, 6);
+
+        drop(pass);
+        queue.submit([encoder.finish()]);
     }
 }
 
@@ -142,7 +297,7 @@ impl Renderer for WgpuRenderer {
 
                 rpass.set_bind_group(1, &bind_group, &[]);
             }
-            rpass.set_pipeline(&self.pipeline);
+            rpass.set_pipeline(&self.default_pipeline);
             // rpass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(..));
             // rpass.draw(0..self.vertex_count, 0..1);
         }
@@ -152,37 +307,22 @@ impl Renderer for WgpuRenderer {
     }
     fn render_mesh(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
-        camera_bg: &wgpu::BindGroup,
-        texture_bg: &wgpu::BindGroup,
+        rpass: &mut wgpu::RenderPass,
+        camera_bind_group: &wgpu::BindGroup,
+        texture_bind_group: &wgpu::BindGroup,
         wgpu_buffer_cache: &mut WgpuBufferCache,
         mesh: &Mesh,
     ) {
-        let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-            label: Some("main pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        rpass.set_pipeline(&self.pipeline);
-        rpass.set_bind_group(0, camera_bg, &[]);
-        rpass.set_bind_group(1, texture_bg, &[]);
+        rpass.set_pipeline(&self.default_pipeline);
+        rpass.set_bind_group(0, camera_bind_group, &[]);
+        rpass.set_bind_group(1, texture_bind_group, &[]);
 
         match mesh {
             Mesh::Shared { key, count } => {
-                let vb = wgpu_buffer_cache.get_buffer(key).unwrap();
-                rpass.set_vertex_buffer(0, vb.buffer.slice(..));
-                rpass.draw(0..*count, 0..1);
+                if let Some(vb) = wgpu_buffer_cache.get_buffer(key) {
+                    rpass.set_vertex_buffer(0, vb.buffer.slice(..));
+                    rpass.draw(0..*count, 0..1);
+                }
             }
             Mesh::Unique { buffer, count } => {
                 rpass.set_vertex_buffer(0, buffer.buffer.slice(..));

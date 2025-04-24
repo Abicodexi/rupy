@@ -26,7 +26,7 @@ pub use cache::storage::HashCache;
 pub mod texture;
 
 pub mod bind_group;
-pub use bind_group::BGLBuilder;
+pub use bind_group::BindGroupLayoutBuilder;
 pub use bind_group::BindGroupLayouts;
 
 pub mod camera;

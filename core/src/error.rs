@@ -28,4 +28,7 @@ pub enum EngineError {
 
     #[error("Image error: {0}")]
     ImageError(#[from] image::ImageError),
+
+    #[error("FileSystem error: {0}")]
+    FileSystemError(String),
 }

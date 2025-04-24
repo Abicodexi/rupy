@@ -18,8 +18,7 @@ pub trait Renderer {
     );
     fn render_mesh(
         &self,
-        encoder: &mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
+        rpass: &mut wgpu::RenderPass,
         camera_bg: &wgpu::BindGroup,
         texture_bg: &wgpu::BindGroup,
         wgpu_buffer_cache: &mut WgpuBufferCache,

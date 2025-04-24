@@ -97,6 +97,11 @@ impl<'a> Rupy<'a> {
                     .as_entire_binding(),
             }],
         });
+        let surface = instance.create_surface(win_clone)?;
+        let surface_config = surface.get_default_config(adapter, width, height).ok_or(
+            EngineError::SurfaceConfigError("surface isn't supported by this adapter".into()),
+        )?;
+        surface.configure(&gpu.device, &surface_config);
 
         let mut texture_manager = TextureManager::new(gpu.device.clone(), gpu.queue.clone());
         texture_manager
@@ -106,13 +111,29 @@ impl<'a> Rupy<'a> {
             )
             .await?;
 
-        let surface = instance.create_surface(win_clone)?;
-        let surface_config = surface.get_default_config(adapter, width, height).ok_or(
-            EngineError::SurfaceConfigError("surface isn't supported by this adapter".into()),
-        )?;
-        surface.configure(&gpu.device, &surface_config);
+        if let Err(e) = texture_manager.prepare_equirect_projection_textures(
+            &bind_group_layouts,
+            "C:\\Users\\abism\\Desktop\\rupy\\pure-sky.hdr",
+            1080,
+            wgpu::TextureFormat::Rgba32Float,
+        ) {
+            eprintln!("Error preparing cupemap textures: {}", e);
+        };
 
         let wgpu_renderer = WgpuRenderer::new(&gpu, &surface_config, &bind_group_layouts)?;
+        let encoder = gpu.device().create_command_encoder(&Default::default());
+
+        if let Some(equirect_bind_group) = texture_manager
+            .bind_group_for("equirect_projection_src", &bind_group_layouts.equirect_src)
+        {
+            wgpu_renderer.equirect_projection(
+                gpu.queue(),
+                encoder,
+                equirect_bind_group,
+                1080,
+                Some("equirect projection"),
+            );
+        }
 
         let mesh_buffer_key = CacheKey::new("mesh_vertex_buffer");
         wgpu_buffer_cache.get_or_create_buffer(&mesh_buffer_key, || {
@@ -149,29 +170,59 @@ impl<'a> Rupy<'a> {
     pub fn render(&mut self, gpu: &GpuContext) {
         match self.surface.texture() {
             Ok(frame) => {
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let mut encoder =
+                    gpu.device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("render encoder"),
+                        });
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("main pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.wgpu_renderer.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                if let Some(skybox_bind_group) = self.texture_manager.bind_group_for(
+                    "equirect_projection_dst",
+                    &self.bind_group_layouts.equirect_dst,
+                ) {
+                    rpass.set_bind_group(0, &self.camera_bind_group, &[]);
+                    rpass.set_bind_group(1, skybox_bind_group, &[]);
+                    rpass.set_pipeline(&self.wgpu_renderer.equirect_dst_pipeline);
+                    rpass.draw(0..3, 0..1);
+                }
+
                 if let Some(texture_bg) = self
                     .texture_manager
                     .bind_group_for("cube_diffuse", &self.bind_group_layouts.texture)
                 {
-                    let mut encoder =
-                        gpu.device()
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some("render encoder"),
-                            });
-
                     self.wgpu_renderer.render_mesh(
-                        &mut encoder,
-                        &frame
-                            .texture
-                            .create_view(&wgpu::TextureViewDescriptor::default()),
+                        &mut rpass,
                         &self.camera_bind_group,
                         &texture_bg,
                         &mut self.wgpu_buffer_cache,
                         &self.mesh,
                     );
-                    gpu.queue().submit(Some(encoder.finish()));
                 }
-
+                drop(rpass);
+                gpu.queue().submit(Some(encoder.finish()));
                 frame.present();
                 self.window.request_redraw();
             }
@@ -180,6 +231,7 @@ impl<'a> Rupy<'a> {
             }
         };
     }
+
     pub fn update(&mut self, gpu: &GpuContext) {
         self.camera_controller
             .update_camera(&mut self.camera, 1.0 / 60.0);
