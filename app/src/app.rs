@@ -2,7 +2,6 @@ use cgmath::{Deg, Point3, Vector3};
 use core::{
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
-    gpu::global::get_global_gpu,
     texture::TextureManager,
     BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Mesh, Renderer, SurfaceExt,
     VertexTexture, WgpuBuffer, WgpuBufferCache, WgpuRenderer,
@@ -34,6 +33,7 @@ const VERTICES: [VertexTexture; 3] = [
 
 #[allow(dead_code)]
 pub struct Rupy<'a> {
+    pub gpu: GpuContext,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'a>,
     pub surface_config: wgpu::SurfaceConfiguration,
@@ -51,9 +51,7 @@ pub struct Rupy<'a> {
 
 impl<'a> Rupy<'a> {
     pub async fn new(event_loop: &ActiveEventLoop) -> Result<Self, EngineError> {
-        let gpu = get_global_gpu();
-        let (adapter, instance) = { (gpu.adapter(), gpu.instance()) };
-
+        let gpu = GpuContext::new().await?;
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
@@ -63,7 +61,7 @@ impl<'a> Rupy<'a> {
             (inenr_size.width, inenr_size.height)
         };
 
-        let bind_group_layouts = BindGroupLayouts::new(gpu.device());
+        let bind_group_layouts = BindGroupLayouts::new(&gpu.device);
         let mut wgpu_buffer_cache = WgpuBufferCache::new();
         let glyphon_buffer_cache = GlyphonBufferCache::new();
 
@@ -80,7 +78,7 @@ impl<'a> Rupy<'a> {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
-        let camera_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
+        let camera_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera_bg"),
             layout: &bind_group_layouts.camera,
             entries: &[wgpu::BindGroupEntry {
@@ -88,7 +86,7 @@ impl<'a> Rupy<'a> {
                 resource: wgpu_buffer_cache
                     .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
                         WgpuBuffer::from_data(
-                            gpu.device(),
+                            &gpu.device,
                             &[camera_uniform],
                             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                         )
@@ -97,10 +95,12 @@ impl<'a> Rupy<'a> {
                     .as_entire_binding(),
             }],
         });
-        let surface = instance.create_surface(win_clone)?;
-        let surface_config = surface.get_default_config(adapter, width, height).ok_or(
-            EngineError::SurfaceConfigError("surface isn't supported by this adapter".into()),
-        )?;
+        let surface = gpu.instance.create_surface(win_clone)?;
+        let surface_config = surface
+            .get_default_config(&gpu.adapter, width, height)
+            .ok_or(EngineError::SurfaceConfigError(
+                "surface isn't supported by this adapter".into(),
+            ))?;
         surface.configure(&gpu.device, &surface_config);
 
         let mut texture_manager = TextureManager::new(gpu.device.clone(), gpu.queue.clone());
@@ -121,13 +121,13 @@ impl<'a> Rupy<'a> {
         };
 
         let wgpu_renderer = WgpuRenderer::new(&gpu, &surface_config, &bind_group_layouts)?;
-        let encoder = gpu.device().create_command_encoder(&Default::default());
+        let encoder = gpu.device.create_command_encoder(&Default::default());
 
         if let Some(equirect_bind_group) = texture_manager
             .bind_group_for("equirect_projection_src", &bind_group_layouts.equirect_src)
         {
             wgpu_renderer.equirect_projection(
-                gpu.queue(),
+                &gpu.queue,
                 encoder,
                 equirect_bind_group,
                 1080,
@@ -137,7 +137,7 @@ impl<'a> Rupy<'a> {
 
         let mesh_buffer_key = CacheKey::new("mesh_vertex_buffer");
         wgpu_buffer_cache.get_or_create_buffer(&mesh_buffer_key, || {
-            WgpuBuffer::from_data(gpu.device(), &VERTICES, wgpu::BufferUsages::VERTEX)
+            WgpuBuffer::from_data(&gpu.device, &VERTICES, wgpu::BufferUsages::VERTEX)
         });
         let mesh = Mesh::Shared {
             key: CacheKey::new("mesh_vertex_buffer"),
@@ -145,6 +145,7 @@ impl<'a> Rupy<'a> {
         };
 
         Ok(Rupy {
+            gpu,
             window,
             surface,
             surface_config,
@@ -161,20 +162,21 @@ impl<'a> Rupy<'a> {
         })
     }
 
-    pub fn resize(&mut self, gpu: &GpuContext, new_size: &PhysicalSize<u32>) {
+    pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface
-            .resize(gpu.device(), &mut self.surface_config, *new_size);
+            .resize(self.gpu.device(), &mut self.surface_config, *new_size);
         self.wgpu_renderer.resize(&self.surface_config);
     }
 
-    pub fn render(&mut self, gpu: &GpuContext) {
+    pub fn render(&mut self) {
         match self.surface.texture() {
             Ok(frame) => {
                 let view = frame
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
                 let mut encoder =
-                    gpu.device()
+                    self.gpu
+                        .device()
                         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("render encoder"),
                         });
@@ -222,7 +224,7 @@ impl<'a> Rupy<'a> {
                     );
                 }
                 drop(rpass);
-                gpu.queue().submit(Some(encoder.finish()));
+                self.gpu.queue().submit(Some(encoder.finish()));
                 frame.present();
                 self.window.request_redraw();
             }
@@ -232,16 +234,16 @@ impl<'a> Rupy<'a> {
         };
     }
 
-    pub fn update(&mut self, gpu: &GpuContext) {
+    pub fn update(&mut self) {
         self.camera_controller
             .update_camera(&mut self.camera, 1.0 / 60.0);
         self.camera_uniform.update_view_proj(&self.camera);
-        gpu.queue.write_buffer(
+        self.gpu.queue.write_buffer(
             &self
                 .wgpu_buffer_cache
                 .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
                     WgpuBuffer::from_data(
-                        gpu.device(),
+                        self.gpu.device(),
                         &[self.camera_uniform],
                         wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     )

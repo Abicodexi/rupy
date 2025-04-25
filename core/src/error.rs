@@ -1,7 +1,15 @@
+use std::sync::{PoisonError, RwLockReadGuard};
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum EngineError {
+    #[error("GPU error: {0}")]
+    GpuError(String),
+
+    #[error("RwLock error: {0}")]
+    RwLockError(String),
+
     #[error("No suitable GPU adapter found")]
     AdapterNotFound,
 

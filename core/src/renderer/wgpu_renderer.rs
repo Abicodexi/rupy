@@ -57,13 +57,13 @@ impl WgpuRenderer {
                     layout: Some(&default_pipeline_layout),
                     vertex: wgpu::VertexState {
                         module: &default_shader,
-                        entry_point: "vs_main",
+                        entry_point: Some("vs_main"),
                         buffers: &[VertexTexture::LAYOUT],
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &default_shader,
-                        entry_point: "fs_main",
+                        entry_point: Some("fs_main"),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: config.format,
                             blend: Some(wgpu::BlendState::REPLACE),
@@ -101,7 +101,7 @@ impl WgpuRenderer {
                     label: Some("Equirect src pipeline"),
                     layout: Some(&equirect_src_pipeline_layout),
                     module: &equirect_src_shader,
-                    entry_point: "compute_equirect_to_cubemap",
+                    entry_point: Some("compute_equirect_to_cubemap"),
                     compilation_options: Default::default(),
                     cache: None,
                 });
@@ -133,13 +133,13 @@ impl WgpuRenderer {
                     layout: Some(&equirect_dst_layout),
                     vertex: wgpu::VertexState {
                         module: &equirect_dst_shader,
-                        entry_point: "vs_main",
+                        entry_point: Some("vs_main"),
                         buffers: &[],
                         compilation_options: Default::default(),
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &equirect_dst_shader,
-                        entry_point: "fs_main",
+                        entry_point: Some("fs_main"),
                         targets: &[Some(wgpu::ColorTargetState {
                             format: config.format,
                             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -217,7 +217,7 @@ impl WgpuRenderer {
 
         let num_workgroups = (dst_size + 15) / 16;
         pass.set_pipeline(&self.equirect_src_pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_bind_group(0, bind_group, &[]);
         pass.dispatch_workgroups(num_workgroups, num_workgroups, 6);
 
         drop(pass);

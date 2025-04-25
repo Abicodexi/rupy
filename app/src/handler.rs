@@ -1,14 +1,11 @@
 use crate::state::{AppInnerState, ApplicationState};
-use core::gpu::global::get_global_gpu;
 use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
 pub enum ApplicationEvent {/* custom events */}
 
 impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let AppInnerState::Cold = self.inner {
-            if let Err(e) = pollster::block_on(self.init(event_loop)) {
-                panic!("Error on resume: {e}");
-            };
+            pollster::block_on(self.init(event_loop)).expect("Init failed");
         }
     }
 
@@ -23,16 +20,15 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
         }
 
         if let AppInnerState::Warm(app) = &mut self.inner {
-            let gpu = get_global_gpu();
             app.camera_controller.process_events(&event);
 
             if let WindowEvent::Resized(new_size) = &event {
-                app.resize(gpu, new_size);
+                app.resize(new_size);
             }
 
             if let WindowEvent::RedrawRequested = &event {
-                app.update(gpu);
-                app.render(gpu);
+                app.update();
+                app.render();
             }
         }
     }

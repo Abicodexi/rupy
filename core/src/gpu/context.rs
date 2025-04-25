@@ -5,28 +5,28 @@ use wgpu::{Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterO
 use crate::EngineError;
 
 pub struct GpuContext {
-    pub instance: Instance,
-    pub adapter: wgpu::Adapter,
+    pub instance: Arc<Instance>,
+    pub adapter: Arc<Adapter>,
     pub device: Arc<Device>,
     pub queue: Arc<Queue>,
 }
 
 impl GpuContext {
     pub async fn new() -> Result<Self, EngineError> {
-        let instance = Instance::new(InstanceDescriptor::default());
+        let instance = Instance::new(&InstanceDescriptor::default());
 
         let adapter = instance
             .request_adapter(&RequestAdapterOptions::default())
             .await
-            .ok_or(EngineError::AdapterNotFound)?;
+            .expect("Request adapter");
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await?;
 
         Ok(Self {
-            instance,
-            adapter,
+            instance: instance.into(),
+            adapter: adapter.into(),
             device: device.into(),
             queue: queue.into(),
         })
