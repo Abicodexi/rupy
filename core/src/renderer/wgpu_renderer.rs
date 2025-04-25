@@ -1,22 +1,16 @@
-use std::sync::Arc;
-
+use super::{Mesh, VertexTexture};
 use crate::{
-    camera::uniform::CameraUniform,
     texture::{Texture, TextureManager},
-    BindGroupLayouts, CacheKey, EngineError, GpuContext, Mesh, Renderer, VertexTexture, WgpuBuffer,
-    WgpuBufferCache,
+    BindGroupLayouts, EngineError, GpuContext, Renderer, WgpuBufferCache,
 };
-use wgpu::{
-    CommandEncoder, CommandEncoderDescriptor, LoadOp, Operations, RenderPassColorAttachment,
-    RenderPassDescriptor, SurfaceConfiguration, SurfaceTexture,
-};
+use wgpu::{CommandEncoder, SurfaceConfiguration, SurfaceTexture};
+
 #[warn(dead_code)]
 pub struct WgpuRenderer {
     pub default_pipeline: wgpu::RenderPipeline,
     pub equirect_dst_pipeline: wgpu::RenderPipeline,
     pub equirect_src_pipeline: wgpu::ComputePipeline,
     pub depth_texture: Texture,
-    pub device: Arc<wgpu::Device>,
 }
 
 impl WgpuRenderer {
@@ -199,7 +193,6 @@ impl WgpuRenderer {
             equirect_dst_pipeline,
             equirect_src_pipeline,
             depth_texture,
-            device: Arc::clone(&gpu.device),
         })
     }
     pub fn equirect_projection(
@@ -226,9 +219,9 @@ impl WgpuRenderer {
 }
 
 impl Renderer for WgpuRenderer {
-    fn resize(&mut self, config: &SurfaceConfiguration) {
+    fn resize(&mut self, config: &SurfaceConfiguration, device: &wgpu::Device) {
         self.depth_texture = Texture::create(
-            &self.device,
+            device,
             wgpu::Extent3d {
                 width: config.width,
                 height: config.height,
@@ -240,7 +233,7 @@ impl Renderer for WgpuRenderer {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             Some(wgpu::AddressMode::ClampToEdge),
             wgpu::FilterMode::Linear,
-            Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+            Some(device.create_sampler(&wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -263,103 +256,61 @@ impl Renderer for WgpuRenderer {
         gpu: &GpuContext,
         surface_texture: SurfaceTexture,
         bind_group_layouts: &BindGroupLayouts,
-        texture_manager: &TextureManager,
+        texture_manager: &mut TextureManager,
         wgpu_buffer_cache: &mut WgpuBufferCache,
-        camera_uniform: &CameraUniform,
+        camera_bind_group: &wgpu::BindGroup,
+        mesh: &Mesh,
     ) {
         let view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
         let mut encoder = gpu
             .device()
-            .create_command_encoder(&CommandEncoderDescriptor {
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("render encoder"),
             });
-
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("main pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_texture.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        if let Some(skybox_bind_group) = texture_manager
+            .bind_group_for("equirect_projection_dst", &bind_group_layouts.equirect_dst)
         {
-            let mut rpass = encoder.begin_render_pass(&RenderPassDescriptor {
-                label: Some("main pass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            let camera_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("camera_bg"),
-                layout: &bind_group_layouts.camera,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu_buffer_cache
-                        .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
-                            WgpuBuffer::from_data(
-                                gpu.device(),
-                                &[*camera_uniform],
-                                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            )
-                        })
-                        .buffer
-                        .as_entire_binding(),
-                }],
-            });
-            rpass.set_bind_group(0, &camera_bind_group, &[]);
-
-            if let Some(tex) = texture_manager.get("cube_diffuse") {
-                let bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-                    layout: &bind_group_layouts.texture,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&tex.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&tex.sampler),
-                        },
-                    ],
-                    label: Some("texture_bind_group"),
-                });
-
-                rpass.set_bind_group(1, &bind_group, &[]);
-            }
-            rpass.set_pipeline(&self.default_pipeline);
-            // rpass.set_vertex_buffer(0, self.vertex_buffer.buffer.slice(..));
-            // rpass.draw(0..self.vertex_count, 0..1);
+            rpass.set_bind_group(0, camera_bind_group, &[]);
+            rpass.set_bind_group(1, skybox_bind_group, &[]);
+            rpass.set_pipeline(&self.equirect_dst_pipeline);
+            rpass.draw(0..3, 0..1);
         }
 
+        if let Some(texture_bind_group) =
+            texture_manager.bind_group_for("cube_diffuse", &bind_group_layouts.texture)
+        {
+            mesh.draw(
+                &mut rpass,
+                &self.default_pipeline,
+                vec![&camera_bind_group, texture_bind_group],
+                &wgpu_buffer_cache,
+            );
+        }
+        drop(rpass);
         gpu.queue().submit(Some(encoder.finish()));
         surface_texture.present();
-    }
-    fn render_mesh(
-        &self,
-        rpass: &mut wgpu::RenderPass,
-        camera_bind_group: &wgpu::BindGroup,
-        texture_bind_group: &wgpu::BindGroup,
-        wgpu_buffer_cache: &mut WgpuBufferCache,
-        mesh: &Mesh,
-    ) {
-        rpass.set_pipeline(&self.default_pipeline);
-        rpass.set_bind_group(0, camera_bind_group, &[]);
-        rpass.set_bind_group(1, texture_bind_group, &[]);
-
-        match mesh {
-            Mesh::Shared { key, count } => {
-                if let Some(vb) = wgpu_buffer_cache.get_buffer(key) {
-                    rpass.set_vertex_buffer(0, vb.buffer.slice(..));
-                    rpass.draw(0..*count, 0..1);
-                }
-            }
-            Mesh::Unique { buffer, count } => {
-                rpass.set_vertex_buffer(0, buffer.buffer.slice(..));
-                rpass.draw(0..*count, 0..1);
-            }
-        }
     }
 }

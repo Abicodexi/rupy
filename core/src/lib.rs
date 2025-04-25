@@ -30,11 +30,3 @@ pub use bind_group::BindGroupLayoutBuilder;
 pub use bind_group::BindGroupLayouts;
 
 pub mod camera;
-
-pub mod mesh;
-pub use mesh::Mesh;
-
-pub mod vertex;
-pub use vertex::VertexColor;
-pub use vertex::VertexNormal;
-pub use vertex::VertexTexture;

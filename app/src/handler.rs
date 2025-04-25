@@ -28,7 +28,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
 
             if let WindowEvent::RedrawRequested = &event {
                 app.update();
-                app.render();
+                app.draw();
             }
         }
     }

@@ -2,9 +2,10 @@ use cgmath::{Deg, Point3, Vector3};
 use core::{
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
+    renderer::{Mesh, VertexTexture},
     texture::TextureManager,
-    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Mesh, Renderer, SurfaceExt,
-    VertexTexture, WgpuBuffer, WgpuBufferCache, WgpuRenderer,
+    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Renderer, SurfaceExt, WgpuBuffer,
+    WgpuBufferCache, WgpuRenderer,
 };
 use std::sync::Arc;
 use winit::{
@@ -165,67 +166,22 @@ impl<'a> Rupy<'a> {
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface
             .resize(self.gpu.device(), &mut self.surface_config, *new_size);
-        self.wgpu_renderer.resize(&self.surface_config);
+        self.wgpu_renderer
+            .resize(&self.surface_config, self.gpu.device());
     }
 
-    pub fn render(&mut self) {
+    pub fn draw(&mut self) {
         match self.surface.texture() {
             Ok(frame) => {
-                let view = frame
-                    .texture
-                    .create_view(&wgpu::TextureViewDescriptor::default());
-                let mut encoder =
-                    self.gpu
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("render encoder"),
-                        });
-                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("main pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.wgpu_renderer.depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                if let Some(skybox_bind_group) = self.texture_manager.bind_group_for(
-                    "equirect_projection_dst",
-                    &self.bind_group_layouts.equirect_dst,
-                ) {
-                    rpass.set_bind_group(0, &self.camera_bind_group, &[]);
-                    rpass.set_bind_group(1, skybox_bind_group, &[]);
-                    rpass.set_pipeline(&self.wgpu_renderer.equirect_dst_pipeline);
-                    rpass.draw(0..3, 0..1);
-                }
-
-                if let Some(texture_bg) = self
-                    .texture_manager
-                    .bind_group_for("cube_diffuse", &self.bind_group_layouts.texture)
-                {
-                    self.wgpu_renderer.render_mesh(
-                        &mut rpass,
-                        &self.camera_bind_group,
-                        &texture_bg,
-                        &mut self.wgpu_buffer_cache,
-                        &self.mesh,
-                    );
-                }
-                drop(rpass);
-                self.gpu.queue().submit(Some(encoder.finish()));
-                frame.present();
+                self.wgpu_renderer.render(
+                    &self.gpu,
+                    frame,
+                    &self.bind_group_layouts,
+                    &mut self.texture_manager,
+                    &mut self.wgpu_buffer_cache,
+                    &self.camera_bind_group,
+                    &self.mesh,
+                );
                 self.window.request_redraw();
             }
             Err(e) => {
