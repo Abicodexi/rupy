@@ -41,7 +41,7 @@ impl WgpuBufferCache {
             inner: Default::default(),
         }
     }
-    pub fn get_buffer(&mut self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
+    pub fn get_buffer(&self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
         self.inner.get(key_source)
     }
     pub fn get_or_create_buffer<F>(
