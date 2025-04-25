@@ -5,9 +5,8 @@ edition = "2021"
 
 [dependencies]
 core = { path = "../core" }
-pollster = "0.4.0"
-tokio = { version = "1.40.0", features = ["full"] }
-winit = { version = "0.30.5", features = ["rwh_06", "serde"] }
-wgpu = { version =  "22.0.0" , features = ["serde"] }
+wgpu =  "24.0.3"
+winit = "0.30.9"
 cgmath = "0.18.0"
+pollster = "0.4.0"
 bytemuck = "1.22.0"
