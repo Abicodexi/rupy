@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     camera::uniform::CameraUniform,
     texture::{Texture, TextureManager},
@@ -14,6 +16,7 @@ pub struct WgpuRenderer {
     pub equirect_dst_pipeline: wgpu::RenderPipeline,
     pub equirect_src_pipeline: wgpu::ComputePipeline,
     pub depth_texture: Texture,
+    pub device: Arc<wgpu::Device>,
 }
 
 impl WgpuRenderer {
@@ -196,6 +199,7 @@ impl WgpuRenderer {
             equirect_dst_pipeline,
             equirect_src_pipeline,
             depth_texture,
+            device: Arc::clone(&gpu.device),
         })
     }
     pub fn equirect_projection(
@@ -222,7 +226,35 @@ impl WgpuRenderer {
 }
 
 impl Renderer for WgpuRenderer {
-    fn resize(&mut self, _config: &SurfaceConfiguration) {}
+    fn resize(&mut self, config: &SurfaceConfiguration) {
+        self.depth_texture = Texture::create(
+            &self.device,
+            wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::LessEqual),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            })),
+            Some("Depth texture"),
+        )
+    }
 
     fn update(&mut self, _dt: f32) {}
 
