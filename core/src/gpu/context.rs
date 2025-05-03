@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use wgpu::{Adapter, Device, Instance, InstanceDescriptor, Queue, RequestAdapterOptions};
+use wgpu::{
+    Adapter, Backends, Device, Instance, InstanceDescriptor, InstanceFlags, Queue,
+    RequestAdapterOptions,
+};
 
 use crate::EngineError;
 
@@ -13,7 +16,11 @@ pub struct GpuContext {
 
 impl GpuContext {
     pub async fn new() -> Result<Self, EngineError> {
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(&InstanceDescriptor {
+            backends: Backends::default(),
+            flags: InstanceFlags::empty(),
+            backend_options: Default::default(),
+        });
 
         let adapter = instance
             .request_adapter(&RequestAdapterOptions::default())

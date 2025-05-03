@@ -1,6 +1,7 @@
 mod app;
 mod handler;
 mod state;
+use app::Resources;
 use core::{
     asset_dir,
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
@@ -8,16 +9,15 @@ use core::{
     logger::LogFactory,
     ApplicationEvent, AssetLoader, AssetWatcher, EngineError, GpuContext,
 };
+use crossbeam::channel::{self, Receiver, Sender};
+use state::ApplicationState;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-
-use app::Resources;
-use crossbeam::channel::{self, Receiver, Sender};
-use state::ApplicationState;
 use winit::event_loop::EventLoop;
+
 #[tokio::main]
 async fn main() -> Result<(), EngineError> {
     #[cfg(feature = "logging")]

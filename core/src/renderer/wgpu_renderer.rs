@@ -2,20 +2,17 @@ use std::sync::Arc;
 
 use super::{Mesh, VertexTexture};
 use crate::{
-    assets::loader::AssetLoader,
-    pipeline::PipelineManager,
-    texture::{Texture, TextureManager},
+    assets::loader::AssetLoader, pipeline::PipelineManager, texture::TextureManager,
     BindGroupLayouts, CacheKey, EngineError, GpuContext, Renderer, ShaderManager,
     WgpuBufferManager,
 };
-use wgpu::{CommandEncoder, SurfaceConfiguration, SurfaceTexture};
+use wgpu::{CommandEncoder, DepthStencilState, SurfaceConfiguration};
 
 #[warn(dead_code)]
 pub struct WgpuRenderer {
     pub default_pipeline: Arc<wgpu::RenderPipeline>,
     pub equirect_dst_pipeline: wgpu::RenderPipeline,
     pub equirect_src_pipeline: wgpu::ComputePipeline,
-    pub depth_texture: Texture,
 }
 
 impl WgpuRenderer {
@@ -25,16 +22,9 @@ impl WgpuRenderer {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         config: &SurfaceConfiguration,
+        depth_stencil: &DepthStencilState,
         bind_group_layouts: &BindGroupLayouts,
     ) -> Result<Self, EngineError> {
-        let depth_stencil = wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
         let default_shader = shader_manager.get_or_create("v_texture.wgsl", || {
             let shader_module = asset_loader.load_shader("v_texture.wgsl")?;
             Ok(Arc::new(shader_module))
@@ -149,7 +139,7 @@ impl WgpuRenderer {
                         unclipped_depth: false,
                         conservative: false,
                     },
-                    depth_stencil: Some(depth_stencil),
+                    depth_stencil: Some(depth_stencil.clone()),
 
                     multisample: wgpu::MultisampleState {
                         count: 1,
@@ -160,38 +150,10 @@ impl WgpuRenderer {
                     cache: None,
                 });
 
-        let depth_texture = Texture::create(
-            gpu.device(),
-            wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(gpu.device().create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            })),
-            Some("Depth texture"),
-        );
         Ok(WgpuRenderer {
             default_pipeline,
             equirect_dst_pipeline,
             equirect_src_pipeline,
-            depth_texture,
         })
     }
     pub fn equirect_projection(
@@ -218,70 +180,17 @@ impl WgpuRenderer {
 }
 
 impl Renderer for WgpuRenderer {
-    fn resize(&mut self, config: &SurfaceConfiguration, device: &wgpu::Device) {
-        self.depth_texture = Texture::create(
-            device,
-            wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            })),
-            Some("Depth texture"),
-        )
-    }
-
     fn update(&mut self, _dt: f32) {}
 
     fn render(
         &self,
-        gpu: &GpuContext,
-        view: &wgpu::TextureView,
-        encoder: &mut CommandEncoder,
+        rpass: &mut wgpu::RenderPass,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &mut TextureManager,
         w_buffer_manager: &mut WgpuBufferManager,
         camera_bind_group: &wgpu::BindGroup,
         mesh: &Mesh,
     ) {
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("main pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth_texture.view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
         if let Some(skybox_bind_group) = texture_manager
             .bind_group_for("equirect_projection_dst", &bind_group_layouts.equirect_dst)
         {
@@ -295,7 +204,7 @@ impl Renderer for WgpuRenderer {
             texture_manager.bind_group_for("cube_diffuse", &bind_group_layouts.texture)
         {
             mesh.draw(
-                &mut rpass,
+                rpass,
                 &self.default_pipeline,
                 vec![&camera_bind_group, texture_bind_group],
                 &w_buffer_manager,

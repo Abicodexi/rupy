@@ -7,7 +7,7 @@ use core::{
     log_error,
     pipeline::PipelineManager,
     renderer::{glyphon_renderer::GlyphonRenderer, Mesh, VertexTexture},
-    texture::TextureManager,
+    texture::{Texture, TextureManager},
     BindGroupLayouts, CacheKey, GlyphonBuffer, GpuContext, Renderer, ShaderManager, SurfaceExt,
     Time, WgpuBuffer, WgpuRenderer,
 };
@@ -52,6 +52,8 @@ pub struct Managers {
 pub struct Rupy<'a> {
     pub resources: Arc<Resources>,
     pub managers: Managers,
+    pub depth_texture: Texture,
+    pub depth_stencil_state: wgpu::DepthStencilState,
     pub time: Time,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'a>,
@@ -124,13 +126,46 @@ impl<'a> Rupy<'a> {
                 });
 
         let surface = resources.gpu.instance.create_surface(win_clone)?;
-        let surface_config = surface
+        let mut surface_config = surface
             .get_default_config(&resources.gpu.adapter, width, height)
             .ok_or(EngineError::SurfaceConfigError(
                 "surface isn't supported by this adapter".into(),
             ))?;
+        surface_config.present_mode = wgpu::PresentMode::Mailbox;
         surface.configure(&resources.gpu.device, &surface_config);
 
+        let depth_texture = Texture::create(
+            &resources.gpu.device,
+            wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(
+                resources
+                    .gpu
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Linear,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        compare: Some(wgpu::CompareFunction::LessEqual),
+                        lod_min_clamp: 0.0,
+                        lod_max_clamp: 100.0,
+                        ..Default::default()
+                    }),
+            ),
+            Some("Depth texture"),
+        );
         let mut texture_manager =
             TextureManager::new(resources.gpu.device.clone(), resources.gpu.queue.clone());
         texture_manager
@@ -151,12 +186,21 @@ impl<'a> Rupy<'a> {
             log_error!("Error preparing cupemap textures: {}", e);
         };
 
+        let depth_stencil_state = wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+
         let wgpu_renderer = WgpuRenderer::new(
             &resources.gpu,
             &resources.asset_loader,
             &mut shader_manager,
             &mut pipeline_manager,
             &surface_config,
+            &depth_stencil_state,
             &bind_group_layouts,
         )?;
 
@@ -164,6 +208,7 @@ impl<'a> Rupy<'a> {
             &resources.gpu.device,
             &resources.gpu.queue,
             surface_config.format,
+            &depth_stencil_state,
         );
 
         let encoder = resources
@@ -199,6 +244,8 @@ impl<'a> Rupy<'a> {
                 pipeline_manager,
                 buffer_manager,
             },
+            depth_texture,
+            depth_stencil_state,
             time,
             window,
             surface,
@@ -220,8 +267,45 @@ impl<'a> Rupy<'a> {
             &mut self.surface_config,
             *new_size,
         );
-        self.wgpu_renderer
-            .resize(&self.surface_config, self.resources.gpu.device());
+        self.glyphon_renderer.resize(
+            &self.resources.gpu.queue,
+            glyphon::Resolution {
+                width: self.surface_config.width,
+                height: self.surface_config.height,
+            },
+        );
+        self.depth_texture = Texture::create(
+            &self.resources.gpu.device,
+            wgpu::Extent3d {
+                width: self.surface_config.width,
+                height: self.surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(
+                self.resources
+                    .gpu
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Linear,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        compare: Some(wgpu::CompareFunction::LessEqual),
+                        lod_min_clamp: 0.0,
+                        lod_max_clamp: 100.0,
+                        ..Default::default()
+                    }),
+            ),
+            Some("Depth texture"),
+        )
     }
 
     pub fn draw(&mut self) {
@@ -235,17 +319,39 @@ impl<'a> Rupy<'a> {
                         label: Some("render encoder"),
                     },
                 );
-                self.wgpu_renderer.render(
-                    &self.resources.gpu,
-                    &view,
-                    &mut encoder,
-                    &self.bind_group_layouts,
-                    &mut self.texture_manager,
-                    &mut self.managers.buffer_manager.w_buffer,
-                    &self.camera_bind_group,
-                    &self.mesh,
-                );
-                self.glyphon_renderer.render(&view, &mut encoder);
+                {
+                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("main pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_texture.view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                    self.wgpu_renderer.render(
+                        &mut rpass,
+                        &self.bind_group_layouts,
+                        &mut self.texture_manager,
+                        &mut self.managers.buffer_manager.w_buffer,
+                        &self.camera_bind_group,
+                        &self.mesh,
+                    );
+                    self.glyphon_renderer.render(&mut rpass);
+                }
+
                 self.resources.gpu.queue.submit(Some(encoder.finish()));
                 frame.present();
                 self.window.request_redraw();
@@ -324,13 +430,7 @@ impl<'a> Rupy<'a> {
         debug_buffer
             .buffer
             .shape_until_scroll(&mut self.glyphon_renderer.font_system, false);
-        self.glyphon_renderer.update(
-            &self.resources.gpu.queue,
-            glyphon::Resolution {
-                width: self.surface_config.width,
-                height: self.surface_config.height,
-            },
-        );
+
         self.glyphon_renderer.prepate(
             &self.resources.gpu.device,
             &self.resources.gpu.queue,

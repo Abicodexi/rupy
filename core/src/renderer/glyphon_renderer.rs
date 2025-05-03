@@ -18,14 +18,19 @@ impl GlyphonRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         swapchain_format: wgpu::TextureFormat,
+        depth_stencil: &wgpu::DepthStencilState,
     ) -> Self {
         let swash_cache = SwashCache::new();
         let cache = Cache::new(device);
         let viewport = Viewport::new(device, &cache);
         let mut atlas = TextAtlas::new(device, queue, &cache, swapchain_format);
 
-        let renderer =
-            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+        let renderer = TextRenderer::new(
+            &mut atlas,
+            device,
+            wgpu::MultisampleState::default(),
+            Some(depth_stencil.clone()),
+        );
 
         let font_system = FontSystem::new();
 
@@ -38,7 +43,7 @@ impl GlyphonRenderer {
         }
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue, resolution: glyphon::Resolution) {
+    pub fn resize(&mut self, queue: &wgpu::Queue, resolution: glyphon::Resolution) {
         self.viewport.update(queue, resolution);
     }
     pub fn prepate(
@@ -73,25 +78,8 @@ impl GlyphonRenderer {
             log_error!("Error preparing text: {}", e);
         };
     }
-    pub fn render<'a>(&'a mut self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("glyphon pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        if let Err(e) = self
-            .renderer
-            .render(&self.atlas, &self.viewport, &mut rpass)
-        {
+    pub fn render<'a>(&'a mut self, rpass: &mut wgpu::RenderPass) {
+        if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
             log_error!("Error rendering text: {}", e);
         }
     }

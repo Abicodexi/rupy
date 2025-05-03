@@ -14,7 +14,7 @@ pub struct ApplicationState<'a> {
 }
 
 impl<'a> ApplicationState<'a> {
-    /// Creates a new application state in the "cold" (uninitialized) phase.
+    /// Creates a new application state in the "stopped" (uninitialized) phase.
     pub fn new(resources: Resources) -> Self {
         Self {
             inner: AppInnerState::Stopped(resources.into()),

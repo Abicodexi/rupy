@@ -6,6 +6,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let AppInnerState::Stopped(..) = self.inner {
             pollster::block_on(self.init(event_loop)).expect("Init failed");
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         }
     }
 
@@ -45,6 +46,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
                         &mut app.managers.shader_manager,
                         &mut app.managers.pipeline_manager,
                         &app.surface_config,
+                        &app.depth_stencil_state,
                         &app.bind_group_layouts,
                     ) {
                         app.wgpu_renderer = renderer_reload;
