@@ -58,6 +58,7 @@ pub struct Rupy<'a> {
     pub bind_group_layouts: BindGroupLayouts,
     pub texture_manager: TextureManager,
     pub camera: Camera,
+    pub controller: CameraController,
     pub camera_bind_group: wgpu::BindGroup,
     pub mesh: Mesh,
 }
@@ -90,9 +91,9 @@ impl<'a> Rupy<'a> {
             fovy: Deg(45.0),
             znear: 0.1,
             zfar: 100.0,
-            controller: CameraController::new(1.0, 0.5),
             uniform: CameraUniform::new(),
         };
+        let controller = CameraController::new(1.0, 0.5);
 
         let camera_bind_group =
             resources
@@ -193,6 +194,7 @@ impl<'a> Rupy<'a> {
             bind_group_layouts,
             texture_manager,
             camera,
+            controller,
             camera_bind_group,
             mesh,
         })
@@ -229,7 +231,7 @@ impl<'a> Rupy<'a> {
     }
 
     pub fn update(&mut self) {
-        self.camera.update();
+        self.camera.update(&mut self.controller);
         self.resources.gpu.queue.write_buffer(
             &self
                 .managers

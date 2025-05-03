@@ -1,9 +1,10 @@
-use super::Camera;
 use cgmath::{Angle, Deg, InnerSpace, Vector3, Zero};
 use winit::{
     event::{ElementState, MouseScrollDelta, WindowEvent},
     keyboard::KeyCode,
 };
+
+use super::Camera;
 
 #[derive(Debug)]
 pub struct CameraController {
@@ -76,18 +77,9 @@ impl CameraController {
         }
     }
 
-    pub fn update(
-        &self,
-        camera: (
-            Deg<f32>,
-            Deg<f32>,
-            cgmath::Point3<f32>,
-            cgmath::Point3<f32>,
-            cgmath::Vector3<f32>,
-        ),
-        dt: f32,
-    ) {
-        let (yaw_r, pitch_r, mut eye, mut target, up) = camera;
+    pub fn update(&mut self, camera: &mut Camera, dt: f32) {
+        let (yaw_r, pitch_r): (cgmath::Deg<f32>, cgmath::Deg<f32>) =
+            (Deg(self.yaw).into(), Deg(self.pitch).into());
         let front = Vector3 {
             x: yaw_r.cos() * pitch_r.cos(),
             y: pitch_r.sin(),
@@ -95,7 +87,7 @@ impl CameraController {
         }
         .normalize();
 
-        let right = front.cross(up).normalize();
+        let right = front.cross(camera.up).normalize();
         let mut displacement = Vector3::zero();
         if self.forward {
             displacement += front;
@@ -111,9 +103,9 @@ impl CameraController {
         }
         if displacement.magnitude2() > 0.0 {
             let disp = displacement.normalize() * self.speed * dt;
-            eye += disp;
+            camera.eye += disp;
         }
 
-        target = eye + front;
+        camera.target = camera.eye + front;
     }
 }

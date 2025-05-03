@@ -2,6 +2,7 @@ pub mod controller;
 pub mod uniform;
 
 use cgmath::{perspective, Deg, Matrix4, Point3, SquareMatrix, Vector3};
+use controller::CameraController;
 
 #[derive(Debug)]
 pub struct Camera {
@@ -13,20 +14,11 @@ pub struct Camera {
     pub znear: f32,
     pub zfar: f32,
     pub uniform: uniform::CameraUniform,
-    pub controller: controller::CameraController,
 }
 
 impl Camera {
-    pub fn update(&mut self) {
-        let camera: (Deg<f32>, Deg<f32>, Point3<f32>, Point3<f32>, Vector3<f32>) = (
-            Deg(self.controller.yaw).into(),
-            Deg(self.controller.pitch).into(),
-            self.eye,
-            self.target,
-            self.up,
-        );
-
-        self.controller.update(camera, 1.0 / 60.0);
+    pub fn update(&mut self, controller: &mut CameraController) {
+        controller.update(self, 1.0 / 60.0);
         let vp = self.build_view_projection_matrix();
         self.uniform.update(vp);
     }
