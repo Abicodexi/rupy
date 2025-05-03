@@ -60,7 +60,6 @@ impl LogFactory {
             .set_default_level(LevelFilter::Error)
             .add_filter("naga")
             .add_filter("cosmic_text")
-            //.set_default_level(LevelFilter::Debug)
             .add_filter("wgpu_core")
             .add_filter("wgpu_hal");
         let mut env_logger_builder = env_logger::Builder::new();
@@ -105,5 +104,7 @@ impl log::Log for Logger {
         self.env_logger.log(record)
     }
 
-    fn flush(&self) {}
+    fn flush(&self) {
+        self.env_logger.flush();
+    }
 }
