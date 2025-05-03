@@ -2,5 +2,14 @@
 resolver = "2"
 members = [
   "core",
-  "app"
-]
+  "app",
+  "cli"
+  ]
+
+[profile.release-with-debug-assertions]
+inherits = "release"
+debug-assertions = true
+
+[profile.dev-no-debug-assertions]
+inherits = "dev"
+debug-assertions = false
