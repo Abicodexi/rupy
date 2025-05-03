@@ -1,6 +1,6 @@
 use cgmath::{Deg, Point3, Vector3};
 use core::{
-    assets::{loader::AssetLoader, Assets},
+    assets::loader::AssetLoader,
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
     renderer::{Mesh, VertexTexture},
@@ -55,7 +55,7 @@ pub struct Rupy<'a> {
 impl<'a> Rupy<'a> {
     pub async fn new(event_loop: &ActiveEventLoop) -> Result<Self, EngineError> {
         let gpu = GpuContext::new().await?;
-        let asset_loader = AssetLoader::new(gpu.device.clone());
+        let asset_loader = AssetLoader::new(gpu.device.clone())?;
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
@@ -170,9 +170,7 @@ impl<'a> Rupy<'a> {
             mesh,
         })
     }
-    pub fn assets(&self) -> Assets {
-        Assets::new(&self.asset_loader)
-    }
+
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface
             .resize(self.gpu.device(), &mut self.surface_config, *new_size);

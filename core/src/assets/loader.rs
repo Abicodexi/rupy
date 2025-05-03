@@ -8,9 +8,9 @@ pub struct AssetLoader {
 }
 
 impl AssetLoader {
-    pub fn new(device: Arc<wgpu::Device>) -> Self {
-        let base_path = asset_dir();
-        Self { device, base_path }
+    pub fn new(device: Arc<wgpu::Device>) -> Result<Self, EngineError> {
+        let base_path = asset_dir()?;
+        Ok(Self { device, base_path })
     }
 
     pub fn resolve(&self, rel_path: &str) -> PathBuf {
