@@ -1,49 +1,38 @@
 use glyphon::{
-    Cache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer,
-    Viewport,
+    Cache, FontSystem, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
 };
-use wgpu::{Device, Queue, RenderPass, SurfaceConfiguration};
+use wgpu::{Device, Queue, SurfaceConfiguration};
 
 use crate::{log_error, GlyphonBuffer};
 
-pub struct GlyphonRender {
-    font_system: FontSystem,
-    atlas: TextAtlas,
-    renderer_2d: TextRenderer,
-    renderer_3d: TextRenderer,
-    swash_cache: SwashCache,
-    viewport: Viewport,
+pub struct GlyphonRenderer {
+    pub font_system: FontSystem,
+    pub atlas: TextAtlas,
+    pub renderer: TextRenderer,
+    pub swash_cache: SwashCache,
+    pub viewport: Viewport,
 }
 
-impl GlyphonRender {
+impl GlyphonRenderer {
     pub fn new(
-        device: &Device,
-        queue: &Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         swapchain_format: wgpu::TextureFormat,
-        depth_stencil: &wgpu::DepthStencilState,
     ) -> Self {
         let swash_cache = SwashCache::new();
         let cache = Cache::new(device);
         let viewport = Viewport::new(device, &cache);
         let mut atlas = TextAtlas::new(device, queue, &cache, swapchain_format);
 
-        let renderer_2d =
+        let renderer =
             TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
-
-        let renderer_3d = TextRenderer::new(
-            &mut atlas,
-            device,
-            wgpu::MultisampleState::default(),
-            Some(depth_stencil.clone()),
-        );
 
         let font_system = FontSystem::new();
 
-        GlyphonRender {
+        GlyphonRenderer {
             font_system,
             atlas,
-            renderer_2d,
-            renderer_3d,
+            renderer,
             swash_cache,
             viewport,
         }
@@ -56,71 +45,54 @@ impl GlyphonRender {
         &mut self,
         device: &Device,
         queue: &Queue,
-        data: GlyphonBuffer,
+        data: &mut GlyphonBuffer,
         surface_config: &SurfaceConfiguration,
-        use_depth: bool,
     ) {
-        let _ = if use_depth {
-            let _ = if let Err(e) = self.renderer_3d.prepare(
-                device,
-                queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                [TextArea {
-                    buffer: &data.buffer,
-                    left: 10.0,
-                    top: 10.0,
-                    scale: 1.0,
-                    bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: surface_config.width as i32,
-                        bottom: surface_config.height as i32,
-                    },
-                    default_color: glyphon::Color::rgb(1, 1, 1),
-                    custom_glyphs: &[],
-                }],
-                &mut self.swash_cache,
-            ) {
-                log_error!("Error preparing 3d text: {}", e);
-            };
-        } else {
-            if let Err(e) = self.renderer_2d.prepare(
-                device,
-                queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                [TextArea {
-                    buffer: &data.buffer,
-                    left: 10.0,
-                    top: 10.0,
-                    scale: 1.0,
-                    bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: surface_config.width as i32,
-                        bottom: surface_config.height as i32,
-                    },
-                    default_color: glyphon::Color::rgb(1, 1, 1),
-                    custom_glyphs: &[],
-                }],
-                &mut self.swash_cache,
-            ) {
-                log_error!("Error preparing 2d text: {}", e);
-            }
+        let _ = if let Err(e) = self.renderer.prepare(
+            device,
+            queue,
+            &mut self.font_system,
+            &mut self.atlas,
+            &self.viewport,
+            [TextArea {
+                buffer: &data.buffer,
+                left: 10.0,
+                top: 10.0,
+                scale: 1.0,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: surface_config.width as i32,
+                    bottom: surface_config.height as i32,
+                },
+                default_color: glyphon::Color::rgb(1, 1, 1),
+                custom_glyphs: &[],
+            }],
+            &mut self.swash_cache,
+        ) {
+            log_error!("Error preparing text: {}", e);
         };
     }
-    pub fn render<'a>(&'a mut self, pass: &mut RenderPass<'a>, use_depth: bool) {
-        let _ = if use_depth {
-            if let Err(e) = self.renderer_3d.render(&self.atlas, &self.viewport, pass) {
-                log_error!("Error rendering 3d text: {}", e);
-            }
-        } else {
-            if let Err(e) = self.renderer_2d.render(&self.atlas, &self.viewport, pass) {
-                log_error!("Error rendering 2d text: {}", e);
-            }
-        };
+    pub fn render<'a>(&'a mut self, view: &wgpu::TextureView, encoder: &mut wgpu::CommandEncoder) {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("glyphon pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        if let Err(e) = self
+            .renderer
+            .render(&self.atlas, &self.viewport, &mut rpass)
+        {
+            log_error!("Error rendering text: {}", e);
+        }
     }
 }

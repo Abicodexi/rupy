@@ -11,9 +11,11 @@ cgmath = "0.18.0"
 pollster = "0.4.0"
 bytemuck = "1.22.0"
 crossbeam = "0.8.4"
-tokio = { version = "1.44.2",  features = ["full"] }
 log = { version = "0.4.27", optional = true }
 env_logger = { version = "0.11.8", optional = true }
+glyphon = "0.8"
+tokio = { version = "1.44.2",  features = ["full"] }
+
 
 [features]
 default = ["logging"]

@@ -1,6 +1,6 @@
 use super::Mesh;
 use crate::{texture::TextureManager, BindGroupLayouts, GpuContext, WgpuBufferManager};
-use wgpu::SurfaceTexture;
+use wgpu::{SurfaceTexture, TextureView};
 
 pub trait Renderer {
     fn resize(&mut self, new_config: &wgpu::SurfaceConfiguration, device: &wgpu::Device);
@@ -8,7 +8,8 @@ pub trait Renderer {
     fn render(
         &self,
         gpu: &GpuContext,
-        surface_texture: SurfaceTexture,
+        view: &TextureView,
+        encoder: &mut wgpu::CommandEncoder,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &mut TextureManager,
         w_buffer_manager: &mut WgpuBufferManager,

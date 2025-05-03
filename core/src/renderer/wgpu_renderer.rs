@@ -253,21 +253,14 @@ impl Renderer for WgpuRenderer {
     fn render(
         &self,
         gpu: &GpuContext,
-        surface_texture: SurfaceTexture,
+        view: &wgpu::TextureView,
+        encoder: &mut CommandEncoder,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &mut TextureManager,
         w_buffer_manager: &mut WgpuBufferManager,
         camera_bind_group: &wgpu::BindGroup,
         mesh: &Mesh,
     ) {
-        let view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = gpu
-            .device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("render encoder"),
-            });
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("main pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -309,7 +302,5 @@ impl Renderer for WgpuRenderer {
             );
         }
         drop(rpass);
-        gpu.queue().submit(Some(encoder.finish()));
-        surface_texture.present();
     }
 }

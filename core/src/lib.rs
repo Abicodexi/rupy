@@ -44,6 +44,9 @@ pub mod pipeline;
 pub mod event_bus;
 pub use event_bus::ApplicationEvent;
 
+pub mod time;
+pub use time::Time;
+
 pub mod logger;
 
 #[cfg(feature = "logging")]
