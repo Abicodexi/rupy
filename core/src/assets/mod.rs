@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use loader::AssetLoader;
 use wgpu::ShaderModule;
 pub mod loader;
+pub mod watcher;
 
 pub const DIR_ASSETS: &str = "assets";
 
