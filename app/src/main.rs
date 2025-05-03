@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use app::PreRupy;
+use app::Resources;
 use crossbeam::channel::{self, Receiver, Sender};
 use state::ApplicationState;
 use winit::event_loop::EventLoop;
@@ -42,7 +42,6 @@ async fn main() -> Result<(), EngineError> {
     let gpu = GpuContext::new().await?;
 
     let asset_loader = AssetLoader::new(gpu.device.clone())?;
-    let arc_asset_loader = Arc::new(asset_loader);
 
     tokio::spawn(async move {
         event_bus.start().await;
@@ -72,11 +71,11 @@ async fn main() -> Result<(), EngineError> {
             }
         }
     });
-    let pre_rupy = PreRupy {
+
+    let mut app = ApplicationState::new(Resources {
         gpu: gpu.into(),
-        asset_loader: arc_asset_loader,
-    };
-    let mut app = ApplicationState::new(pre_rupy);
+        asset_loader: asset_loader.into(),
+    });
     let _ = event_loop.run_app(&mut app);
     Ok(())
 }

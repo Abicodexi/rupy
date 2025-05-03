@@ -3,14 +3,15 @@ use std::sync::Arc;
 use super::{Mesh, VertexTexture};
 use crate::{
     assets::loader::AssetLoader,
+    pipeline::PipelineManager,
     texture::{Texture, TextureManager},
-    BindGroupLayouts, EngineError, GpuContext, Renderer, ShaderManager, WgpuBufferCache,
+    BindGroupLayouts, EngineError, GpuContext, Renderer, ShaderManager, WgpuBufferManager,
 };
 use wgpu::{CommandEncoder, SurfaceConfiguration, SurfaceTexture};
 
 #[warn(dead_code)]
 pub struct WgpuRenderer {
-    pub default_pipeline: wgpu::RenderPipeline,
+    pub default_pipeline: Arc<wgpu::RenderPipeline>,
     pub equirect_dst_pipeline: wgpu::RenderPipeline,
     pub equirect_src_pipeline: wgpu::ComputePipeline,
     pub depth_texture: Texture,
@@ -21,6 +22,7 @@ impl WgpuRenderer {
         gpu: &GpuContext,
         asset_loader: &AssetLoader,
         shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         config: &SurfaceConfiguration,
         bind_group_layouts: &BindGroupLayouts,
     ) -> Result<Self, EngineError> {
@@ -37,41 +39,47 @@ impl WgpuRenderer {
             Ok(Arc::new(shader_module))
         });
 
-        let default_pipeline_layout =
-            gpu.device()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("pipeline layout"),
-                    bind_group_layouts: &[&bind_group_layouts.camera, &bind_group_layouts.texture],
-                    push_constant_ranges: &[],
-                });
-
         let default_pipeline =
-            gpu.device()
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("default pipeline"),
-                    layout: Some(&default_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &default_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[VertexTexture::LAYOUT],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &default_shader,
-                        entry_point: Some("fs_main"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: config.format,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::default(),
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: Default::default(),
-                    depth_stencil: Some(depth_stencil.clone()),
-                    multisample: Default::default(),
-                    multiview: None,
-                    cache: None,
-                });
+            pipeline_manager.get_or_create_render_pipeline("default_pipeline", || {
+                let default_pipeline_layout =
+                    gpu.device()
+                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                            label: Some("pipeline layout"),
+                            bind_group_layouts: &[
+                                &bind_group_layouts.camera,
+                                &bind_group_layouts.texture,
+                            ],
+                            push_constant_ranges: &[],
+                        });
+                let default_pipeline =
+                    gpu.device()
+                        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                            label: Some("default pipeline"),
+                            layout: Some(&default_pipeline_layout),
+                            vertex: wgpu::VertexState {
+                                module: &default_shader,
+                                entry_point: Some("vs_main"),
+                                buffers: &[VertexTexture::LAYOUT],
+                                compilation_options: Default::default(),
+                            },
+                            fragment: Some(wgpu::FragmentState {
+                                module: &default_shader,
+                                entry_point: Some("fs_main"),
+                                targets: &[Some(wgpu::ColorTargetState {
+                                    format: config.format,
+                                    blend: Some(wgpu::BlendState::REPLACE),
+                                    write_mask: wgpu::ColorWrites::default(),
+                                })],
+                                compilation_options: Default::default(),
+                            }),
+                            primitive: Default::default(),
+                            depth_stencil: Some(depth_stencil.clone()),
+                            multisample: Default::default(),
+                            multiview: None,
+                            cache: None,
+                        });
+                Ok(default_pipeline.into())
+            });
 
         let equirect_src_shader = shader_manager.get_or_create("equirect_src.wgsl", || {
             let shader_module = asset_loader.load_shader("equirect_src.wgsl")?;
@@ -182,7 +190,7 @@ impl WgpuRenderer {
             Some("Depth texture"),
         );
         Ok(WgpuRenderer {
-            default_pipeline,
+            default_pipeline: default_pipeline.clone(),
             equirect_dst_pipeline,
             equirect_src_pipeline,
             depth_texture,
@@ -250,7 +258,7 @@ impl Renderer for WgpuRenderer {
         surface_texture: SurfaceTexture,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &mut TextureManager,
-        wgpu_buffer_cache: &mut WgpuBufferCache,
+        w_buffer_manager: &mut WgpuBufferManager,
         camera_bind_group: &wgpu::BindGroup,
         mesh: &Mesh,
     ) {
@@ -299,7 +307,7 @@ impl Renderer for WgpuRenderer {
                 &mut rpass,
                 &self.default_pipeline,
                 vec![&camera_bind_group, texture_bind_group],
-                &wgpu_buffer_cache,
+                &w_buffer_manager,
             );
         }
         drop(rpass);

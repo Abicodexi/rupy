@@ -1,5 +1,5 @@
 use super::Mesh;
-use crate::{texture::TextureManager, BindGroupLayouts, GpuContext, WgpuBufferCache};
+use crate::{texture::TextureManager, BindGroupLayouts, GpuContext, WgpuBufferManager};
 use wgpu::SurfaceTexture;
 
 pub trait Renderer {
@@ -11,7 +11,7 @@ pub trait Renderer {
         surface_texture: SurfaceTexture,
         bind_group_layouts: &BindGroupLayouts,
         texture_manager: &mut TextureManager,
-        wgpu_buffer_cache: &mut WgpuBufferCache,
+        w_buffer_manager: &mut WgpuBufferManager,
         camera_bind_group: &wgpu::BindGroup,
         mesh: &Mesh,
     );

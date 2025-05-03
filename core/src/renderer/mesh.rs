@@ -1,4 +1,4 @@
-use crate::{CacheKey, WgpuBuffer, WgpuBufferCache};
+use crate::{CacheKey, WgpuBuffer, WgpuBufferManager};
 
 pub enum Mesh {
     Shared { key: CacheKey, count: u32 },
@@ -11,7 +11,7 @@ impl Mesh {
         rpass: &mut wgpu::RenderPass,
         pipeline: &wgpu::RenderPipeline,
         bind_groups: Vec<&wgpu::BindGroup>,
-        wgpu_buffer_cache: &WgpuBufferCache,
+        w_buffers: &WgpuBufferManager,
     ) {
         rpass.set_pipeline(pipeline);
         let mut index: u32 = 0;
@@ -22,7 +22,7 @@ impl Mesh {
 
         match self {
             Mesh::Shared { key, count } => {
-                if let Some(vb) = wgpu_buffer_cache.get_buffer(key) {
+                if let Some(vb) = w_buffers.get(key) {
                     rpass.set_vertex_buffer(0, vb.buffer.slice(..));
                     rpass.draw(0..*count, 0..1);
                 }

@@ -38,22 +38,20 @@ impl GlyphonBuffer {
 }
 
 pub type GlyphonBufferCacheType = std::collections::HashMap<CacheKey, GlyphonBuffer>;
-pub struct GlyphonBufferCache {
+pub struct GlyphonBufferManager {
     inner: GlyphonBufferCacheType,
 }
 
-impl GlyphonBufferCache {
+impl GlyphonBufferManager {
     pub fn new() -> Self {
         Self {
             inner: Default::default(),
         }
     }
-
-    pub fn get_or_create_buffer<F>(
-        &mut self,
-        key_source: &CacheKey,
-        create_fn: F,
-    ) -> &mut GlyphonBuffer
+    pub fn get(&self, key_source: &CacheKey) -> Option<&GlyphonBuffer> {
+        self.inner.get(key_source)
+    }
+    pub fn get_or_create<F>(&mut self, key_source: &CacheKey, create_fn: F) -> &mut GlyphonBuffer
     where
         F: FnOnce() -> GlyphonBuffer,
     {

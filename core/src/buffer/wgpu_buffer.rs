@@ -31,24 +31,20 @@ impl WgpuBuffer {
 }
 
 pub type WgpuBufferCacheType = std::collections::HashMap<CacheKey, WgpuBuffer>;
-pub struct WgpuBufferCache {
+pub struct WgpuBufferManager {
     inner: WgpuBufferCacheType,
 }
 
-impl WgpuBufferCache {
+impl WgpuBufferManager {
     pub fn new() -> Self {
         Self {
             inner: Default::default(),
         }
     }
-    pub fn get_buffer(&self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
+    pub fn get(&self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
         self.inner.get(key_source)
     }
-    pub fn get_or_create_buffer<F>(
-        &mut self,
-        key_source: &CacheKey,
-        create_fn: F,
-    ) -> &mut WgpuBuffer
+    pub fn get_or_create<F>(&mut self, key_source: &CacheKey, create_fn: F) -> &mut WgpuBuffer
     where
         F: FnOnce() -> WgpuBuffer,
     {

@@ -14,9 +14,9 @@ pub use surface::SurfaceSize;
 
 pub mod buffer;
 pub use buffer::glyphon_buffer::GlyphonBuffer;
-pub use buffer::glyphon_buffer::GlyphonBufferCache;
+pub use buffer::glyphon_buffer::GlyphonBufferManager;
 pub use buffer::wgpu_buffer::WgpuBuffer;
-pub use buffer::wgpu_buffer::WgpuBufferCache;
+pub use buffer::wgpu_buffer::WgpuBufferManager;
 
 pub mod cache;
 pub use cache::key::CacheKey;
@@ -38,6 +38,8 @@ pub use assets::watcher::AssetWatcher;
 
 pub mod shader;
 pub use shader::ShaderManager;
+
+pub mod pipeline;
 
 pub mod event_bus;
 pub use event_bus::ApplicationEvent;
