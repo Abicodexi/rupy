@@ -8,3 +8,5 @@ pub mod vertex;
 pub use vertex::VertexColor;
 pub use vertex::VertexNormal;
 pub use vertex::VertexTexture;
+
+pub mod glyphon_renderer;

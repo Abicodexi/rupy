@@ -2,8 +2,8 @@ use crate::{log_debug, CacheKey, CacheStorage, EngineError, HashCache};
 use std::sync::Arc;
 
 pub struct PipelineManager {
-    render_pipelines: HashCache<Arc<wgpu::RenderPipeline>>,
-    compute_pipelines: HashCache<Arc<wgpu::ComputePipeline>>,
+    pub render_pipelines: HashCache<Arc<wgpu::RenderPipeline>>,
+    pub compute_pipelines: HashCache<Arc<wgpu::ComputePipeline>>,
 }
 
 impl PipelineManager {

@@ -9,12 +9,12 @@ use winit::{
 pub struct CameraController {
     pub speed: f32,
     pub sensitivity: f32,
-    forward: bool,
-    back: bool,
-    left: bool,
-    right: bool,
-    pitch: f32,
-    yaw: f32,
+    pub forward: bool,
+    pub back: bool,
+    pub left: bool,
+    pub right: bool,
+    pub pitch: f32,
+    pub yaw: f32,
     last_mouse: Option<(f32, f32)>,
 }
 
@@ -76,8 +76,18 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera, dt: f32) {
-        let (yaw_r, pitch_r): (Deg<f32>, Deg<f32>) = (Deg(self.yaw).into(), Deg(self.pitch).into());
+    pub fn update(
+        &self,
+        camera: (
+            Deg<f32>,
+            Deg<f32>,
+            cgmath::Point3<f32>,
+            cgmath::Point3<f32>,
+            cgmath::Vector3<f32>,
+        ),
+        dt: f32,
+    ) {
+        let (yaw_r, pitch_r, mut eye, mut target, up) = camera;
         let front = Vector3 {
             x: yaw_r.cos() * pitch_r.cos(),
             y: pitch_r.sin(),
@@ -85,7 +95,7 @@ impl CameraController {
         }
         .normalize();
 
-        let right = front.cross(camera.up).normalize();
+        let right = front.cross(up).normalize();
         let mut displacement = Vector3::zero();
         if self.forward {
             displacement += front;
@@ -101,9 +111,9 @@ impl CameraController {
         }
         if displacement.magnitude2() > 0.0 {
             let disp = displacement.normalize() * self.speed * dt;
-            camera.eye += disp;
+            eye += disp;
         }
 
-        camera.target = camera.eye + front;
+        target = eye + front;
     }
 }

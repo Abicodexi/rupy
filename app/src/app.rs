@@ -58,13 +58,12 @@ pub struct Rupy<'a> {
     pub bind_group_layouts: BindGroupLayouts,
     pub texture_manager: TextureManager,
     pub camera: Camera,
-    pub camera_controller: CameraController,
-    pub camera_uniform: CameraUniform,
     pub camera_bind_group: wgpu::BindGroup,
     pub mesh: Mesh,
 }
 
 impl<'a> Rupy<'a> {
+    pub const DEBUG_G_BUFFER: &'static str = "debug_buffer";
     pub async fn new(
         event_loop: &ActiveEventLoop,
         resources: Arc<Resources>,
@@ -83,7 +82,6 @@ impl<'a> Rupy<'a> {
         };
 
         let bind_group_layouts = BindGroupLayouts::new(&resources.gpu.device);
-
         let camera = Camera {
             eye: Point3::new(0.0, 1.0, 2.0),
             target: Point3::new(0.0, 0.0, 0.0),
@@ -92,10 +90,9 @@ impl<'a> Rupy<'a> {
             fovy: Deg(45.0),
             znear: 0.1,
             zfar: 100.0,
+            controller: CameraController::new(1.0, 0.5),
+            uniform: CameraUniform::new(),
         };
-        let camera_controller = CameraController::new(1.0, 0.5);
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
 
         let camera_bind_group =
             resources
@@ -111,7 +108,7 @@ impl<'a> Rupy<'a> {
                             .get_or_create(&CacheKey::new("camera_uniform_buffer"), || {
                                 WgpuBuffer::from_data(
                                     &resources.gpu.device,
-                                    &[camera_uniform],
+                                    &[camera.uniform],
                                     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                                 )
                             })
@@ -196,8 +193,6 @@ impl<'a> Rupy<'a> {
             bind_group_layouts,
             texture_manager,
             camera,
-            camera_controller,
-            camera_uniform,
             camera_bind_group,
             mesh,
         })
@@ -234,9 +229,7 @@ impl<'a> Rupy<'a> {
     }
 
     pub fn update(&mut self) {
-        self.camera_controller
-            .update_camera(&mut self.camera, 1.0 / 60.0);
-        self.camera_uniform.update_view_proj(&self.camera);
+        self.camera.update();
         self.resources.gpu.queue.write_buffer(
             &self
                 .managers
@@ -245,13 +238,13 @@ impl<'a> Rupy<'a> {
                 .get_or_create(&CacheKey::new("camera_uniform_buffer"), || {
                     WgpuBuffer::from_data(
                         self.resources.gpu.device(),
-                        &[self.camera_uniform],
+                        &[self.camera.uniform],
                         wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     )
                 })
                 .buffer,
             0,
-            bytemuck::cast_slice(&[self.camera_uniform]),
+            bytemuck::cast_slice(&[self.camera.uniform]),
         );
     }
 }

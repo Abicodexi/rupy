@@ -5,7 +5,8 @@ use crate::{
     assets::loader::AssetLoader,
     pipeline::PipelineManager,
     texture::{Texture, TextureManager},
-    BindGroupLayouts, EngineError, GpuContext, Renderer, ShaderManager, WgpuBufferManager,
+    BindGroupLayouts, CacheKey, EngineError, GpuContext, Renderer, ShaderManager,
+    WgpuBufferManager,
 };
 use wgpu::{CommandEncoder, SurfaceConfiguration, SurfaceTexture};
 
@@ -39,48 +40,45 @@ impl WgpuRenderer {
             Ok(Arc::new(shader_module))
         });
 
-        let default_pipeline =
-            pipeline_manager.get_or_create_render_pipeline("default_pipeline", || {
-                let default_pipeline_layout =
-                    gpu.device()
-                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                            label: Some("pipeline layout"),
-                            bind_group_layouts: &[
-                                &bind_group_layouts.camera,
-                                &bind_group_layouts.texture,
-                            ],
-                            push_constant_ranges: &[],
-                        });
-                let default_pipeline =
-                    gpu.device()
-                        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                            label: Some("default pipeline"),
-                            layout: Some(&default_pipeline_layout),
-                            vertex: wgpu::VertexState {
-                                module: &default_shader,
-                                entry_point: Some("vs_main"),
-                                buffers: &[VertexTexture::LAYOUT],
-                                compilation_options: Default::default(),
-                            },
-                            fragment: Some(wgpu::FragmentState {
-                                module: &default_shader,
-                                entry_point: Some("fs_main"),
-                                targets: &[Some(wgpu::ColorTargetState {
-                                    format: config.format,
-                                    blend: Some(wgpu::BlendState::REPLACE),
-                                    write_mask: wgpu::ColorWrites::default(),
-                                })],
-                                compilation_options: Default::default(),
-                            }),
-                            primitive: Default::default(),
-                            depth_stencil: Some(depth_stencil.clone()),
-                            multisample: Default::default(),
-                            multiview: None,
-                            cache: None,
-                        });
-                Ok(default_pipeline.into())
-            });
-
+        let default_pipeline_layout =
+            gpu.device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("default pipeline layout"),
+                    bind_group_layouts: &[&bind_group_layouts.camera, &bind_group_layouts.texture],
+                    push_constant_ranges: &[],
+                });
+        let default_pipeline_cache_key = CacheKey::from("default_pipeline");
+        let default_pipeline: Arc<wgpu::RenderPipeline> = gpu
+            .device()
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("default pipeline"),
+                layout: Some(&default_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &default_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[VertexTexture::LAYOUT],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &default_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::default(),
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(depth_stencil.clone()),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            })
+            .into();
+        pipeline_manager
+            .render_pipelines
+            .insert(default_pipeline_cache_key, default_pipeline.clone());
         let equirect_src_shader = shader_manager.get_or_create("equirect_src.wgsl", || {
             let shader_module = asset_loader.load_shader("equirect_src.wgsl")?;
             Ok(Arc::new(shader_module))
@@ -190,7 +188,7 @@ impl WgpuRenderer {
             Some("Depth texture"),
         );
         Ok(WgpuRenderer {
-            default_pipeline: default_pipeline.clone(),
+            default_pipeline,
             equirect_dst_pipeline,
             equirect_src_pipeline,
             depth_texture,

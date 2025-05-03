@@ -1,7 +1,7 @@
 use super::Camera;
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub inv_proj: [[f32; 4]; 4],
@@ -18,8 +18,15 @@ impl CameraUniform {
         }
     }
 
-    pub fn update_view_proj(&mut self, camera: &Camera) {
-        let (vp, inv_proj, inv_view) = camera.build_view_projection_matrix();
+    pub fn update(
+        &mut self,
+        vp: (
+            cgmath::Matrix4<f32>,
+            cgmath::Matrix4<f32>,
+            cgmath::Matrix4<f32>,
+        ),
+    ) {
+        let (vp, inv_proj, inv_view) = vp;
         self.view_proj = vp.into();
         self.inv_proj = inv_proj.into();
         self.inv_view = inv_view.into();

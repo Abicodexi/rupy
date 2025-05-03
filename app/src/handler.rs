@@ -20,7 +20,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
         }
 
         if let AppInnerState::Running(app) = &mut self.inner {
-            app.camera_controller.process_events(&event);
+            app.camera.controller.process_events(&event);
 
             if let WindowEvent::Resized(new_size) = &event {
                 app.resize(new_size);
@@ -38,6 +38,7 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
             match event {
                 ApplicationEvent::ShaderReload(rel_path) => {
                     app.managers.shader_manager.reload_shader(&rel_path);
+
                     if let Ok(renderer_reload) = WgpuRenderer::new(
                         &app.resources.gpu,
                         &app.resources.asset_loader,
