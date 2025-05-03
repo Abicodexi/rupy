@@ -1,9 +1,5 @@
-use std::path::PathBuf;
-
-use loader::AssetLoader;
-use wgpu::ShaderModule;
-
 use crate::EngineError;
+use std::path::PathBuf;
 pub mod loader;
 pub mod watcher;
 

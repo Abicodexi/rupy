@@ -1,10 +1,10 @@
 use crate::state::{AppInnerState, ApplicationState};
+use core::{ApplicationEvent, WgpuRenderer};
 use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
-pub enum ApplicationEvent {/* custom events */}
 
 impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if let AppInnerState::Cold = self.inner {
+        if let AppInnerState::Cold(..) = self.inner {
             pollster::block_on(self.init(event_loop)).expect("Init failed");
         }
     }
@@ -33,7 +33,22 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: ApplicationEvent) {
-        if let AppInnerState::Warm(..) = &mut self.inner {}
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: ApplicationEvent) {
+        if let AppInnerState::Warm(app) = &mut self.inner {
+            match event {
+                ApplicationEvent::ShaderReload(rel_path) => {
+                    app.shader_manager.reload_shader(&rel_path);
+                    if let Ok(renderer_reload) = WgpuRenderer::new(
+                        &app.gpu,
+                        &app.asset_loader,
+                        &mut app.shader_manager,
+                        &app.surface_config,
+                        &app.bind_group_layouts,
+                    ) {
+                        app.wgpu_renderer = renderer_reload;
+                    }
+                }
+            }
+        }
     }
 }

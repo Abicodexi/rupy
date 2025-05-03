@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use super::{Mesh, VertexTexture};
 use crate::{
     assets::loader::AssetLoader,
     texture::{Texture, TextureManager},
-    BindGroupLayouts, EngineError, GpuContext, Renderer, WgpuBufferCache,
+    BindGroupLayouts, EngineError, GpuContext, Renderer, ShaderManager, WgpuBufferCache,
 };
 use wgpu::{CommandEncoder, SurfaceConfiguration, SurfaceTexture};
 
@@ -18,6 +20,7 @@ impl WgpuRenderer {
     pub fn new(
         gpu: &GpuContext,
         asset_loader: &AssetLoader,
+        shader_manager: &mut ShaderManager,
         config: &SurfaceConfiguration,
         bind_group_layouts: &BindGroupLayouts,
     ) -> Result<Self, EngineError> {
@@ -29,7 +32,10 @@ impl WgpuRenderer {
             bias: wgpu::DepthBiasState::default(),
         };
 
-        let default_shader = asset_loader.load_shader("v_texture.wgsl")?;
+        let default_shader = shader_manager.get_or_create("v_texture.wgsl", || {
+            let shader_module = asset_loader.load_shader("v_texture.wgsl")?;
+            Ok(Arc::new(shader_module))
+        });
 
         let default_pipeline_layout =
             gpu.device()
@@ -67,7 +73,10 @@ impl WgpuRenderer {
                     cache: None,
                 });
 
-        let equirect_src_shader = asset_loader.load_shader("equirect_src.wgsl")?;
+        let equirect_src_shader = shader_manager.get_or_create("equirect_src.wgsl", || {
+            let shader_module = asset_loader.load_shader("equirect_src.wgsl")?;
+            Ok(Arc::new(shader_module))
+        });
 
         let equirect_src_pipeline_layout =
             gpu.device()
@@ -88,7 +97,10 @@ impl WgpuRenderer {
                     cache: None,
                 });
 
-        let equirect_dst_shader = asset_loader.load_shader("equirect_dst.wgsl")?;
+        let equirect_dst_shader = shader_manager.get_or_create("equirect_dst.wgsl", || {
+            let shader_module = asset_loader.load_shader("equirect_dst.wgsl")?;
+            Ok(Arc::new(shader_module))
+        });
 
         let equirect_dst_layout =
             gpu.device()

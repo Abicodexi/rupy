@@ -24,7 +24,7 @@ impl AssetLoader {
     }
 
     pub fn load_shader(&self, rel_path: &str) -> Result<wgpu::ShaderModule, EngineError> {
-        let path = self.resolve(&format!("shaders\\{}", rel_path));
+        let path = self.base_path.join("shaders").join(rel_path);
 
         let shader_source = std::fs::read_to_string(&path)?;
 
@@ -46,7 +46,7 @@ impl AssetLoader {
         queue: &wgpu::Queue,
         rel_path: &str,
     ) -> Result<Texture, EngineError> {
-        let path = self.resolve(&format!("textures\\{}", rel_path));
+        let path = self.base_path.join("textures").join(rel_path);
 
         let bytes = Self::read_bytes(&path)?;
         let tex = Texture::from_bytes(&self.device, queue, &bytes, path).await?;

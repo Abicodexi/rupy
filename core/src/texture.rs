@@ -174,6 +174,12 @@ impl Texture {
     }
 }
 
+impl Into<CacheKey> for Texture {
+    fn into(self) -> CacheKey {
+        CacheKey::new(self.label)
+    }
+}
+
 pub struct TextureManager {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,

@@ -3,10 +3,11 @@ use core::{
     assets::loader::AssetLoader,
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
+    log_error,
     renderer::{Mesh, VertexTexture},
     texture::TextureManager,
-    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Renderer, SurfaceExt, WgpuBuffer,
-    WgpuBufferCache, WgpuRenderer,
+    BindGroupLayouts, CacheKey, GlyphonBufferCache, GpuContext, Renderer, ShaderManager,
+    SurfaceExt, WgpuBuffer, WgpuBufferCache, WgpuRenderer,
 };
 use std::sync::Arc;
 use winit::{
@@ -33,10 +34,16 @@ const VERTICES: [VertexTexture; 3] = [
     },
 ];
 
+pub struct PreRupy {
+    pub gpu: Arc<GpuContext>,
+    pub asset_loader: Arc<AssetLoader>,
+}
+
 #[allow(dead_code)]
 pub struct Rupy<'a> {
-    pub gpu: GpuContext,
-    pub asset_loader: AssetLoader,
+    pub gpu: Arc<GpuContext>,
+    pub asset_loader: Arc<AssetLoader>,
+    pub shader_manager: ShaderManager,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'a>,
     pub surface_config: wgpu::SurfaceConfiguration,
@@ -53,19 +60,19 @@ pub struct Rupy<'a> {
 }
 
 impl<'a> Rupy<'a> {
-    pub async fn new(event_loop: &ActiveEventLoop) -> Result<Self, EngineError> {
-        let gpu = GpuContext::new().await?;
-        let asset_loader = AssetLoader::new(gpu.device.clone())?;
+    pub async fn new(event_loop: &ActiveEventLoop, pre: &PreRupy) -> Result<Self, EngineError> {
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
+
+        let mut shader_manager = ShaderManager::new(pre.asset_loader.clone());
 
         let (width, height) = {
             let inenr_size = window.inner_size();
             (inenr_size.width, inenr_size.height)
         };
 
-        let bind_group_layouts = BindGroupLayouts::new(&gpu.device);
+        let bind_group_layouts = BindGroupLayouts::new(&pre.gpu.device);
         let mut wgpu_buffer_cache = WgpuBufferCache::new();
         let glyphon_buffer_cache = GlyphonBufferCache::new();
 
@@ -82,60 +89,69 @@ impl<'a> Rupy<'a> {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
-        let camera_bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera_bg"),
-            layout: &bind_group_layouts.camera,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu_buffer_cache
-                    .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
-                        WgpuBuffer::from_data(
-                            &gpu.device,
-                            &[camera_uniform],
-                            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                        )
-                    })
-                    .buffer
-                    .as_entire_binding(),
-            }],
-        });
+        let camera_bind_group = pre
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("camera_bg"),
+                layout: &bind_group_layouts.camera,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu_buffer_cache
+                        .get_or_create_buffer(&CacheKey::new("camera_uniform_buffer"), || {
+                            WgpuBuffer::from_data(
+                                &pre.gpu.device,
+                                &[camera_uniform],
+                                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                            )
+                        })
+                        .buffer
+                        .as_entire_binding(),
+                }],
+            });
 
-        let surface = gpu.instance.create_surface(win_clone)?;
+        let surface = pre.gpu.instance.create_surface(win_clone)?;
         let surface_config = surface
-            .get_default_config(&gpu.adapter, width, height)
+            .get_default_config(&pre.gpu.adapter, width, height)
             .ok_or(EngineError::SurfaceConfigError(
                 "surface isn't supported by this adapter".into(),
             ))?;
-        surface.configure(&gpu.device, &surface_config);
+        surface.configure(&pre.gpu.device, &surface_config);
 
-        let mut texture_manager = TextureManager::new(gpu.device.clone(), gpu.queue.clone());
+        let mut texture_manager =
+            TextureManager::new(pre.gpu.device.clone(), pre.gpu.queue.clone());
         texture_manager
             .load(
                 CacheKey::new("cube_diffuse"),
-                &asset_loader,
+                &pre.asset_loader,
                 "cube-diffuse.jpg",
             )
             .await?;
 
         if let Err(e) = texture_manager.prepare_equirect_projection_textures(
-            &asset_loader,
+            &pre.asset_loader,
             &bind_group_layouts,
             "pure-sky.hdr",
             1080,
             wgpu::TextureFormat::Rgba32Float,
         ) {
-            eprintln!("Error preparing cupemap textures: {}", e);
+            log_error!("Error preparing cupemap textures: {}", e);
         };
 
-        let wgpu_renderer =
-            WgpuRenderer::new(&gpu, &asset_loader, &surface_config, &bind_group_layouts)?;
-        let encoder = gpu.device.create_command_encoder(&Default::default());
+        let wgpu_renderer = WgpuRenderer::new(
+            &pre.gpu,
+            &pre.asset_loader,
+            &mut shader_manager,
+            &surface_config,
+            &bind_group_layouts,
+        )?;
+        let encoder = pre.gpu.device.create_command_encoder(&Default::default());
 
         if let Some(equirect_bind_group) = texture_manager
             .bind_group_for("equirect_projection_src", &bind_group_layouts.equirect_src)
         {
             wgpu_renderer.equirect_projection(
-                &gpu.queue,
+                &pre.gpu.queue,
                 encoder,
                 equirect_bind_group,
                 1080,
@@ -145,7 +161,7 @@ impl<'a> Rupy<'a> {
 
         let mesh_buffer_key = CacheKey::new("mesh_vertex_buffer");
         wgpu_buffer_cache.get_or_create_buffer(&mesh_buffer_key, || {
-            WgpuBuffer::from_data(&gpu.device, &VERTICES, wgpu::BufferUsages::VERTEX)
+            WgpuBuffer::from_data(&pre.gpu.device, &VERTICES, wgpu::BufferUsages::VERTEX)
         });
         let mesh = Mesh::Shared {
             key: CacheKey::new("mesh_vertex_buffer"),
@@ -153,8 +169,9 @@ impl<'a> Rupy<'a> {
         };
 
         Ok(Rupy {
-            gpu,
-            asset_loader,
+            gpu: pre.gpu.clone(),
+            asset_loader: pre.asset_loader.clone(),
+            shader_manager,
             window,
             surface,
             surface_config,
@@ -193,7 +210,7 @@ impl<'a> Rupy<'a> {
                 self.window.request_redraw();
             }
             Err(e) => {
-                eprintln!("SurfaceError: {}", e);
+                log_error!("SurfaceError: {}", e);
             }
         };
     }

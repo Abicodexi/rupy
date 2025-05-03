@@ -1,14 +1,10 @@
-use crate::app::Rupy;
-use crate::handler::ApplicationEvent;
+use crate::app::{PreRupy, Rupy};
 use core::EngineError;
-use winit::{
-    error::EventLoopError,
-    event_loop::{ActiveEventLoop, EventLoop},
-};
+use winit::event_loop::ActiveEventLoop;
 
 #[allow(dead_code)]
 pub enum AppInnerState<'a> {
-    Cold,
+    Cold(PreRupy),
     Warm(Rupy<'a>),
 }
 
@@ -18,21 +14,21 @@ pub struct ApplicationState<'a> {
 
 impl<'a> ApplicationState<'a> {
     /// Creates a new application state in the "cold" (uninitialized) phase.
-    pub fn new() -> Self {
+    pub fn new(pre: PreRupy) -> Self {
         Self {
-            inner: AppInnerState::Cold,
+            inner: AppInnerState::Cold(pre),
         }
     }
 
     /// One-time async initialization, called from `resumed()`.
     pub async fn init(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EngineError> {
-        self.inner = AppInnerState::Warm(Rupy::new(event_loop).await?);
+        match &self.inner {
+            AppInnerState::Cold(inner) => {
+                self.inner = AppInnerState::Warm(Rupy::new(event_loop, inner).await?);
+            }
+            _ => {}
+        }
+
         Ok(())
     }
-}
-
-pub fn run_app() -> Result<(), EventLoopError> {
-    let event_loop = EventLoop::<ApplicationEvent>::with_user_event().build()?;
-    let mut app = ApplicationState::new();
-    event_loop.run_app(&mut app)
 }

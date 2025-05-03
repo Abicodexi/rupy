@@ -37,4 +37,7 @@ pub enum EngineError {
 
     #[error("FileSystem error: {0}")]
     FileSystemError(String),
+
+    #[error("EventLoopError: {0}")]
+    EventLoopError(#[from] winit::error::EventLoopError),
 }
