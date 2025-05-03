@@ -1,5 +1,6 @@
 use cgmath::{Deg, Point3, Vector3};
 use core::{
+    assets::{loader::AssetLoader, Assets},
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
     renderer::{Mesh, VertexTexture},
@@ -35,6 +36,7 @@ const VERTICES: [VertexTexture; 3] = [
 #[allow(dead_code)]
 pub struct Rupy<'a> {
     pub gpu: GpuContext,
+    pub asset_loader: AssetLoader,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'a>,
     pub surface_config: wgpu::SurfaceConfiguration,
@@ -53,6 +55,7 @@ pub struct Rupy<'a> {
 impl<'a> Rupy<'a> {
     pub async fn new(event_loop: &ActiveEventLoop) -> Result<Self, EngineError> {
         let gpu = GpuContext::new().await?;
+        let asset_loader = AssetLoader::new(gpu.device.clone());
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
@@ -96,6 +99,7 @@ impl<'a> Rupy<'a> {
                     .as_entire_binding(),
             }],
         });
+
         let surface = gpu.instance.create_surface(win_clone)?;
         let surface_config = surface
             .get_default_config(&gpu.adapter, width, height)
@@ -108,20 +112,23 @@ impl<'a> Rupy<'a> {
         texture_manager
             .load(
                 CacheKey::new("cube_diffuse"),
-                "C:\\Users\\abism\\Desktop\\rupy\\cube-diffuse.jpg",
+                &asset_loader,
+                "cube-diffuse.jpg",
             )
             .await?;
 
         if let Err(e) = texture_manager.prepare_equirect_projection_textures(
+            &asset_loader,
             &bind_group_layouts,
-            "C:\\Users\\abism\\Desktop\\rupy\\pure-sky.hdr",
+            "pure-sky.hdr",
             1080,
             wgpu::TextureFormat::Rgba32Float,
         ) {
             eprintln!("Error preparing cupemap textures: {}", e);
         };
 
-        let wgpu_renderer = WgpuRenderer::new(&gpu, &surface_config, &bind_group_layouts)?;
+        let wgpu_renderer =
+            WgpuRenderer::new(&gpu, &asset_loader, &surface_config, &bind_group_layouts)?;
         let encoder = gpu.device.create_command_encoder(&Default::default());
 
         if let Some(equirect_bind_group) = texture_manager
@@ -147,6 +154,7 @@ impl<'a> Rupy<'a> {
 
         Ok(Rupy {
             gpu,
+            asset_loader,
             window,
             surface,
             surface_config,
@@ -162,7 +170,9 @@ impl<'a> Rupy<'a> {
             mesh,
         })
     }
-
+    pub fn assets(&self) -> Assets {
+        Assets::new(&self.asset_loader)
+    }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface
             .resize(self.gpu.device(), &mut self.surface_config, *new_size);

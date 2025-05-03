@@ -1,3 +1,4 @@
+use crate::assets::loader::AssetLoader;
 use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
@@ -214,13 +215,14 @@ impl TextureManager {
     }
 
     /// Load (or reload) a texture from disk
-    pub async fn load<K: Into<CacheKey>, P: AsRef<std::path::Path>>(
+    pub async fn load<K: Into<CacheKey>>(
         &mut self,
         key: K,
-        path: P,
+        asset_loader: &AssetLoader,
+        rel_path: &str,
     ) -> Result<Arc<Texture>, EngineError> {
-        let bytes = std::fs::read(&path)?;
-        let tex = Texture::from_bytes(&self.device, &self.queue, &bytes, path).await?;
+        let tex = asset_loader.load_texture(&self.queue, rel_path).await?;
+
         let arc = Arc::new(tex);
         self.textures.insert(key.into(), arc.clone());
         Ok(arc)
@@ -277,14 +279,16 @@ impl TextureManager {
         Ok((pixels, meta))
     }
 
-    pub fn prepare_equirect_projection_textures<P: AsRef<std::path::Path>>(
+    pub fn prepare_equirect_projection_textures(
         &mut self,
+        asset_loader: &AssetLoader,
         bind_group_layouts: &BindGroupLayouts,
-        path: P,
+        rel_path: &str,
         dst_size: u32,
         format: wgpu::TextureFormat,
     ) -> Result<(), EngineError> {
-        let bytes = std::fs::read(&path)?;
+        let path = asset_loader.resolve(&format!("hdr\\{}", rel_path));
+        let bytes = AssetLoader::read_bytes(&path)?;
         let (pixels, meta) = Self::decode_hdr(&bytes)?;
 
         let src_key = CacheKey::new("equirect_projection_src");
@@ -302,7 +306,7 @@ impl TextureManager {
             None,
             wgpu::FilterMode::Linear,
             None,
-            Some(&format!("src:{}", path.as_ref().to_str().unwrap())),
+            Some(&format!("src:{}", rel_path)),
         );
 
         let dst_key = CacheKey::new("equirect_projection_dst");
@@ -320,7 +324,7 @@ impl TextureManager {
             Some(wgpu::AddressMode::ClampToEdge),
             wgpu::FilterMode::Nearest,
             None,
-            Some(&format!("dst:{}", path.as_ref().to_str().unwrap())),
+            Some(&format!("dst:{}", rel_path)),
         );
 
         let equirect_src_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

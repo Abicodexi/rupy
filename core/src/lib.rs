@@ -30,3 +30,5 @@ pub use bind_group::BindGroupLayoutBuilder;
 pub use bind_group::BindGroupLayouts;
 
 pub mod camera;
+
+pub mod assets;

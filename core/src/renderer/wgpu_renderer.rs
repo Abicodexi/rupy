@@ -1,5 +1,6 @@
 use super::{Mesh, VertexTexture};
 use crate::{
+    assets::loader::AssetLoader,
     texture::{Texture, TextureManager},
     BindGroupLayouts, EngineError, GpuContext, Renderer, WgpuBufferCache,
 };
@@ -16,6 +17,7 @@ pub struct WgpuRenderer {
 impl WgpuRenderer {
     pub fn new(
         gpu: &GpuContext,
+        asset_loader: &AssetLoader,
         config: &SurfaceConfiguration,
         bind_group_layouts: &BindGroupLayouts,
     ) -> Result<Self, EngineError> {
@@ -27,14 +29,7 @@ impl WgpuRenderer {
             bias: wgpu::DepthBiasState::default(),
         };
 
-        let default_shader = gpu
-            .device()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("default shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("C:\\Users\\abism\\Desktop\\rupy\\v_texture.wgsl").into(),
-                ),
-            });
+        let default_shader = asset_loader.load_shader("v_texture.wgsl")?;
 
         let default_pipeline_layout =
             gpu.device()
@@ -72,14 +67,7 @@ impl WgpuRenderer {
                     cache: None,
                 });
 
-        let equirect_src_shader = gpu
-            .device()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("default shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("C:\\Users\\abism\\Desktop\\rupy\\equirect_src.wgsl").into(),
-                ),
-            });
+        let equirect_src_shader = asset_loader.load_shader("equirect_src.wgsl")?;
 
         let equirect_src_pipeline_layout =
             gpu.device()
@@ -100,14 +88,7 @@ impl WgpuRenderer {
                     cache: None,
                 });
 
-        let equirect_dst_shader = gpu
-            .device()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Equirect dst shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("C:\\Users\\abism\\Desktop\\rupy\\equirect_dst.wgsl").into(),
-                ),
-            });
+        let equirect_dst_shader = asset_loader.load_shader("equirect_dst.wgsl")?;
 
         let equirect_dst_layout =
             gpu.device()

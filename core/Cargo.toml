@@ -16,3 +16,4 @@ anyhow = "1.0.98"
 image = { version = "0.24", features = ["png", "jpeg", "hdr"] }
 
 cgmath = "0.18.0"
+notify = "8.0.0"
