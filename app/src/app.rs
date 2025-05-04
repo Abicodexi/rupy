@@ -66,10 +66,11 @@ pub struct Rupy<'a> {
     pub controller: CameraController,
     pub camera_bind_group: wgpu::BindGroup,
     pub mesh: Mesh,
+    pub last_shape_time: std::time::Instant,
 }
 
 impl<'a> Rupy<'a> {
-    pub const DEBUG_G_BUFFER: &'static str = "debug_buffer";
+    pub const TEXT_BUFFER: &'static str = "text_buffer";
     pub async fn new(
         event_loop: &ActiveEventLoop,
         resources: Arc<Resources>,
@@ -99,6 +100,7 @@ impl<'a> Rupy<'a> {
             znear: 0.1,
             zfar: 100.0,
             uniform: CameraUniform::new(),
+            uniform_cache_key: CacheKey::new("camera_uniform_buffer"),
         };
         let controller = CameraController::new(1.0, 0.5);
 
@@ -113,7 +115,7 @@ impl<'a> Rupy<'a> {
                         binding: 0,
                         resource: buffer_manager
                             .w_buffer
-                            .get_or_create(&CacheKey::new("camera_uniform_buffer"), || {
+                            .get_or_create(&camera.uniform_cache_key, || {
                                 WgpuBuffer::from_data(
                                     &resources.gpu.device,
                                     &[camera.uniform],
@@ -258,6 +260,7 @@ impl<'a> Rupy<'a> {
             controller,
             camera_bind_group,
             mesh,
+            last_shape_time: std::time::Instant::now(),
         })
     }
 
@@ -326,7 +329,7 @@ impl<'a> Rupy<'a> {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
@@ -354,7 +357,6 @@ impl<'a> Rupy<'a> {
 
                 self.resources.gpu.queue.submit(Some(encoder.finish()));
                 frame.present();
-                self.window.request_redraw();
             }
             Err(e) => {
                 log_error!("SurfaceError: {}", e);
@@ -365,77 +367,89 @@ impl<'a> Rupy<'a> {
     pub fn update(&mut self) {
         self.time.update();
         self.camera.update(&mut self.controller);
+        let camera_uniform_buffer = self.managers.buffer_manager.w_buffer.get_or_create(
+            &self.camera.uniform_cache_key,
+            || {
+                WgpuBuffer::from_data(
+                    self.resources.gpu.device(),
+                    &[self.camera.uniform],
+                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                )
+            },
+        );
         self.resources.gpu.queue.write_buffer(
-            &self
-                .managers
-                .buffer_manager
-                .w_buffer
-                .get_or_create(&CacheKey::new("camera_uniform_buffer"), || {
-                    WgpuBuffer::from_data(
-                        self.resources.gpu.device(),
-                        &[self.camera.uniform],
-                        wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    )
-                })
-                .buffer,
+            &camera_uniform_buffer.buffer,
             0,
             bytemuck::cast_slice(&[self.camera.uniform]),
         );
-        let debug_buffer = self.managers.buffer_manager.g_buffer.get_or_create(
-            &CacheKey::new(Self::DEBUG_G_BUFFER),
-            || {
-                let metrics = glyphon::Metrics {
-                    font_size: 20.0,
-                    line_height: 20.0,
-                };
-                GlyphonBuffer::new(&mut self.glyphon_renderer.font_system, Some(metrics))
-            },
-        );
-        debug_buffer.flush_buffer_lines();
-        let mut debug_buffer_lines: Vec<glyphon::BufferLine> = Vec::new();
-        debug_buffer_lines.push(glyphon::BufferLine::new(
-            format!(
-                "Eye: x: {} y: {} z: {}",
-                self.camera.eye.x, self.camera.eye.y, self.camera.eye.z
-            ),
-            LineEnding::LfCr,
-            glyphon::AttrsList::new(Attrs::new()),
-            Shaping::Basic,
-        ));
-        debug_buffer_lines.push(glyphon::BufferLine::new(
-            format!(
-                "Target: x: {} y: {} z: {}",
-                self.camera.target.x, self.camera.target.y, self.camera.target.z
-            ),
-            LineEnding::LfCr,
-            glyphon::AttrsList::new(Attrs::new()),
-            Shaping::Basic,
-        ));
-        debug_buffer_lines.push(glyphon::BufferLine::new(
-            format!(
-                "yaw: {} pitch: {}",
-                self.controller.yaw, self.controller.pitch
-            ),
-            LineEnding::LfCr,
-            glyphon::AttrsList::new(Attrs::new()),
-            Shaping::Basic,
-        ));
-        debug_buffer_lines.push(glyphon::BufferLine::new(
-            format!("fps: {} dt: {}", self.time.fps, self.time.delta_time),
-            LineEnding::LfCr,
-            glyphon::AttrsList::new(Attrs::new()),
-            Shaping::Basic,
-        ));
-        debug_buffer.push_buffer_lines(&debug_buffer_lines);
-        debug_buffer
-            .buffer
-            .shape_until_scroll(&mut self.glyphon_renderer.font_system, false);
 
-        self.glyphon_renderer.prepate(
-            &self.resources.gpu.device,
-            &self.resources.gpu.queue,
-            debug_buffer,
-            &self.surface_config,
-        );
+        if self.last_shape_time.elapsed().as_millis() > 1000 {
+            let text_buffer = self.managers.buffer_manager.g_buffer.get_or_create(
+                &CacheKey::new(Self::TEXT_BUFFER),
+                || {
+                    let metrics = glyphon::Metrics {
+                        font_size: 20.0,
+                        line_height: 20.0,
+                    };
+                    GlyphonBuffer::new(&mut self.glyphon_renderer.font_system, Some(metrics))
+                },
+            );
+
+            let line_ending = LineEnding::LfCr;
+            let attrs_list = glyphon::AttrsList::new(Attrs::new());
+            let shaping = Shaping::Advanced;
+            text_buffer.clear_buffer_lines();
+
+            #[cfg(debug_assertions)]
+            {
+                let debug_buffer_lines = vec![
+                    glyphon::BufferLine::new(
+                        format!(
+                            "Eye: x: {:.2} y: {:.2} z: {:.2}",
+                            self.camera.eye.x, self.camera.eye.y, self.camera.eye.z
+                        ),
+                        line_ending,
+                        attrs_list.clone(),
+                        shaping,
+                    ),
+                    glyphon::BufferLine::new(
+                        format!(
+                            "Target: x: {:.2} y: {:.2} z: {:.2}",
+                            self.camera.target.x, self.camera.target.y, self.camera.target.z
+                        ),
+                        line_ending,
+                        attrs_list.clone(),
+                        shaping,
+                    ),
+                    glyphon::BufferLine::new(
+                        format!(
+                            "yaw: {:.2} pitch: {:.2}",
+                            self.controller.yaw, self.controller.pitch
+                        ),
+                        line_ending,
+                        attrs_list.clone(),
+                        shaping,
+                    ),
+                ];
+
+                text_buffer.set_buffer_lines(debug_buffer_lines);
+            }
+            text_buffer.push_buffer_line(glyphon::BufferLine::new(
+                format!("fps: {:.1} dt: {:.4}", self.time.fps, self.time.delta_time),
+                line_ending,
+                attrs_list,
+                shaping,
+            ));
+            text_buffer
+                .buffer
+                .shape_until_scroll(&mut self.glyphon_renderer.font_system, false);
+            self.last_shape_time = std::time::Instant::now();
+            self.glyphon_renderer.prepate(
+                &self.resources.gpu.device,
+                &self.resources.gpu.queue,
+                text_buffer,
+                &self.surface_config,
+            );
+        }
     }
 }

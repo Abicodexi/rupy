@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use wgpu::{
-    Adapter, Backends, Device, Instance, InstanceDescriptor, InstanceFlags, Queue,
-    RequestAdapterOptions,
+    Adapter, Backends, Device, Features, Instance, InstanceDescriptor, InstanceFlags, Limits,
+    MemoryHints, Queue, RequestAdapterOptions,
 };
 
 use crate::EngineError;
@@ -28,7 +28,15 @@ impl GpuContext {
             .expect("Request adapter");
 
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: Features::empty(),
+                    required_limits: Limits::downlevel_defaults(),
+                    memory_hints: MemoryHints::Performance,
+                },
+                None,
+            )
             .await?;
 
         Ok(Self {

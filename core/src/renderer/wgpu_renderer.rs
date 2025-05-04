@@ -210,6 +210,5 @@ impl Renderer for WgpuRenderer {
                 &w_buffer_manager,
             );
         }
-        drop(rpass);
     }
 }

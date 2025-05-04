@@ -4,6 +4,8 @@ pub mod uniform;
 use cgmath::{perspective, Deg, Matrix4, Point3, SquareMatrix, Vector3};
 use controller::CameraController;
 
+use crate::CacheKey;
+
 #[derive(Debug)]
 pub struct Camera {
     pub eye: Point3<f32>,
@@ -14,6 +16,7 @@ pub struct Camera {
     pub znear: f32,
     pub zfar: f32,
     pub uniform: uniform::CameraUniform,
+    pub uniform_cache_key: CacheKey,
 }
 
 impl Camera {

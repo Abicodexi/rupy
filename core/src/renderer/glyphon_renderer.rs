@@ -70,7 +70,7 @@ impl GlyphonRenderer {
                     right: surface_config.width as i32,
                     bottom: surface_config.height as i32,
                 },
-                default_color: glyphon::Color::rgb(1, 1, 1),
+                default_color: glyphon::Color::rgb(255, 255, 255),
                 custom_glyphs: &[],
             }],
             &mut self.swash_cache,

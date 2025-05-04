@@ -22,18 +22,22 @@ impl GlyphonBuffer {
         buffer.push_buffer_lines(lines);
         buffer
     }
-
     /// Append lines into the buffer
     pub fn push_buffer_lines(&mut self, lines: &Vec<glyphon::BufferLine>) {
         for line in lines.iter() {
             self.buffer.lines.push(line.clone());
         }
     }
-
+    /// Append lines into the buffer
+    pub fn push_buffer_line(&mut self, line: glyphon::BufferLine) {
+        self.buffer.lines.push(line);
+    }
+    pub fn set_buffer_lines(&mut self, lines: Vec<glyphon::BufferLine>) {
+        self.buffer.lines = lines;
+    }
     /// Clear all lines from the buffer
-    pub fn flush_buffer_lines(&mut self) {
+    pub fn clear_buffer_lines(&mut self) {
         self.buffer.lines.clear();
-        self.buffer.lines.shrink_to_fit();
     }
 }
 
