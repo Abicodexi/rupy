@@ -1,5 +1,5 @@
 use crate::assets::loader::AssetLoader;
-use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, HashCache};
+use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, GpuContext, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -185,11 +185,15 @@ pub struct TextureManager {
     queue: Arc<wgpu::Queue>,
     textures: HashCache<Arc<Texture>>,
     texture_bgs: std::collections::HashMap<String, wgpu::BindGroup>,
+    pub depth_texture: Texture,
+    pub depth_stencil_state: wgpu::DepthStencilState,
 }
+
 impl CacheStorage<Arc<Texture>> for TextureManager {
-    fn get(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
-        self.textures.get(key)
+    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&Arc<Texture>> {
+        self.textures.get(&key.into())
     }
+
     fn contains(&self, key: &CacheKey) -> bool {
         self.textures.contains_key(key)
     }
@@ -211,15 +215,60 @@ impl CacheStorage<Arc<Texture>> for TextureManager {
 }
 
 impl TextureManager {
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+    pub fn new(
+        resources: &std::sync::Arc<GpuContext>,
+        surface_config: &wgpu::SurfaceConfiguration,
+    ) -> Self {
+        let depth_stencil_state = wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+
+        let depth_texture = Texture::create(
+            &resources.device,
+            wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(resources.device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::LessEqual),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            })),
+            Some("Depth texture"),
+        );
         Self {
-            device,
-            queue,
+            device: resources.device.clone(),
+            queue: resources.queue.clone(),
             textures: HashCache::new(),
             texture_bgs: std::collections::HashMap::new(),
+            depth_texture,
+            depth_stencil_state,
         }
     }
-
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
     /// Load (or reload) a texture from disk
     pub async fn load<K: Into<CacheKey>>(
         &mut self,
@@ -285,6 +334,9 @@ impl TextureManager {
         Ok((pixels, meta))
     }
 
+    pub fn insert_texture_bind_group(&mut self, key: &CacheKey, bind_group: wgpu::BindGroup) {
+        self.texture_bgs.insert(key.id.clone(), bind_group);
+    }
     pub fn prepare_equirect_projection_textures(
         &mut self,
         asset_loader: &AssetLoader,
@@ -292,7 +344,7 @@ impl TextureManager {
         rel_path: &str,
         dst_size: u32,
         format: wgpu::TextureFormat,
-    ) -> Result<(), EngineError> {
+    ) -> Result<(CacheKey, wgpu::BindGroup, CacheKey, wgpu::BindGroup), EngineError> {
         let path = asset_loader.resolve(&format!("hdr\\{}", rel_path));
         let bytes = AssetLoader::read_bytes(&path)?;
         let (pixels, meta) = Self::decode_hdr(&bytes)?;
@@ -380,13 +432,18 @@ impl TextureManager {
         );
 
         self.texture_bgs
-            .insert(src_key.id.clone(), equirect_src_bind_group);
+            .insert(src_key.id.clone(), equirect_src_bind_group.clone());
         self.texture_bgs
-            .insert(dst_key.id.clone(), equirect_dst_bind_group);
+            .insert(dst_key.id.clone(), equirect_dst_bind_group.clone());
 
-        self.textures.insert(src_key, src.into());
-        self.textures.insert(dst_key, dst.into());
+        self.textures.insert(src_key.clone(), src.into());
+        self.textures.insert(dst_key.clone(), dst.into());
 
-        Ok(())
+        Ok((
+            src_key,
+            equirect_src_bind_group,
+            dst_key,
+            equirect_dst_bind_group,
+        ))
     }
 }

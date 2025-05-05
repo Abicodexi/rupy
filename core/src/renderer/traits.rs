@@ -1,15 +1,12 @@
-use super::Mesh;
-use crate::{texture::TextureManager, BindGroupLayouts, WgpuBufferManager};
+use crate::{BindGroupLayouts, Camera, World};
 
 pub trait Renderer {
     fn render(
         &self,
         rpass: &mut wgpu::RenderPass,
         bind_group_layouts: &BindGroupLayouts,
-        texture_manager: &mut TextureManager,
-        w_buffer_manager: &mut WgpuBufferManager,
-        camera_bind_group: &wgpu::BindGroup,
-        mesh: &Mesh,
+        world: &mut World,
+        camera: &Camera,
     );
     fn update(&mut self, dt: f32);
 }

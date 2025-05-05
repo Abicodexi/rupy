@@ -1,4 +1,6 @@
-use crate::{CacheKey, CacheStorage};
+use std::sync::Arc;
+
+use crate::{CacheKey, CacheStorage, HashCache};
 
 /// Wrapper around Glyphon buffers
 pub struct GlyphonBuffer {
@@ -41,7 +43,7 @@ impl GlyphonBuffer {
     }
 }
 
-pub type GlyphonBufferCacheType = std::collections::HashMap<CacheKey, GlyphonBuffer>;
+pub type GlyphonBufferCacheType = HashCache<GlyphonBuffer>;
 pub struct GlyphonBufferManager {
     inner: GlyphonBufferCacheType,
 }
@@ -52,13 +54,28 @@ impl GlyphonBufferManager {
             inner: Default::default(),
         }
     }
-    pub fn get(&self, key_source: &CacheKey) -> Option<&GlyphonBuffer> {
-        self.inner.get(key_source)
+}
+
+impl CacheStorage<GlyphonBuffer> for GlyphonBufferManager {
+    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&GlyphonBuffer> {
+        self.inner.get(&key.into())
     }
-    pub fn get_or_create<F>(&mut self, key_source: &CacheKey, create_fn: F) -> &mut GlyphonBuffer
+    fn contains(&self, key: &CacheKey) -> bool {
+        self.inner.contains_key(key)
+    }
+    fn get_mut(&mut self, key: &CacheKey) -> Option<&mut GlyphonBuffer> {
+        self.inner.get_mut(key)
+    }
+    fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> &mut GlyphonBuffer
     where
         F: FnOnce() -> GlyphonBuffer,
     {
-        self.inner.get_or_create(key_source.clone(), create_fn)
+        self.inner.entry(key).or_insert_with(create_fn)
+    }
+    fn insert(&mut self, key: CacheKey, resource: GlyphonBuffer) {
+        self.inner.insert(key, resource);
+    }
+    fn remove(&mut self, key: &CacheKey) {
+        self.inner.remove(key);
     }
 }

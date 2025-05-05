@@ -1,7 +1,13 @@
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec3<f32>,
-    @location(2) tex_coords: vec2<f32>
+    @location(2) tex_coords: vec2<f32>,
+
+    // Instance model matrix
+    @location(3) model_0: vec4<f32>,
+    @location(4) model_1: vec4<f32>,
+    @location(5) model_2: vec4<f32>,
+    @location(6) model_3: vec4<f32>
 };
 
 struct VertexOutput {
@@ -27,7 +33,15 @@ var s_diffuse: sampler;
 @vertex
 fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-    output.clip_position = camera.view_proj * vec4<f32>(input.position, 1.0);
+
+    let model = mat4x4<f32>(
+        input.model_0,
+        input.model_1,
+        input.model_2,
+        input.model_3
+    );
+
+    output.clip_position = camera.view_proj * model * vec4<f32>(input.position, 1.0);
     output.color = input.color;
     output.tex_coords = input.tex_coords;
     return output;

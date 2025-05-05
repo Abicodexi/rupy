@@ -1,5 +1,5 @@
-use crate::app::{Resources, Rupy};
-use core::EngineError;
+use crate::app::Rupy;
+use core::{EngineError, Resources};
 use std::sync::Arc;
 use winit::event_loop::ActiveEventLoop;
 

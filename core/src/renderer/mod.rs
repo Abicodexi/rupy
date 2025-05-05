@@ -10,3 +10,11 @@ pub use vertex::VertexNormal;
 pub use vertex::VertexTexture;
 
 pub mod glyphon_renderer;
+
+pub mod material;
+pub use material::Material;
+
+pub mod model;
+pub use model::Model;
+
+pub mod environment;

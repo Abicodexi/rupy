@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::key::CacheKey;
 
 pub trait CacheStorage<R> {
-    fn get(&self, key: &CacheKey) -> Option<&R>;
+    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&R>;
     fn contains(&self, key: &CacheKey) -> bool;
     fn get_mut(&mut self, key: &CacheKey) -> Option<&mut R>;
     fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> &mut R
@@ -16,8 +16,8 @@ pub trait CacheStorage<R> {
 pub type HashCache<R> = HashMap<CacheKey, R>;
 
 impl<R> CacheStorage<R> for HashCache<R> {
-    fn get(&self, key: &CacheKey) -> Option<&R> {
-        self.get(key)
+    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&R> {
+        self.get(&key.into())
     }
     fn contains(&self, key: &CacheKey) -> bool {
         self.contains_key(key)

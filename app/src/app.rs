@@ -1,15 +1,18 @@
-use cgmath::{Deg, Point3, Vector3};
+use cgmath::{Deg, Point3, Rotation3, Vector3};
 use core::{
-    assets::loader::AssetLoader,
     buffer::BufferManager,
     camera::{controller::CameraController, uniform::CameraUniform, Camera},
     error::EngineError,
-    log_error,
+    frustum::Frustum,
+    log_error, log_info,
     pipeline::PipelineManager,
-    renderer::{glyphon_renderer::GlyphonRenderer, Mesh, VertexTexture},
+    renderer::{
+        glyphon_renderer::GlyphonRenderer, material::MaterialManager, Model, VertexTexture,
+    },
     texture::{Texture, TextureManager},
-    BindGroupLayouts, CacheKey, GlyphonBuffer, GpuContext, Renderer, ShaderManager, SurfaceExt,
-    Time, WgpuBuffer, WgpuRenderer,
+    BindGroupLayouts, CacheKey, CacheStorage, Entity, Environment, EquirectProjection,
+    GlyphonBuffer, Managers, MeshManager, ModelManager, Position, Renderable, Renderer, Resources,
+    Rotation, Scale, ShaderManager, SurfaceExt, Time, WgpuBuffer, WgpuRenderer, World,
 };
 use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use std::sync::Arc;
@@ -37,23 +40,12 @@ const VERTICES: [VertexTexture; 3] = [
     },
 ];
 
-pub struct Resources {
-    pub gpu: Arc<GpuContext>,
-    pub asset_loader: Arc<AssetLoader>,
-}
-
-pub struct Managers {
-    pub shader_manager: ShaderManager,
-    pub pipeline_manager: PipelineManager,
-    pub buffer_manager: BufferManager,
-}
+const INDICES: [u32; 3] = [0, 1, 2];
 
 #[allow(dead_code)]
 pub struct Rupy<'a> {
     pub resources: Arc<Resources>,
-    pub managers: Managers,
-    pub depth_texture: Texture,
-    pub depth_stencil_state: wgpu::DepthStencilState,
+    pub world: World,
     pub time: Time,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'a>,
@@ -61,12 +53,10 @@ pub struct Rupy<'a> {
     pub wgpu_renderer: WgpuRenderer,
     pub glyphon_renderer: GlyphonRenderer,
     pub bind_group_layouts: BindGroupLayouts,
-    pub texture_manager: TextureManager,
     pub camera: Camera,
     pub controller: CameraController,
-    pub camera_bind_group: wgpu::BindGroup,
-    pub mesh: Mesh,
     pub last_shape_time: std::time::Instant,
+    pub last_transform_time: std::time::Instant,
 }
 
 impl<'a> Rupy<'a> {
@@ -79,53 +69,10 @@ impl<'a> Rupy<'a> {
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
 
-        let time = Time::new();
-
-        let mut shader_manager = ShaderManager::new(resources.asset_loader.clone());
-        let mut pipeline_manager = PipelineManager::new();
-        let mut buffer_manager = BufferManager::new();
-
         let (width, height) = {
             let inenr_size = window.inner_size();
             (inenr_size.width, inenr_size.height)
         };
-
-        let bind_group_layouts = BindGroupLayouts::new(&resources.gpu.device);
-        let camera = Camera {
-            eye: Point3::new(0.0, 1.0, 2.0),
-            target: Point3::new(0.0, 0.0, 0.0),
-            up: Vector3::unit_y(),
-            aspect: width as f32 / height as f32,
-            fovy: Deg(45.0),
-            znear: 0.1,
-            zfar: 100.0,
-            uniform: CameraUniform::new(),
-            uniform_cache_key: CacheKey::new("camera_uniform_buffer"),
-        };
-        let controller = CameraController::new(1.0, 0.5);
-
-        let camera_bind_group =
-            resources
-                .gpu
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("camera_bg"),
-                    layout: &bind_group_layouts.camera,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buffer_manager
-                            .w_buffer
-                            .get_or_create(&camera.uniform_cache_key, || {
-                                WgpuBuffer::from_data(
-                                    &resources.gpu.device,
-                                    &[camera.uniform],
-                                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                                )
-                            })
-                            .buffer
-                            .as_entire_binding(),
-                    }],
-                });
 
         let surface = resources.gpu.instance.create_surface(win_clone)?;
         let mut surface_config = surface
@@ -136,118 +83,182 @@ impl<'a> Rupy<'a> {
         surface_config.present_mode = wgpu::PresentMode::Mailbox;
         surface.configure(&resources.gpu.device, &surface_config);
 
-        let depth_texture = Texture::create(
-            &resources.gpu.device,
-            wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(
-                resources
-                    .gpu
-                    .device
-                    .create_sampler(&wgpu::SamplerDescriptor {
-                        address_mode_u: wgpu::AddressMode::ClampToEdge,
-                        address_mode_v: wgpu::AddressMode::ClampToEdge,
-                        address_mode_w: wgpu::AddressMode::ClampToEdge,
-                        mag_filter: wgpu::FilterMode::Linear,
-                        min_filter: wgpu::FilterMode::Linear,
-                        mipmap_filter: wgpu::FilterMode::Nearest,
-                        compare: Some(wgpu::CompareFunction::LessEqual),
-                        lod_min_clamp: 0.0,
-                        lod_max_clamp: 100.0,
-                        ..Default::default()
-                    }),
-            ),
-            Some("Depth texture"),
-        );
-        let mut texture_manager =
-            TextureManager::new(resources.gpu.device.clone(), resources.gpu.queue.clone());
-        texture_manager
-            .load(
-                CacheKey::new("cube_diffuse"),
-                &resources.asset_loader,
-                "cube-diffuse.jpg",
-            )
-            .await?;
+        let time = Time::new();
 
-        if let Err(e) = texture_manager.prepare_equirect_projection_textures(
+        let shader_manager = ShaderManager::new(resources.asset_loader.clone());
+        let texture_manager = TextureManager::new(&resources.gpu, &surface_config);
+        let pipeline_manager = PipelineManager::new();
+        let buffer_manager = BufferManager::new();
+        let mesh_manager = MeshManager::new(resources.gpu.device.clone());
+        let material_manager = MaterialManager::new();
+        let model_manager = ModelManager::new();
+        let mut managers = Managers {
+            shader_manager,
+            pipeline_manager,
+            buffer_manager,
+            texture_manager,
+            mesh_manager,
+            material_manager,
+            model_manager,
+        };
+        let bind_group_layouts = BindGroupLayouts::new(&resources.gpu.device);
+        let camera_uniform = CameraUniform::new();
+        let camera_uniform_cache_key = CacheKey::new("camera_uniform_buffer");
+        let camera_bind_group =
+            resources
+                .gpu
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("camera_bg"),
+                    layout: &bind_group_layouts.camera,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: managers
+                            .buffer_manager
+                            .w_buffer
+                            .get_or_create(camera_uniform_cache_key.clone(), || {
+                                WgpuBuffer::from_data(
+                                    &resources.gpu.queue,
+                                    &resources.gpu.device,
+                                    &[camera_uniform],
+                                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                                    Some(&format!("camera uniform buffer")),
+                                )
+                                .into()
+                            })
+                            .buffer
+                            .as_entire_binding(),
+                    }],
+                });
+        let camera = Camera {
+            eye: Point3::new(0.0, 1.0, 2.0),
+            target: Point3::new(0.0, 0.0, 0.0),
+            up: Vector3::unit_y(),
+            aspect: width as f32 / height as f32,
+            fovy: Deg(45.0),
+            znear: 0.1,
+            zfar: 1000.0,
+            uniform: camera_uniform,
+            frustum: Frustum::new(),
+            bind_group: camera_bind_group.clone(),
+            uniform_cache_key: camera_uniform_cache_key,
+        };
+        let controller = CameraController::new(1.0, 0.5);
+
+        let equirect_projection = EquirectProjection::new(
+            &resources.gpu,
             &resources.asset_loader,
+            &mut managers,
+            &surface_config,
             &bind_group_layouts,
+            CacheKey::from("equirect_src.wgsl"),
+            CacheKey::from("equirect_dst.wgsl"),
             "pure-sky.hdr",
             1080,
             wgpu::TextureFormat::Rgba32Float,
-        ) {
-            log_error!("Error preparing cupemap textures: {}", e);
-        };
-
-        let depth_stencil_state = wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
-        let wgpu_renderer = WgpuRenderer::new(
-            &resources.gpu,
-            &resources.asset_loader,
-            &mut shader_manager,
-            &mut pipeline_manager,
-            &surface_config,
-            &depth_stencil_state,
-            &bind_group_layouts,
         )?;
+
+        let mut world = World::new(managers);
+        let _ = world.build_environment(&resources, &bind_group_layouts, Some(equirect_projection));
+        let wgpu_renderer = WgpuRenderer::new();
 
         let glyphon_renderer = GlyphonRenderer::new(
             &resources.gpu.device,
             &resources.gpu.queue,
             surface_config.format,
-            &depth_stencil_state,
+            &world.managers().texture_manager.depth_stencil_state,
+        );
+        let triangle_key = CacheKey::from("triangle");
+        let entity = world.spawn();
+        world.insert_position(entity, Position { x: 0.0, y: 0.0 });
+        let angle_deg = 90.0 % 360.0;
+        let angle = Deg(angle_deg);
+        world.insert_rotation(
+            entity,
+            Rotation {
+                quat: cgmath::Quaternion::from_angle_x(angle),
+            },
+        );
+        world.insert_scale(
+            entity,
+            Scale {
+                value: cgmath::Vector3 {
+                    x: 5.0,
+                    y: 1.0,
+                    z: 5.0,
+                },
+            },
+        );
+        world.insert_renderable(
+            entity,
+            Renderable {
+                model_key: "2d_triangle".into(),
+                visible: true,
+            },
         );
 
-        let encoder = resources
-            .gpu
-            .device
-            .create_command_encoder(&Default::default());
+        let grid_width = 50;
+        let spacing = 2.0;
 
-        if let Some(equirect_bind_group) = texture_manager
-            .bind_group_for("equirect_projection_src", &bind_group_layouts.equirect_src)
-        {
-            wgpu_renderer.equirect_projection(
-                &resources.gpu.queue,
-                encoder,
-                equirect_bind_group,
-                1080,
-                Some("equirect projection"),
+        for idx in 0..500 {
+            let ent = world.spawn();
+            let x = (idx % grid_width) as f32 * spacing;
+            let y = (idx / grid_width) as f32 * spacing;
+
+            world.insert_position(ent, Position { x, y });
+
+            let angle_deg = (90.0 * idx as f32) % 360.0;
+            let angle = Deg(angle_deg);
+            world.insert_rotation(
+                ent,
+                Rotation {
+                    quat: cgmath::Quaternion::from_angle_x(angle),
+                },
             );
+            world.insert_scale(
+                ent,
+                Scale {
+                    value: cgmath::Vector3 {
+                        x: 5.0,
+                        y: 5.0,
+                        z: 5.0,
+                    },
+                },
+            );
+            world.update_transforms(time.delta_time as f64, camera.frustum);
+            if let Some(t) = world.get_transform(Entity(idx)) {
+                world.add_to_instance_batch(entity, Entity(idx), *t);
+            }
         }
 
-        let mesh_buffer_key = CacheKey::new("mesh_vertex_buffer");
-        buffer_manager.w_buffer.get_or_create(&mesh_buffer_key, || {
-            WgpuBuffer::from_data(&resources.gpu.device, &VERTICES, wgpu::BufferUsages::VERTEX)
-        });
-        let mesh = Mesh::Shared {
-            key: CacheKey::new("mesh_vertex_buffer"),
-            count: VERTICES.len() as u32,
-        };
+        // END TEST
+        let abb = Model::compute_aabb(&VERTICES);
+        world
+            .load_model(
+                &resources.gpu,
+                &resources.asset_loader,
+                &surface_config,
+                vec![bind_group_layouts.camera.clone()],
+                vec![camera_bind_group],
+                "2d_triangle",
+                &triangle_key.id,
+                "v_texture.wgsl",
+                Some("cube-diffuse.jpg"),
+                Some(&bind_group_layouts.texture),
+                wgpu::BlendState::REPLACE,
+                wgpu::Face::Front,
+                wgpu::PrimitiveTopology::TriangleStrip,
+                wgpu::FrontFace::Ccw,
+                wgpu::PolygonMode::Fill,
+                &VERTICES,
+                &INDICES,
+                abb,
+            )
+            .await?;
 
         Ok(Rupy {
             resources,
-            managers: Managers {
-                shader_manager,
-                pipeline_manager,
-                buffer_manager,
-            },
-            depth_texture,
-            depth_stencil_state,
+            world,
             time,
             window,
             surface,
@@ -255,12 +266,10 @@ impl<'a> Rupy<'a> {
             wgpu_renderer,
             glyphon_renderer,
             bind_group_layouts,
-            texture_manager,
             camera,
             controller,
-            camera_bind_group,
-            mesh,
             last_shape_time: std::time::Instant::now(),
+            last_transform_time: std::time::Instant::now(),
         })
     }
 
@@ -277,7 +286,7 @@ impl<'a> Rupy<'a> {
                 height: self.surface_config.height,
             },
         );
-        self.depth_texture = Texture::create(
+        self.world.managers_mut().texture_manager.depth_texture = Texture::create(
             &self.resources.gpu.device,
             wgpu::Extent3d {
                 width: self.surface_config.width,
@@ -334,7 +343,7 @@ impl<'a> Rupy<'a> {
                             },
                         })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: &self.depth_texture.view,
+                            view: &self.world.managers().texture_manager.depth_texture.view,
                             depth_ops: Some(wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(1.0),
                                 store: wgpu::StoreOp::Store,
@@ -347,10 +356,8 @@ impl<'a> Rupy<'a> {
                     self.wgpu_renderer.render(
                         &mut rpass,
                         &self.bind_group_layouts,
-                        &mut self.texture_manager,
-                        &mut self.managers.buffer_manager.w_buffer,
-                        &self.camera_bind_group,
-                        &self.mesh,
+                        &mut self.world,
+                        &self.camera,
                     );
                     self.glyphon_renderer.render(&mut rpass);
                 }
@@ -366,34 +373,44 @@ impl<'a> Rupy<'a> {
 
     pub fn update(&mut self) {
         self.time.update();
+        const TRANSFORM_UPDATE_INTERVAL_MS: u128 = 16; // ~60Hz
         self.camera.update(&mut self.controller);
-        let camera_uniform_buffer = self.managers.buffer_manager.w_buffer.get_or_create(
-            &self.camera.uniform_cache_key,
-            || {
+        let camera_uniform_buffer = self
+            .world
+            .managers_mut()
+            .buffer_manager
+            .w_buffer
+            .get_or_create(self.camera.uniform_cache_key.clone(), || {
                 WgpuBuffer::from_data(
+                    self.resources.gpu.queue(),
                     self.resources.gpu.device(),
                     &[self.camera.uniform],
                     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    Some(&format!("camera uniform buffer")),
                 )
-            },
-        );
-        self.resources.gpu.queue.write_buffer(
-            &camera_uniform_buffer.buffer,
-            0,
-            bytemuck::cast_slice(&[self.camera.uniform]),
-        );
+                .into()
+            });
+        camera_uniform_buffer.write_data(self.resources.gpu.queue(), &[self.camera.uniform], None);
+
+        if self.last_transform_time.elapsed().as_millis() > TRANSFORM_UPDATE_INTERVAL_MS {
+            self.world
+                .update_transforms(self.time.delta_time as f64, self.camera.frustum);
+            self.last_transform_time = std::time::Instant::now();
+        }
 
         if self.last_shape_time.elapsed().as_millis() > 1000 {
-            let text_buffer = self.managers.buffer_manager.g_buffer.get_or_create(
-                &CacheKey::new(Self::TEXT_BUFFER),
-                || {
+            let text_buffer = self
+                .world
+                .managers_mut()
+                .buffer_manager
+                .g_buffer
+                .get_or_create(CacheKey::new(Self::TEXT_BUFFER), || {
                     let metrics = glyphon::Metrics {
                         font_size: 20.0,
                         line_height: 20.0,
                     };
-                    GlyphonBuffer::new(&mut self.glyphon_renderer.font_system, Some(metrics))
-                },
-            );
+                    GlyphonBuffer::new(&mut self.glyphon_renderer.font_system, Some(metrics)).into()
+                });
 
             let line_ending = LineEnding::LfCr;
             let attrs_list = glyphon::AttrsList::new(Attrs::new());

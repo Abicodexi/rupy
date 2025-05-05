@@ -39,19 +39,11 @@ impl<'a> winit::application::ApplicationHandler<ApplicationEvent> for Applicatio
         if let AppInnerState::Running(app) = &mut self.inner {
             match event {
                 ApplicationEvent::ShaderReload(rel_path) => {
-                    app.managers.shader_manager.reload_shader(&rel_path);
-
-                    if let Ok(renderer_reload) = WgpuRenderer::new(
-                        &app.resources.gpu,
-                        &app.resources.asset_loader,
-                        &mut app.managers.shader_manager,
-                        &mut app.managers.pipeline_manager,
-                        &app.surface_config,
-                        &app.depth_stencil_state,
-                        &app.bind_group_layouts,
-                    ) {
-                        app.wgpu_renderer = renderer_reload;
-                    }
+                    app.world
+                        .managers_mut()
+                        .shader_manager
+                        .reload_shader(&rel_path);
+                    app.wgpu_renderer = WgpuRenderer::new();
                 }
             }
         }

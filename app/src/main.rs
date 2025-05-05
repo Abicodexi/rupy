@@ -1,13 +1,12 @@
 mod app;
 mod handler;
 mod state;
-use app::Resources;
 use core::{
     asset_dir,
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
     log_error,
     logger::LogFactory,
-    ApplicationEvent, AssetLoader, AssetWatcher, EngineError, GpuContext,
+    ApplicationEvent, AssetLoader, AssetWatcher, EngineError, GpuContext, Resources,
 };
 use crossbeam::channel::{self, Receiver, Sender};
 use state::ApplicationState;

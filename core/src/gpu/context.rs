@@ -31,7 +31,7 @@ impl GpuContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    required_features: Features::empty(),
+                    required_features: Features::POLYGON_MODE_LINE | Features::POLYGON_MODE_POINT,
                     required_limits: Limits::downlevel_defaults(),
                     memory_hints: MemoryHints::Performance,
                 },
