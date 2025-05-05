@@ -1,16 +1,13 @@
-use crate::{log_debug, CacheKey, CacheStorage, EngineError, HashCache};
-use std::sync::Arc;
-
 pub struct PipelineManager {
-    pub render_pipelines: HashCache<Arc<wgpu::RenderPipeline>>,
-    pub compute_pipelines: HashCache<Arc<wgpu::ComputePipeline>>,
+    pub render_pipelines: crate::HashCache<std::sync::Arc<wgpu::RenderPipeline>>,
+    pub compute_pipelines: crate::HashCache<std::sync::Arc<wgpu::ComputePipeline>>,
 }
 
 impl PipelineManager {
     pub fn new() -> Self {
         Self {
-            render_pipelines: HashCache::new(),
-            compute_pipelines: HashCache::new(),
+            render_pipelines: crate::HashCache::new(),
+            compute_pipelines: crate::HashCache::new(),
         }
     }
     // pub fn reload_shader(&mut self, name: &str) {
@@ -32,34 +29,34 @@ impl PipelineManager {
     //     }
     // }
 
-    pub fn get_render_pipeline<K: Into<CacheKey>>(
+    pub fn get_render_pipeline<K: Into<crate::CacheKey>>(
         &self,
         name: K,
-    ) -> Option<&Arc<wgpu::RenderPipeline>> {
+    ) -> Option<&std::sync::Arc<wgpu::RenderPipeline>> {
         self.render_pipelines.get(&name.into())
     }
-    pub fn get_compute_pipeline<K: Into<CacheKey>>(
+    pub fn get_compute_pipeline<K: Into<crate::CacheKey>>(
         &self,
         name: K,
-    ) -> Option<&Arc<wgpu::ComputePipeline>> {
+    ) -> Option<&std::sync::Arc<wgpu::ComputePipeline>> {
         self.compute_pipelines.get(&name.into())
     }
     pub fn get_or_create_render_pipeline<K, F>(
         &mut self,
         name: K,
         create_fn: F,
-    ) -> &mut Arc<wgpu::RenderPipeline>
+    ) -> &mut std::sync::Arc<wgpu::RenderPipeline>
     where
-        F: FnOnce() -> Result<Arc<wgpu::RenderPipeline>, EngineError>,
-        K: Into<CacheKey>,
+        F: FnOnce() -> Result<std::sync::Arc<wgpu::RenderPipeline>, crate::EngineError>,
+        K: Into<crate::CacheKey>,
     {
-        let cache_key: CacheKey = name.into();
+        let cache_key: crate::CacheKey = name.into();
 
-        self.render_pipelines.get_or_create(cache_key.clone(), || {
+        crate::CacheStorage::get_or_create(&mut self.render_pipelines, cache_key.clone(), || {
             let start = std::time::Instant::now();
             let module = create_fn().expect("Failed to create render pipeline");
             let elapsed = start.elapsed();
-            log_debug!(
+            crate::log_debug!(
                 "[PipelineManager] Loaded render pipeline `{}` in {:.2?}",
                 cache_key.id,
                 elapsed
@@ -71,18 +68,18 @@ impl PipelineManager {
         &mut self,
         name: K,
         create_fn: F,
-    ) -> &mut Arc<wgpu::ComputePipeline>
+    ) -> &mut std::sync::Arc<wgpu::ComputePipeline>
     where
-        F: FnOnce() -> Result<Arc<wgpu::ComputePipeline>, EngineError>,
-        K: Into<CacheKey>,
+        F: FnOnce() -> Result<std::sync::Arc<wgpu::ComputePipeline>, crate::EngineError>,
+        K: Into<crate::CacheKey>,
     {
-        let cache_key: CacheKey = name.into();
+        let cache_key: crate::CacheKey = name.into();
 
-        self.compute_pipelines.get_or_create(cache_key.clone(), || {
+        crate::CacheStorage::get_or_create(&mut self.compute_pipelines, cache_key.clone(), || {
             let start = std::time::Instant::now();
             let module = create_fn().expect("Failed to create compute pipelien");
             let elapsed = start.elapsed();
-            log_debug!(
+            crate::log_debug!(
                 "[PipelineManager] Loaded compute pipeline `{}` in {:.2?}",
                 cache_key.id,
                 elapsed

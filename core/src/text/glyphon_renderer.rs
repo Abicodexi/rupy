@@ -1,16 +1,9 @@
-use glyphon::{
-    Cache, FontSystem, SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport,
-};
-use wgpu::{Device, Queue, SurfaceConfiguration};
-
-use crate::{log_error, GlyphonBuffer};
-
 pub struct GlyphonRenderer {
-    pub font_system: FontSystem,
-    pub atlas: TextAtlas,
-    pub renderer: TextRenderer,
-    pub swash_cache: SwashCache,
-    pub viewport: Viewport,
+    pub font_system: glyphon::FontSystem,
+    pub atlas: glyphon::TextAtlas,
+    pub renderer: glyphon::TextRenderer,
+    pub swash_cache: glyphon::SwashCache,
+    pub viewport: glyphon::Viewport,
 }
 
 impl GlyphonRenderer {
@@ -20,19 +13,19 @@ impl GlyphonRenderer {
         swapchain_format: wgpu::TextureFormat,
         depth_stencil: &wgpu::DepthStencilState,
     ) -> Self {
-        let swash_cache = SwashCache::new();
-        let cache = Cache::new(device);
-        let viewport = Viewport::new(device, &cache);
-        let mut atlas = TextAtlas::new(device, queue, &cache, swapchain_format);
+        let swash_cache = glyphon::SwashCache::new();
+        let cache = glyphon::Cache::new(device);
+        let viewport = glyphon::Viewport::new(device, &cache);
+        let mut atlas = glyphon::TextAtlas::new(device, queue, &cache, swapchain_format);
 
-        let renderer = TextRenderer::new(
+        let renderer = glyphon::TextRenderer::new(
             &mut atlas,
             device,
             wgpu::MultisampleState::default(),
             Some(depth_stencil.clone()),
         );
 
-        let font_system = FontSystem::new();
+        let font_system = glyphon::FontSystem::new();
 
         GlyphonRenderer {
             font_system,
@@ -46,12 +39,12 @@ impl GlyphonRenderer {
     pub fn resize(&mut self, queue: &wgpu::Queue, resolution: glyphon::Resolution) {
         self.viewport.update(queue, resolution);
     }
-    pub fn prepate(
+    pub fn prepare(
         &mut self,
-        device: &Device,
-        queue: &Queue,
-        data: &mut GlyphonBuffer,
-        surface_config: &SurfaceConfiguration,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &mut super::GlyphonBuffer,
+        surface_config: &wgpu::SurfaceConfiguration,
     ) {
         let _ = if let Err(e) = self.renderer.prepare(
             device,
@@ -59,12 +52,12 @@ impl GlyphonRenderer {
             &mut self.font_system,
             &mut self.atlas,
             &self.viewport,
-            [TextArea {
+            [glyphon::TextArea {
                 buffer: &data.buffer,
                 left: 10.0,
                 top: 10.0,
                 scale: 1.0,
-                bounds: TextBounds {
+                bounds: glyphon::TextBounds {
                     left: 0,
                     top: 0,
                     right: surface_config.width as i32,
@@ -75,12 +68,29 @@ impl GlyphonRenderer {
             }],
             &mut self.swash_cache,
         ) {
-            log_error!("Error preparing text: {}", e);
+            crate::log_error!("Error preparing text: {}", e);
         };
     }
     pub fn render<'a>(&'a mut self, rpass: &mut wgpu::RenderPass) {
         if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
-            log_error!("Error rendering text: {}", e);
+            crate::log_error!("Error rendering text: {}", e);
+        }
+    }
+}
+
+impl crate::Renderer for GlyphonRenderer {
+    fn render(
+        &self,
+        _queue: &wgpu::Queue,
+        _device: &wgpu::Device,
+        _managers: &mut crate::Managers,
+        rpass: &mut wgpu::RenderPass,
+        _bind_group_layouts: &crate::BindGroupLayouts,
+        _world: &mut crate::World,
+        _camera: &crate::camera::Camera,
+    ) {
+        if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
+            crate::log_error!("Error rendering text: {}", e);
         }
     }
 }

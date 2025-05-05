@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use crate::{CacheKey, CacheStorage, HashCache};
-
 /// Wrapper around Glyphon buffers
 pub struct GlyphonBuffer {
     pub buffer: glyphon::Buffer,
@@ -57,8 +54,8 @@ impl GlyphonBufferManager {
 }
 
 impl CacheStorage<GlyphonBuffer> for GlyphonBufferManager {
-    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&GlyphonBuffer> {
-        self.inner.get(&key.into())
+    fn get(&self, key: &CacheKey) -> Option<&GlyphonBuffer> {
+        self.inner.get(&key)
     }
     fn contains(&self, key: &CacheKey) -> bool {
         self.inner.contains_key(key)

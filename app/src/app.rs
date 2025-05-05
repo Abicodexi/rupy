@@ -1,50 +1,61 @@
-use cgmath::{Deg, Point3, Rotation3, Vector3};
 use core::{
-    buffer::BufferManager,
-    camera::{controller::CameraController, uniform::CameraUniform, Camera},
-    error::EngineError,
-    frustum::Frustum,
-    log_error, log_info,
-    pipeline::PipelineManager,
-    renderer::{
-        glyphon_renderer::GlyphonRenderer, material::MaterialManager, Model, VertexTexture,
-    },
-    texture::{Texture, TextureManager},
-    BindGroupLayouts, CacheKey, CacheStorage, Entity, Environment, EquirectProjection,
-    GlyphonBuffer, Managers, MeshManager, ModelManager, Position, Renderable, Renderer, Resources,
-    Rotation, Scale, ShaderManager, SurfaceExt, Time, WgpuBuffer, WgpuRenderer, World,
+    camera::{Camera, CameraController, CameraUniform, Frustum},
+    log_error, BindGroupLayouts, BufferManager, CacheKey, CacheStorage, EngineError, Entity,
+    Environment, EquirectProjection, GlyphonBuffer, GlyphonRenderer, InstanceData, Managers,
+    MaterialManager, MeshManager, Model, ModelManager, PipelineManager, Position, Renderable,
+    Renderer, Resources, Rotation, Scale, ShaderManager, SurfaceExt, Texture, TextureManager, Time,
+    VertexTexture, WgpuBuffer, WgpuRenderer, World,
 };
-use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use std::sync::Arc;
+
+use cgmath::{Deg, Point3, Rotation3, Vector3};
+use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
     window::{Window, WindowAttributes},
 };
 
-const VERTICES: [VertexTexture; 3] = [
+const VERTICES: [VertexTexture; 5] = [
+    // Base (y = 0), CCW winding when viewed from above:
     VertexTexture {
-        position: [-0.5, -0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
+        position: [-1.0, 0.0, -1.0], // corner 0
+        color: [1.0, 0.0, 0.0],      // red
         tex_coords: [0.0, 0.0],
     },
     VertexTexture {
-        position: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
+        position: [1.0, 0.0, -1.0], // corner 1
+        color: [0.0, 1.0, 0.0],     // green
         tex_coords: [1.0, 0.0],
     },
     VertexTexture {
-        position: [0.0, 0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
+        position: [1.0, 0.0, 1.0], // corner 2
+        color: [0.0, 0.0, 1.0],    // blue
+        tex_coords: [1.0, 1.0],
+    },
+    VertexTexture {
+        position: [-1.0, 0.0, 1.0], // corner 3
+        color: [1.0, 1.0, 0.0],     // yellow
         tex_coords: [0.0, 1.0],
+    },
+    // Apex, centered above the base:
+    VertexTexture {
+        position: [0.0, 1.0, 0.0], // corner 4
+        color: [1.0, 1.0, 1.0],    // white
+        tex_coords: [0.5, 0.5],
     },
 ];
 
-const INDICES: [u32; 3] = [0, 1, 2];
+const INDICES: [u16; 18] = [
+    // base (two triangles)
+    0, 1, 2, 0, 2, 3, // four side faces
+    0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4,
+];
 
 #[allow(dead_code)]
 pub struct Rupy<'a> {
     pub resources: Arc<Resources>,
+    pub managers: Managers,
     pub world: World,
     pub time: Time,
     pub window: Arc<Window>,
@@ -84,12 +95,51 @@ impl<'a> Rupy<'a> {
         surface.configure(&resources.gpu.device, &surface_config);
 
         let time = Time::new();
+        let depth_stencil_state = wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
 
-        let shader_manager = ShaderManager::new(resources.asset_loader.clone());
-        let texture_manager = TextureManager::new(&resources.gpu, &surface_config);
+        let depth_texture = Texture::create(
+            &resources.gpu.device,
+            wgpu::Extent3d {
+                width: surface_config.width,
+                height: surface_config.height,
+                depth_or_array_layers: 1,
+            },
+            Texture::DEPTH_FORMAT,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Linear,
+            Some(
+                resources
+                    .gpu
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: wgpu::FilterMode::Linear,
+                        min_filter: wgpu::FilterMode::Linear,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        compare: Some(wgpu::CompareFunction::LessEqual),
+                        lod_min_clamp: 0.0,
+                        lod_max_clamp: 100.0,
+                        ..Default::default()
+                    }),
+            ),
+            Some("Depth texture"),
+        );
+        let shader_manager = ShaderManager::new();
+        let texture_manager = TextureManager::new(depth_stencil_state, depth_texture);
         let pipeline_manager = PipelineManager::new();
         let buffer_manager = BufferManager::new();
-        let mesh_manager = MeshManager::new(resources.gpu.device.clone());
+        let mesh_manager = MeshManager::new();
         let material_manager = MaterialManager::new();
         let model_manager = ModelManager::new();
         let mut managers = Managers {
@@ -146,46 +196,51 @@ impl<'a> Rupy<'a> {
         let controller = CameraController::new(1.0, 0.5);
 
         let equirect_projection = EquirectProjection::new(
-            &resources.gpu,
-            &resources.asset_loader,
+            &resources,
             &mut managers,
             &surface_config,
             &bind_group_layouts,
-            CacheKey::from("equirect_src.wgsl"),
-            CacheKey::from("equirect_dst.wgsl"),
+            "equirect_src.wgsl",
+            "equirect_dst.wgsl",
             "pure-sky.hdr",
             1080,
             wgpu::TextureFormat::Rgba32Float,
         )?;
 
-        let mut world = World::new(managers);
-        let _ = world.build_environment(&resources, &bind_group_layouts, Some(equirect_projection));
+        let mut world = World::new(Environment {
+            equirect_projection,
+        });
+        world.compute_equirect_projection(
+            resources.gpu.queue(),
+            resources.gpu.device(),
+            &mut managers,
+            &bind_group_layouts,
+        );
         let wgpu_renderer = WgpuRenderer::new();
-
         let glyphon_renderer = GlyphonRenderer::new(
             &resources.gpu.device,
             &resources.gpu.queue,
             surface_config.format,
-            &world.managers().texture_manager.depth_stencil_state,
+            &managers.texture_manager.depth_stencil_state,
         );
         let triangle_key = CacheKey::from("triangle");
         let entity = world.spawn();
-        world.insert_position(entity, Position { x: 0.0, y: 0.0 });
-        let angle_deg = 90.0 % 360.0;
+        world.insert_position(entity, Position { x: 1.0, y: 1.0 });
+        let angle_deg = 00.0 % 360.0;
         let angle = Deg(angle_deg);
         world.insert_rotation(
             entity,
             Rotation {
-                quat: cgmath::Quaternion::from_angle_x(angle),
+                quat: cgmath::Quaternion::from_angle_z(angle),
             },
         );
         world.insert_scale(
             entity,
             Scale {
                 value: cgmath::Vector3 {
-                    x: 5.0,
+                    x: 1.0,
                     y: 1.0,
-                    z: 5.0,
+                    z: 1.0,
                 },
             },
         );
@@ -200,54 +255,56 @@ impl<'a> Rupy<'a> {
         let grid_width = 50;
         let spacing = 2.0;
 
-        for idx in 0..500 {
+        for idx in 0..50 {
             let ent = world.spawn();
             let x = (idx % grid_width) as f32 * spacing;
             let y = (idx / grid_width) as f32 * spacing;
 
             world.insert_position(ent, Position { x, y });
 
-            let angle_deg = (90.0 * idx as f32) % 360.0;
+            let angle_deg = (0.0 * idx as f32) % 360.0;
             let angle = Deg(angle_deg);
             world.insert_rotation(
                 ent,
                 Rotation {
-                    quat: cgmath::Quaternion::from_angle_x(angle),
+                    quat: cgmath::Quaternion::from_angle_z(angle),
                 },
             );
             world.insert_scale(
                 ent,
                 Scale {
                     value: cgmath::Vector3 {
-                        x: 5.0,
-                        y: 5.0,
-                        z: 5.0,
+                        x: 1.0,
+                        y: 1.0,
+                        z: 1.0,
                     },
                 },
             );
             world.update_transforms(time.delta_time as f64, camera.frustum);
             if let Some(t) = world.get_transform(Entity(idx)) {
-                world.add_to_instance_batch(entity, Entity(idx), *t);
+                world.add_instance_to_batch(entity, Entity(idx), *t);
             }
         }
 
         // END TEST
         let abb = Model::compute_aabb(&VERTICES);
-        world
+        resources
+            .asset_loader
             .load_model(
-                &resources.gpu,
-                &resources.asset_loader,
+                &resources,
+                &mut managers,
                 &surface_config,
-                vec![bind_group_layouts.camera.clone()],
+                vec![&bind_group_layouts.camera],
                 vec![camera_bind_group],
+                &[VertexTexture::LAYOUT, InstanceData::LAYOUT],
                 "2d_triangle",
                 &triangle_key.id,
                 "v_texture.wgsl",
                 Some("cube-diffuse.jpg"),
                 Some(&bind_group_layouts.texture),
-                wgpu::BlendState::REPLACE,
-                wgpu::Face::Front,
-                wgpu::PrimitiveTopology::TriangleStrip,
+                None,
+                None,
+                wgpu::PrimitiveTopology::TriangleList,
                 wgpu::FrontFace::Ccw,
                 wgpu::PolygonMode::Fill,
                 &VERTICES,
@@ -257,6 +314,7 @@ impl<'a> Rupy<'a> {
             .await?;
 
         Ok(Rupy {
+            managers,
             resources,
             world,
             time,
@@ -286,7 +344,7 @@ impl<'a> Rupy<'a> {
                 height: self.surface_config.height,
             },
         );
-        self.world.managers_mut().texture_manager.depth_texture = Texture::create(
+        self.managers.texture_manager.depth_texture = Texture::create(
             &self.resources.gpu.device,
             wgpu::Extent3d {
                 width: self.surface_config.width,
@@ -343,7 +401,7 @@ impl<'a> Rupy<'a> {
                             },
                         })],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                            view: &self.world.managers().texture_manager.depth_texture.view,
+                            view: &self.managers.texture_manager.depth_texture.view,
                             depth_ops: Some(wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(1.0),
                                 store: wgpu::StoreOp::Store,
@@ -354,12 +412,23 @@ impl<'a> Rupy<'a> {
                         occlusion_query_set: None,
                     });
                     self.wgpu_renderer.render(
+                        &self.resources.gpu.queue,
+                        &self.resources.gpu.device,
+                        &mut self.managers,
                         &mut rpass,
                         &self.bind_group_layouts,
                         &mut self.world,
                         &self.camera,
                     );
-                    self.glyphon_renderer.render(&mut rpass);
+                    self.glyphon_renderer.render(
+                        &self.resources.gpu.queue,
+                        &self.resources.gpu.device,
+                        &mut self.managers,
+                        &mut rpass,
+                        &self.bind_group_layouts,
+                        &mut self.world,
+                        &self.camera,
+                    );
                 }
 
                 self.resources.gpu.queue.submit(Some(encoder.finish()));
@@ -375,12 +444,9 @@ impl<'a> Rupy<'a> {
         self.time.update();
         const TRANSFORM_UPDATE_INTERVAL_MS: u128 = 16; // ~60Hz
         self.camera.update(&mut self.controller);
-        let camera_uniform_buffer = self
-            .world
-            .managers_mut()
-            .buffer_manager
-            .w_buffer
-            .get_or_create(self.camera.uniform_cache_key.clone(), || {
+        let camera_uniform_buffer = self.managers.buffer_manager.w_buffer.get_or_create(
+            self.camera.uniform_cache_key.clone(),
+            || {
                 WgpuBuffer::from_data(
                     self.resources.gpu.queue(),
                     self.resources.gpu.device(),
@@ -389,7 +455,8 @@ impl<'a> Rupy<'a> {
                     Some(&format!("camera uniform buffer")),
                 )
                 .into()
-            });
+            },
+        );
         camera_uniform_buffer.write_data(self.resources.gpu.queue(), &[self.camera.uniform], None);
 
         if self.last_transform_time.elapsed().as_millis() > TRANSFORM_UPDATE_INTERVAL_MS {
@@ -399,18 +466,16 @@ impl<'a> Rupy<'a> {
         }
 
         if self.last_shape_time.elapsed().as_millis() > 1000 {
-            let text_buffer = self
-                .world
-                .managers_mut()
-                .buffer_manager
-                .g_buffer
-                .get_or_create(CacheKey::new(Self::TEXT_BUFFER), || {
+            let text_buffer = self.managers.buffer_manager.g_buffer.get_or_create(
+                CacheKey::new(Self::TEXT_BUFFER),
+                || {
                     let metrics = glyphon::Metrics {
                         font_size: 20.0,
                         line_height: 20.0,
                     };
                     GlyphonBuffer::new(&mut self.glyphon_renderer.font_system, Some(metrics)).into()
-                });
+                },
+            );
 
             let line_ending = LineEnding::LfCr;
             let attrs_list = glyphon::AttrsList::new(Attrs::new());
@@ -461,7 +526,7 @@ impl<'a> Rupy<'a> {
                 .buffer
                 .shape_until_scroll(&mut self.glyphon_renderer.font_system, false);
             self.last_shape_time = std::time::Instant::now();
-            self.glyphon_renderer.prepate(
+            self.glyphon_renderer.prepare(
                 &self.resources.gpu.device,
                 &self.resources.gpu.queue,
                 text_buffer,

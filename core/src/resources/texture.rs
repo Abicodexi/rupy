@@ -3,6 +3,7 @@ use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, GpuContext, H
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
 use std::sync::Arc;
+use wgpu::core::device;
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -181,8 +182,6 @@ impl Into<CacheKey> for Texture {
 }
 
 pub struct TextureManager {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
     textures: HashCache<Arc<Texture>>,
     texture_bgs: std::collections::HashMap<String, wgpu::BindGroup>,
     pub depth_texture: Texture,
@@ -190,8 +189,8 @@ pub struct TextureManager {
 }
 
 impl CacheStorage<Arc<Texture>> for TextureManager {
-    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&Arc<Texture>> {
-        self.textures.get(&key.into())
+    fn get(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
+        self.textures.get(key)
     }
 
     fn contains(&self, key: &CacheKey) -> bool {
@@ -215,68 +214,24 @@ impl CacheStorage<Arc<Texture>> for TextureManager {
 }
 
 impl TextureManager {
-    pub fn new(
-        resources: &std::sync::Arc<GpuContext>,
-        surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Self {
-        let depth_stencil_state = wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
-        let depth_texture = Texture::create(
-            &resources.device,
-            wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(resources.device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            })),
-            Some("Depth texture"),
-        );
+    pub fn new(depth_stencil_state: wgpu::DepthStencilState, depth_texture: Texture) -> Self {
         Self {
-            device: resources.device.clone(),
-            queue: resources.queue.clone(),
             textures: HashCache::new(),
             texture_bgs: std::collections::HashMap::new(),
             depth_texture,
             depth_stencil_state,
         }
     }
-    pub fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-    pub fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
+
     /// Load (or reload) a texture from disk
     pub async fn load<K: Into<CacheKey>>(
         &mut self,
+        queue: &wgpu::Queue,
         key: K,
         asset_loader: &AssetLoader,
         rel_path: &str,
     ) -> Result<Arc<Texture>, EngineError> {
-        let tex = asset_loader.load_texture(&self.queue, rel_path).await?;
+        let tex = asset_loader.load_texture(queue, rel_path).await?;
 
         let arc = Arc::new(tex);
         self.textures.insert(key.into(), arc.clone());
@@ -295,12 +250,13 @@ impl TextureManager {
 
     pub fn bind_group_for(
         &mut self,
+        device: &wgpu::Device,
         key: &str,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<&wgpu::BindGroup> {
         if !self.texture_bgs.contains_key(key) {
             let tex = self.get(key)?;
-            let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&format!("tex_bg:{}", key)),
                 layout,
                 entries: &[
@@ -339,6 +295,8 @@ impl TextureManager {
     }
     pub fn prepare_equirect_projection_textures(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         asset_loader: &AssetLoader,
         bind_group_layouts: &BindGroupLayouts,
         rel_path: &str,
@@ -351,7 +309,7 @@ impl TextureManager {
 
         let src_key = CacheKey::new("equirect_projection_src");
         let src = Texture::create(
-            &self.device,
+            &device,
             wgpu::Extent3d {
                 width: meta.width,
                 height: meta.height,
@@ -369,7 +327,7 @@ impl TextureManager {
 
         let dst_key = CacheKey::new("equirect_projection_dst");
         let dst = Texture::create(
-            &self.device,
+            &device,
             wgpu::Extent3d {
                 width: dst_size,
                 height: dst_size,
@@ -385,7 +343,7 @@ impl TextureManager {
             Some(&format!("dst:{}", rel_path)),
         );
 
-        let equirect_src_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let equirect_src_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layouts.equirect_src,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -400,7 +358,7 @@ impl TextureManager {
             label: Some("Equirect projection bind group"),
         });
 
-        let equirect_dst_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let equirect_dst_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layouts.equirect_dst,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -415,7 +373,7 @@ impl TextureManager {
             label: Some("Skybox bind group"),
         });
 
-        self.queue.write_texture(
+        queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &src.texture,
                 mip_level: 0,

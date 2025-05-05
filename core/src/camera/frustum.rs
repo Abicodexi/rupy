@@ -1,7 +1,3 @@
-use cgmath::{InnerSpace, Matrix, Matrix4, Point3, SquareMatrix, Vector3};
-
-use crate::renderer::model::AABB;
-
 #[derive(Copy, Clone, Debug)]
 pub struct Frustum {
     pub planes: [Plane; 6],
@@ -9,31 +5,32 @@ pub struct Frustum {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Plane {
-    pub normal: Vector3<f32>,
+    pub normal: cgmath::Vector3<f32>,
     pub d: f32,
 }
 
 impl Plane {
     pub fn from_components(a: f32, b: f32, c: f32, d: f32) -> Self {
-        let normal = Vector3::new(a, b, c);
-        let length = normal.magnitude();
+        let normal = cgmath::Vector3::new(a, b, c);
+        let length = cgmath::InnerSpace::magnitude(normal);
         Self {
             normal: normal / length,
             d: d / length,
         }
     }
 
-    pub fn distance(&self, point: Point3<f32>) -> f32 {
-        self.normal.dot(Vector3::new(point.x, point.y, point.z)) + self.d
+    pub fn distance(&self, point: cgmath::Point3<f32>) -> f32 {
+        cgmath::InnerSpace::dot(self.normal, cgmath::Vector3::new(point.x, point.y, point.z))
+            + self.d
     }
 }
 
 impl Frustum {
     pub fn new() -> Self {
-        Frustum::from_matrix(Matrix4::identity())
+        Frustum::from_matrix(<cgmath::Matrix4<f32> as cgmath::SquareMatrix>::identity())
     }
-    pub fn from_matrix(m: Matrix4<f32>) -> Self {
-        let m = m.transpose(); // cgmath uses column-major
+    pub fn from_matrix(m: cgmath::Matrix4<f32>) -> Self {
+        let m = cgmath::Matrix::transpose(&m);
 
         Self {
             planes: [
@@ -47,11 +44,11 @@ impl Frustum {
         }
     }
 
-    pub fn contains_point(&self, point: Point3<f32>) -> bool {
+    pub fn contains_point(&self, point: cgmath::Point3<f32>) -> bool {
         self.planes.iter().all(|plane| plane.distance(point) >= 0.0)
     }
 
-    pub fn contains_sphere(&self, center: Point3<f32>, radius: f32) -> bool {
+    pub fn contains_sphere(&self, center: cgmath::Point3<f32>, radius: f32) -> bool {
         self.planes
             .iter()
             .all(|plane| plane.distance(center) >= -radius)

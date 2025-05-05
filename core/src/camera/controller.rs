@@ -1,10 +1,4 @@
-use cgmath::{Angle, Deg, InnerSpace, Vector3, Zero};
-use winit::{
-    event::{ElementState, MouseScrollDelta, WindowEvent},
-    keyboard::KeyCode,
-};
-
-use super::Camera;
+use cgmath::InnerSpace as _;
 
 #[derive(Debug)]
 pub struct CameraController {
@@ -34,31 +28,31 @@ impl CameraController {
         }
     }
 
-    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+    pub fn process_events(&mut self, event: &winit::event::WindowEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput { event, .. } => {
-                let down = event.state == ElementState::Pressed;
+            winit::event::WindowEvent::KeyboardInput { event, .. } => {
+                let down = event.state == winit::event::ElementState::Pressed;
                 match event.physical_key {
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyW) => {
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyW) => {
                         self.forward = down;
                         true
                     }
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyS) => {
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {
                         self.back = down;
                         true
                     }
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyA) => {
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) => {
                         self.left = down;
                         true
                     }
-                    winit::keyboard::PhysicalKey::Code(KeyCode::KeyD) => {
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyD) => {
                         self.right = down;
                         true
                     }
                     _ => false,
                 }
             }
-            WindowEvent::CursorMoved { position, .. } => {
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
                 let (x, y) = (position.x as f32, position.y as f32);
                 if let Some((lx, ly)) = self.last_mouse {
                     let dx = (x - lx) * self.sensitivity;
@@ -69,26 +63,26 @@ impl CameraController {
                 self.last_mouse = Some((x, y));
                 true
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                if let MouseScrollDelta::LineDelta(_, _scroll) = delta {}
+            winit::event::WindowEvent::MouseWheel { delta, .. } => {
+                if let winit::event::MouseScrollDelta::LineDelta(_, _scroll) = delta {}
                 true
             }
             _ => false,
         }
     }
 
-    pub fn update(&mut self, camera: &mut Camera, dt: f32) {
+    pub fn update(&mut self, camera: &mut super::Camera, dt: f32) {
         let (yaw_r, pitch_r): (cgmath::Deg<f32>, cgmath::Deg<f32>) =
-            (Deg(self.yaw).into(), Deg(self.pitch).into());
-        let front = Vector3 {
-            x: yaw_r.cos() * pitch_r.cos(),
-            y: pitch_r.sin(),
-            z: yaw_r.sin() * pitch_r.cos(),
+            (cgmath::Deg(self.yaw).into(), cgmath::Deg(self.pitch).into());
+        let front = cgmath::Vector3 {
+            x: cgmath::Angle::cos(yaw_r) * cgmath::Angle::cos(pitch_r),
+            y: cgmath::Angle::sin(pitch_r),
+            z: cgmath::Angle::sin(yaw_r) * cgmath::Angle::cos(pitch_r),
         }
         .normalize();
 
         let right = front.cross(camera.up).normalize();
-        let mut displacement = Vector3::zero();
+        let mut displacement = <cgmath::Vector3<f32> as cgmath::Zero>::zero();
         if self.forward {
             displacement += front;
         }

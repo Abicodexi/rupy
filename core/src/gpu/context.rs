@@ -1,29 +1,20 @@
-use std::sync::Arc;
-
-use wgpu::{
-    Adapter, Backends, Device, Features, Instance, InstanceDescriptor, InstanceFlags, Limits,
-    MemoryHints, Queue, RequestAdapterOptions,
-};
-
-use crate::EngineError;
-
 pub struct GpuContext {
-    pub instance: Arc<Instance>,
-    pub adapter: Arc<Adapter>,
-    pub device: Arc<Device>,
-    pub queue: Arc<Queue>,
+    pub instance: std::sync::Arc<wgpu::Instance>,
+    pub adapter: std::sync::Arc<wgpu::Adapter>,
+    pub device: std::sync::Arc<wgpu::Device>,
+    pub queue: std::sync::Arc<wgpu::Queue>,
 }
 
 impl GpuContext {
-    pub async fn new() -> Result<Self, EngineError> {
-        let instance = Instance::new(&InstanceDescriptor {
-            backends: Backends::default(),
-            flags: InstanceFlags::empty(),
+    pub async fn new() -> Result<Self, crate::EngineError> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::default(),
+            flags: wgpu::InstanceFlags::empty(),
             backend_options: Default::default(),
         });
 
         let adapter = instance
-            .request_adapter(&RequestAdapterOptions::default())
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
             .expect("Request adapter");
 
@@ -31,9 +22,10 @@ impl GpuContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    required_features: Features::POLYGON_MODE_LINE | Features::POLYGON_MODE_POINT,
-                    required_limits: Limits::downlevel_defaults(),
-                    memory_hints: MemoryHints::Performance,
+                    required_features: wgpu::Features::POLYGON_MODE_LINE
+                        | wgpu::Features::POLYGON_MODE_POINT,
+                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
             )
@@ -47,19 +39,19 @@ impl GpuContext {
         })
     }
 
-    pub fn instance(&self) -> &Instance {
+    pub fn instance(&self) -> &wgpu::Instance {
         &self.instance
     }
 
-    pub fn adapter(&self) -> &Adapter {
+    pub fn adapter(&self) -> &wgpu::Adapter {
         &self.adapter
     }
 
-    pub fn device(&self) -> &Device {
+    pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
 
-    pub fn queue(&self) -> &Queue {
+    pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
 }

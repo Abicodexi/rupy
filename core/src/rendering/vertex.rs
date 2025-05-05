@@ -1,7 +1,5 @@
-use wgpu_macros::VertexLayout;
-
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, VertexLayout)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, wgpu_macros::VertexLayout)]
 pub struct VertexColor {
     pub(crate) position: [f32; 3], // @location(0)
     pub(crate) color: [f32; 3],    // @location(1)
@@ -17,7 +15,7 @@ impl Default for VertexColor {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, VertexLayout)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, wgpu_macros::VertexLayout)]
 pub struct VertexTexture {
     pub position: [f32; 3],   // @location(0)
     pub color: [f32; 3],      // @location(1)
@@ -34,7 +32,7 @@ impl Default for VertexTexture {
     }
 }
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, VertexLayout)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, wgpu_macros::VertexLayout)]
 pub struct VertexNormal {
     pub position: [f32; 3],   // @location(0)
     pub tex_coords: [f32; 2], // @location(1)
@@ -52,6 +50,20 @@ impl Default for VertexNormal {
             bitangent: Default::default(),
         }
     }
+}
+
+pub trait Vertex: bytemuck::Pod + bytemuck::Zeroable {
+    const LAYOUT: wgpu::VertexBufferLayout<'static>;
+}
+
+impl Vertex for VertexColor {
+    const LAYOUT: wgpu::VertexBufferLayout<'static> = VertexColor::LAYOUT;
+}
+impl Vertex for VertexTexture {
+    const LAYOUT: wgpu::VertexBufferLayout<'static> = VertexTexture::LAYOUT;
+}
+impl Vertex for VertexNormal {
+    const LAYOUT: wgpu::VertexBufferLayout<'static> = VertexNormal::LAYOUT;
 }
 
 #[repr(C)]

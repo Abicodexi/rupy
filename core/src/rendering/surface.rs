@@ -1,5 +1,3 @@
-use winit::dpi::PhysicalSize;
-
 /// Trait to extend wgpu::Surface with setup and usage methods.
 pub trait SurfaceExt {
     /// Resizes the surface by updating the configuration and reconfiguring.
@@ -7,7 +5,7 @@ pub trait SurfaceExt {
         &self,
         device: &wgpu::Device,
         config: &mut wgpu::SurfaceConfiguration,
-        new_size: PhysicalSize<u32>,
+        new_size: winit::dpi::PhysicalSize<u32>,
     );
 
     /// Configures the surface using the provided device and configuration.
@@ -25,7 +23,7 @@ impl<'a> SurfaceExt for wgpu::Surface<'a> {
         &self,
         device: &wgpu::Device,
         config: &mut wgpu::SurfaceConfiguration,
-        new_size: PhysicalSize<u32>,
+        new_size: winit::dpi::PhysicalSize<u32>,
     ) {
         config.width = new_size.width.max(1);
         config.height = new_size.height.max(1);
@@ -48,11 +46,11 @@ impl<'a> SurfaceExt for wgpu::Surface<'a> {
 /// Encapsulates width/height helper conversions for surfaces.
 pub struct SurfaceSize(pub u32, pub u32);
 impl SurfaceSize {
-    pub fn as_physical_size_f32(&self) -> PhysicalSize<f32> {
-        PhysicalSize::new(self.0 as f32, self.1 as f32)
+    pub fn as_physical_size_f32(&self) -> winit::dpi::PhysicalSize<f32> {
+        winit::dpi::PhysicalSize::new(self.0 as f32, self.1 as f32)
     }
-    pub fn as_physical_size_u32(&self) -> PhysicalSize<u32> {
-        PhysicalSize::new(self.0, self.1)
+    pub fn as_physical_size_u32(&self) -> winit::dpi::PhysicalSize<u32> {
+        winit::dpi::PhysicalSize::new(self.0, self.1)
     }
     pub fn width_u32(&self) -> u32 {
         self.0

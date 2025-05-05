@@ -1,11 +1,6 @@
-use std::sync::Arc;
-
-use crate::{CacheKey, CacheStorage, HashCache};
-use wgpu::{Buffer, BufferUsages, Device};
-
 /// Wrapper around WGPU buffers
 pub struct WgpuBuffer {
-    pub buffer: Buffer,
+    pub buffer: wgpu::Buffer,
     pub size: usize,
 }
 
@@ -13,9 +8,9 @@ impl WgpuBuffer {
     /// Create a new GPU buffer with given data and usage flags
     pub fn from_data<T: bytemuck::Pod>(
         queue: &wgpu::Queue,
-        device: &Device,
+        device: &wgpu::Device,
         data: &[T],
-        usage: BufferUsages,
+        usage: wgpu::BufferUsages,
         label: Option<&str>,
     ) -> Self {
         use wgpu::util::DeviceExt;
@@ -27,14 +22,14 @@ impl WgpuBuffer {
             usage,
         });
         queue.write_buffer(&buffer, 0, contents);
-        WgpuBuffer {
+        crate::WgpuBuffer {
             buffer,
             size: size as usize,
         }
     }
     /// Create a new empty GPU buffer with given usage flags
 
-    pub fn new_empty(device: &Device, usage: BufferUsages) -> Self {
+    pub fn new_empty(device: &wgpu::Device, usage: wgpu::BufferUsages) -> Self {
         use wgpu::util::DeviceExt;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -57,7 +52,7 @@ impl WgpuBuffer {
     }
 }
 
-pub type WgpuBufferCacheType = HashCache<WgpuBuffer>;
+pub type WgpuBufferCacheType = crate::HashCache<WgpuBuffer>;
 pub struct WgpuBufferManager {
     inner: WgpuBufferCacheType,
 }
@@ -79,26 +74,26 @@ impl WgpuBufferManager {
     // }
 }
 
-impl CacheStorage<WgpuBuffer> for WgpuBufferManager {
-    fn get<K: Into<CacheKey>>(&self, key: K) -> Option<&WgpuBuffer> {
-        self.inner.get(&key.into())
+impl crate::CacheStorage<WgpuBuffer> for WgpuBufferManager {
+    fn get(&self, key: &crate::CacheKey) -> Option<&WgpuBuffer> {
+        self.inner.get(key)
     }
-    fn contains(&self, key: &CacheKey) -> bool {
+    fn contains(&self, key: &crate::CacheKey) -> bool {
         self.inner.contains_key(key)
     }
-    fn get_mut(&mut self, key: &CacheKey) -> Option<&mut WgpuBuffer> {
+    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut WgpuBuffer> {
         self.inner.get_mut(key)
     }
-    fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> &mut WgpuBuffer
+    fn get_or_create<F>(&mut self, key: crate::CacheKey, create_fn: F) -> &mut WgpuBuffer
     where
         F: FnOnce() -> WgpuBuffer,
     {
         self.inner.entry(key).or_insert_with(create_fn)
     }
-    fn insert(&mut self, key: CacheKey, resource: WgpuBuffer) {
+    fn insert(&mut self, key: crate::CacheKey, resource: WgpuBuffer) {
         self.inner.insert(key, resource);
     }
-    fn remove(&mut self, key: &CacheKey) {
+    fn remove(&mut self, key: &crate::CacheKey) {
         self.inner.remove(key);
     }
 }
