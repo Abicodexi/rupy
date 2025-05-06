@@ -5,6 +5,9 @@ pub enum EngineError {
     #[error("GPU error: {0}")]
     GpuError(String),
 
+    #[error("AssetLoad error: {0}")]
+    AssetLoadError(String),
+
     #[error("RwLock error: {0}")]
     RwLockError(String),
 

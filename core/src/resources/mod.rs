@@ -13,11 +13,6 @@ pub use cache_key::*;
 pub mod texture;
 pub use texture::*;
 
-pub struct Resources {
-    pub gpu: std::sync::Arc<crate::GpuContext>,
-    pub asset_loader: std::sync::Arc<crate::AssetLoader>,
-}
-
 pub struct Managers {
     pub shader_manager: crate::ShaderManager,
     pub pipeline_manager: crate::PipelineManager,

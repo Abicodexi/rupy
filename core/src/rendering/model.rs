@@ -30,6 +30,7 @@ pub struct Model {
     pub bounding_radius: AABB,
     pub name: String,
 }
+
 impl Model {
     pub fn compute_aabb(vertices: &[crate::VertexTexture]) -> AABB {
         let mut min = cgmath::Vector3::new(f32::MAX, f32::MAX, f32::MAX);
@@ -52,7 +53,7 @@ impl Into<crate::CacheKey> for Model {
 }
 
 pub struct ModelManager {
-    models: crate::HashCache<std::sync::Arc<Model>>,
+    pub models: crate::HashCache<std::sync::Arc<Model>>,
 }
 impl ModelManager {
     pub fn new() -> Self {
@@ -75,7 +76,7 @@ impl ModelManager {
                     crate::CacheStorage::get(material_manager, &mesh_instance.material_key)
                 {
                     if let Some(material_pipeline) =
-                        pipeline_manager.get_render_pipeline(material.pipeline_key.clone())
+                        pipeline_manager.get_render_pipeline(material.shader_key.clone())
                     {
                         if let Some(mesh) = <crate::MeshManager as crate::CacheStorage<
                             super::Mesh,

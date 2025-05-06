@@ -4,7 +4,9 @@ use winit::event_loop::EventLoopProxy;
 
 #[derive(Debug, Clone)]
 pub enum ApplicationEvent {
-    ShaderReload(String),
+    ShaderLoad(String),
+    WorldRequestRedraw,
+    Shutdown,
 }
 
 pub trait EventProxyTrait<T: 'static + std::fmt::Debug> {
@@ -27,22 +29,26 @@ impl<T: 'static + std::fmt::Debug> EventProxyTrait<T> for EventProxy<T> {
     }
 }
 pub struct EventBusProxy<T: 'static + std::fmt::Debug + Send> {
-    receiver: Receiver<T>,
+    receiver: Arc<Receiver<T>>,
     event_loop_proxy: Arc<dyn EventProxyTrait<T> + Send + Sync>,
 }
 
 impl<T: 'static + std::fmt::Debug + Send> EventBusProxy<T> {
     pub fn new(
-        receiver: Receiver<T>,
+        receiver: &Arc<Receiver<T>>,
         event_loop_proxy: Arc<dyn EventProxyTrait<T> + Send + Sync>,
     ) -> Self {
         Self {
-            receiver,
+            receiver: receiver.clone(),
             event_loop_proxy,
         }
     }
-
-    pub async fn start(&self) {
+    pub fn run_tokio(self) {
+        tokio::spawn(async move {
+            self.start().await;
+        });
+    }
+    async fn start(&self) {
         while let Ok(event) = self.receiver.recv() {
             if let Err(e) = self.event_loop_proxy.send_event(event) {
                 eprintln!("Failed to send event: {:?}", e);

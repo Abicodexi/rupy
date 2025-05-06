@@ -1,10 +1,11 @@
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Mesh {
     pub vertex_buffer_key: crate::CacheKey,
     pub index_buffer_key: crate::CacheKey,
     pub vertex_count: u32,
     pub index_count: u32,
 }
+
 impl Mesh {
     pub fn draw(
         &self,
@@ -28,7 +29,7 @@ impl Mesh {
         }
     }
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MeshInstance {
     pub vertex_buffer_key: crate::CacheKey,
     pub index_buffer_key: crate::CacheKey,

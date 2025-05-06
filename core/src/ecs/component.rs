@@ -1,16 +1,18 @@
-#[derive(Copy, Clone)]
+use cgmath::SquareMatrix;
+
+#[derive(Debug, Copy, Clone)]
 pub struct Position {
     pub x: f32,
     pub y: f32,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct Velocity {
     pub dx: f32,
     pub dy: f32,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Rotation {
     pub quat: cgmath::Quaternion<f32>,
 }
@@ -34,7 +36,7 @@ impl Rotation {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Scale {
     pub value: cgmath::Vector3<f32>,
 }
@@ -53,9 +55,16 @@ impl Scale {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Transform {
     pub matrix: cgmath::Matrix4<f32>,
+}
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            matrix: cgmath::Matrix4::<f32>::identity(),
+        }
+    }
 }
 
 impl Transform {
@@ -79,7 +88,7 @@ impl Transform {
 //   ↳ Model (shared resource)
 //      ↳ Mesh(es) (vertex/index buffers)
 //      ↳ Material(s) (shader, textures, uniforms)
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Renderable {
     pub model_key: crate::CacheKey,
     pub visible: bool,

@@ -1,3 +1,22 @@
+static BGL: once_cell::sync::OnceCell<BindGroupLayouts> = once_cell::sync::OnceCell::new();
+
+fn init_bind_group_layouts(device: &wgpu::Device) {
+    BGL.get_or_init(|| BindGroupLayouts::new(device));
+}
+
+fn texture_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").texture
+}
+
+fn camera_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").camera
+}
+fn equirect_src_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").equirect_src
+}
+fn equirect_dst_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").equirect_dst
+}
 pub struct BindGroupLayoutBuilder<'a> {
     device: &'a wgpu::Device,
     label: Option<&'a str>,
@@ -47,9 +66,24 @@ pub struct BindGroupLayouts {
 }
 
 impl BindGroupLayouts {
+    pub fn init(device: &wgpu::Device) {
+        init_bind_group_layouts(device);
+    }
+    pub fn camera() -> &'static wgpu::BindGroupLayout {
+        camera_bind_group_layout()
+    }
+    pub fn texture() -> &'static wgpu::BindGroupLayout {
+        texture_bind_group_layout()
+    }
+    pub fn equirect_src() -> &'static wgpu::BindGroupLayout {
+        equirect_src_bind_group_layout()
+    }
+    pub fn equirect_dst() -> &'static wgpu::BindGroupLayout {
+        equirect_dst_bind_group_layout()
+    }
     pub fn new(device: &wgpu::Device) -> Self {
         let texture = BindGroupLayoutBuilder::new(&device)
-            .label("texture_bgl")
+            .label("texture bind group layout")
             .binding(
                 0,
                 wgpu::ShaderStages::FRAGMENT,
@@ -67,7 +101,7 @@ impl BindGroupLayouts {
             .build();
 
         let camera = BindGroupLayoutBuilder::new(&device)
-            .label("camera_bgl")
+            .label("camera bind group layout")
             .binding(
                 0,
                 wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,

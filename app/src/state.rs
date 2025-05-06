@@ -1,35 +1,38 @@
 use crate::app::Rupy;
-use core::{EngineError, Resources};
-use std::sync::Arc;
+use core::EngineError;
 use winit::event_loop::ActiveEventLoop;
 
 #[allow(dead_code)]
-pub enum AppInnerState<'a> {
-    Stopped(Arc<Resources>),
-    Running(Rupy<'a>),
+
+pub enum AppInnerState {
+    Stopped,
+    Running(Rupy),
 }
 
-pub struct ApplicationState<'a> {
-    pub inner: AppInnerState<'a>,
+pub struct ApplicationState {
+    pub inner: AppInnerState,
 }
 
-impl<'a> ApplicationState<'a> {
+impl ApplicationState {
     /// Creates a new application state in the "stopped" (uninitialized) phase.
-    pub fn new(resources: Resources) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: AppInnerState::Stopped(resources.into()),
+            inner: AppInnerState::Stopped,
         }
     }
 
     /// One-time async initialization, called from `resumed()`.
-    pub async fn init(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EngineError> {
-        match &self.inner {
-            AppInnerState::Stopped(inner) => {
-                self.inner = AppInnerState::Running(Rupy::new(event_loop, inner.clone()).await?);
+    pub async fn init(
+        state: &mut ApplicationState,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), EngineError> {
+        match state.inner {
+            AppInnerState::Stopped => {
+                let run = Rupy::new(event_loop)?;
+                state.inner = AppInnerState::Running(run);
+                Ok(())
             }
-            _ => {}
+            _ => Ok(()),
         }
-
-        Ok(())
     }
 }

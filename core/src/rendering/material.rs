@@ -5,14 +5,29 @@ pub struct Material {
     pub front_face: wgpu::FrontFace,
     pub topology: wgpu::PrimitiveTopology,
     pub shader_key: crate::CacheKey,
-    pub pipeline_key: crate::CacheKey,
     pub texture_key: Option<crate::CacheKey>,
     pub blend_state: Option<wgpu::BlendState>,
     pub cull_mode: Option<wgpu::Face>,
 }
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            bind_groups: Default::default(),
+            front_face: Default::default(),
+            topology: Default::default(),
+            shader_key: crate::CacheKey {
+                id: "v_texture.wgsl".to_string(),
+            },
 
+            texture_key: Default::default(),
+            blend_state: Default::default(),
+            cull_mode: Default::default(),
+        }
+    }
+}
 pub struct MaterialManager {
-    materials: crate::HashCache<std::sync::Arc<Material>>,
+    pub materials: crate::HashCache<std::sync::Arc<Material>>,
 }
 
 impl MaterialManager {
@@ -23,7 +38,8 @@ impl MaterialManager {
     }
     pub async fn create_material(
         &mut self,
-        resources: &crate::Resources,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         shader_manager: &mut crate::ShaderManager,
         texture_manager: &mut crate::TextureManager,
         pipeline_manager: &mut crate::PipelineManager,
@@ -49,7 +65,7 @@ impl MaterialManager {
         } else {
             let shader_key = crate::CacheKey::from(shader_rel_path);
             let default_shader = shader_manager.get_or_create(shader_key.clone(), || {
-                let shader_module = resources.asset_loader.load_shader(shader_rel_path)?;
+                let shader_module = crate::AssetLoader::load_shader(device, shader_rel_path)?;
                 Ok(std::sync::Arc::new(shader_module))
             });
 
@@ -57,18 +73,11 @@ impl MaterialManager {
                 (texture_rel_path, texture_bind_group_layout)
             {
                 texture_manager
-                    .load(
-                        &resources.gpu.queue,
-                        material_name,
-                        &resources.asset_loader,
-                        texture_path,
-                    )
+                    .load(queue, device, material_name, texture_path)
                     .await?;
-                if let Some(texture_bind_group) = texture_manager.bind_group_for(
-                    &resources.gpu.device,
-                    material_name,
-                    texture_layout,
-                ) {
+                if let Some(texture_bind_group) =
+                    texture_manager.bind_group_for(device, material_name, texture_layout)
+                {
                     bind_groups.push(texture_bind_group.clone());
                     bind_group_layouts.push(texture_layout)
                 };
@@ -77,18 +86,13 @@ impl MaterialManager {
                 None
             };
             let default_pipeline_layout =
-                resources
-                    .gpu
-                    .device
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("default pipeline layout"),
-                        bind_group_layouts: &bind_group_layouts,
-                        push_constant_ranges: &[],
-                    });
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("default pipeline layout"),
+                    bind_group_layouts: &bind_group_layouts,
+                    push_constant_ranges: &[],
+                });
             let pipeline_key = crate::CacheKey::from(material_name);
-            let default_pipeline: std::sync::Arc<wgpu::RenderPipeline> = resources
-                .gpu
-                .device
+            let default_pipeline: std::sync::Arc<wgpu::RenderPipeline> = device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("default pipeline"),
                     layout: Some(&default_pipeline_layout),
@@ -132,7 +136,6 @@ impl MaterialManager {
                 name: material_name.to_string(),
                 bind_groups,
                 shader_key,
-                pipeline_key,
                 texture_key,
                 blend_state,
                 cull_mode,

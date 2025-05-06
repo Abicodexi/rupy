@@ -1,9 +1,8 @@
 use crate::assets::loader::AssetLoader;
-use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, GpuContext, HashCache};
+use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
 use std::sync::Arc;
-use wgpu::core::device;
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -49,7 +48,69 @@ impl Texture {
             label: desc.label.map(|l| l.to_string()).unwrap_or_default(),
         }
     }
+    pub fn from_image(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        img: &image::RgbaImage,
+        label: impl Into<String>,
+    ) -> Texture {
+        let label = label.into();
+        let (width, height) = img.dimensions();
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
 
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&label),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let bytes_per_pixel = 4;
+        let bytes_per_row = std::num::NonZeroU32::new(bytes_per_pixel * width).unwrap();
+        let rows_per_image = std::num::NonZeroU32::new(height).unwrap();
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &img, // &[u8]
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row.into()),
+                rows_per_image: Some(rows_per_image.into()),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        Texture {
+            texture,
+            view,
+            sampler,
+            label,
+        }
+    }
     pub async fn from_bytes<P: AsRef<std::path::Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -227,11 +288,11 @@ impl TextureManager {
     pub async fn load<K: Into<CacheKey>>(
         &mut self,
         queue: &wgpu::Queue,
+        device: &wgpu::Device,
         key: K,
-        asset_loader: &AssetLoader,
         rel_path: &str,
     ) -> Result<Arc<Texture>, EngineError> {
-        let tex = asset_loader.load_texture(queue, rel_path).await?;
+        let tex = crate::AssetLoader::load_texture(queue, device, rel_path).await?;
 
         let arc = Arc::new(tex);
         self.textures.insert(key.into(), arc.clone());
@@ -247,13 +308,15 @@ impl TextureManager {
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
     }
-
+    pub fn bind_group(&self, key: &str) -> Option<wgpu::BindGroup> {
+        self.texture_bgs.get(key).cloned()
+    }
     pub fn bind_group_for(
-        &mut self,
+        &self,
         device: &wgpu::Device,
         key: &str,
         layout: &wgpu::BindGroupLayout,
-    ) -> Option<&wgpu::BindGroup> {
+    ) -> Option<wgpu::BindGroup> {
         if !self.texture_bgs.contains_key(key) {
             let tex = self.get(key)?;
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -270,9 +333,9 @@ impl TextureManager {
                     },
                 ],
             });
-            self.texture_bgs.insert(key.to_string(), bg);
+            return Some(bg.clone());
         }
-        self.texture_bgs.get(key)
+        self.texture_bgs.get(key).cloned()
     }
     pub fn decode_hdr(data: &[u8]) -> Result<(Vec<[f32; 4]>, HdrMetadata), EngineError> {
         let decoder = HdrDecoder::new(Cursor::new(data))?;
@@ -291,19 +354,18 @@ impl TextureManager {
     }
 
     pub fn insert_texture_bind_group(&mut self, key: &CacheKey, bind_group: wgpu::BindGroup) {
-        self.texture_bgs.insert(key.id.clone(), bind_group);
+        self.texture_bgs.insert(key.id.clone(), bind_group.into());
     }
     pub fn prepare_equirect_projection_textures(
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        asset_loader: &AssetLoader,
         bind_group_layouts: &BindGroupLayouts,
         rel_path: &str,
         dst_size: u32,
         format: wgpu::TextureFormat,
     ) -> Result<(CacheKey, wgpu::BindGroup, CacheKey, wgpu::BindGroup), EngineError> {
-        let path = asset_loader.resolve(&format!("hdr\\{}", rel_path));
+        let path = crate::AssetLoader::resolve(&format!("hdr\\{}", rel_path));
         let bytes = AssetLoader::read_bytes(&path)?;
         let (pixels, meta) = Self::decode_hdr(&bytes)?;
 

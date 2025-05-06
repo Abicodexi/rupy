@@ -5,8 +5,7 @@ pub trait Renderer {
         device: &wgpu::Device,
         managers: &mut crate::Managers,
         rpass: &mut wgpu::RenderPass,
-        bind_group_layouts: &crate::BindGroupLayouts,
-        world: &mut crate::World,
+        world: &crate::World,
         camera: &crate::camera::Camera,
     );
 }

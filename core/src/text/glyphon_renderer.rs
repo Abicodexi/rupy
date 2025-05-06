@@ -85,8 +85,7 @@ impl crate::Renderer for GlyphonRenderer {
         _device: &wgpu::Device,
         _managers: &mut crate::Managers,
         rpass: &mut wgpu::RenderPass,
-        _bind_group_layouts: &crate::BindGroupLayouts,
-        _world: &mut crate::World,
+        _world: &crate::World,
         _camera: &crate::camera::Camera,
     ) {
         if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
