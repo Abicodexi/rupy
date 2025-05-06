@@ -15,22 +15,12 @@ pub use texture::*;
 
 pub struct Managers {
     pub shader_manager: crate::ShaderManager,
-    pub pipeline_manager: crate::PipelineManager,
+    pub compute_pipeline_manager: crate::ComputePipelineManager,
+    pub render_pipeline_manager: crate::RenderPipelineManager,
     pub buffer_manager: BufferManager,
     pub texture_manager: TextureManager,
     pub mesh_manager: crate::MeshManager,
     pub material_manager: crate::MaterialManager,
     pub model_manager: crate::ModelManager,
-}
-
-impl Managers {
-    pub fn render_models(&self, rpass: &mut wgpu::RenderPass) {
-        self.model_manager.render(
-            rpass,
-            &self.pipeline_manager,
-            &self.buffer_manager,
-            &self.material_manager,
-            &self.mesh_manager,
-        );
-    }
+    pub bind_group_manager: crate::BindGroupManager,
 }

@@ -1,3 +1,5 @@
+use crate::CacheStorage;
+
 #[warn(dead_code)]
 pub struct WgpuRenderer {}
 
@@ -18,7 +20,6 @@ impl WgpuRenderer {
             });
             projection.compute_projection(
                 queue,
-                device,
                 encoder,
                 managers,
                 Some("equirect projection compute pass"),
@@ -39,7 +40,7 @@ impl crate::Renderer for WgpuRenderer {
     ) {
         let frustum = &camera.frustum;
         if let Some(projection) = world.projection() {
-            projection.render(rpass, managers, &camera.bind_group);
+            projection.render(rpass, managers, camera);
         }
         for (entity, rend_opt) in world.get_renderables().iter().enumerate() {
             let rend = match rend_opt {
@@ -58,13 +59,13 @@ impl crate::Renderer for WgpuRenderer {
                     )
                     .unwrap();
                     let pipeline = managers
-                        .pipeline_manager
-                        .get_render_pipeline(material.shader_key.clone())
+                        .render_pipeline_manager
+                        .get(&material.shader_key)
                         .unwrap();
 
                     rpass.set_pipeline(&pipeline);
                     for (i, bg) in material.bind_groups.iter().enumerate() {
-                        rpass.set_bind_group(i as u32, bg, &[]);
+                        rpass.set_bind_group(i as u32, bg.as_ref(), &[]);
                     }
 
                     if world

@@ -1,7 +1,9 @@
+use crate::CacheStorage;
+
 #[derive(Clone)]
 pub struct Material {
     pub name: String,
-    pub bind_groups: Vec<wgpu::BindGroup>,
+    pub bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
     pub front_face: wgpu::FrontFace,
     pub topology: wgpu::PrimitiveTopology,
     pub shader_key: crate::CacheKey,
@@ -26,26 +28,13 @@ impl Default for Material {
         }
     }
 }
-pub struct MaterialManager {
-    pub materials: crate::HashCache<std::sync::Arc<Material>>,
-}
-
-impl MaterialManager {
-    pub fn new() -> Self {
-        Self {
-            materials: crate::HashCache::new(),
-        }
-    }
-    pub async fn create_material(
-        &mut self,
-        queue: &wgpu::Queue,
+impl Material {
+    pub async fn create(
         device: &wgpu::Device,
-        shader_manager: &mut crate::ShaderManager,
-        texture_manager: &mut crate::TextureManager,
-        pipeline_manager: &mut crate::PipelineManager,
+        managers: &mut crate::Managers,
         config: &wgpu::SurfaceConfiguration,
         mut bind_group_layouts: Vec<&wgpu::BindGroupLayout>,
-        mut bind_groups: Vec<wgpu::BindGroup>,
+        mut bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         material_name: &str,
         shader_rel_path: &str,
@@ -59,25 +48,27 @@ impl MaterialManager {
     ) -> Result<std::sync::Arc<Material>, crate::EngineError> {
         let material_key: crate::CacheKey = material_name.into();
 
-        if let Some(cached_material) = self.materials.get(&material_key) {
+        if let Some(cached_material) = managers.material_manager.get(&material_key) {
             crate::log_info!("Returning cached material: {}", material_key.id);
             return Ok(cached_material.clone());
         } else {
             let shader_key = crate::CacheKey::from(shader_rel_path);
-            let default_shader = shader_manager.get_or_create(shader_key.clone(), || {
-                let shader_module = crate::AssetLoader::load_shader(device, shader_rel_path)?;
-                Ok(std::sync::Arc::new(shader_module))
-            });
+            let default_shader = crate::Shader::load(managers, shader_rel_path)?;
 
             let texture_key = if let (Some(texture_path), Some(texture_layout)) =
                 (texture_rel_path, texture_bind_group_layout)
             {
-                texture_manager
-                    .load(queue, device, material_name, texture_path)
-                    .await?;
-                if let Some(texture_bind_group) =
-                    texture_manager.bind_group_for(device, material_name, texture_layout)
+                if !managers
+                    .texture_manager
+                    .contains(&crate::CacheKey::from(texture_path))
                 {
+                    crate::AssetLoader::load_texture(managers, texture_path).await?;
+                }
+                if let Some(texture_bind_group) = managers.bind_group_manager.bind_group_for(
+                    &managers.texture_manager,
+                    material_name,
+                    texture_layout,
+                ) {
                     bind_groups.push(texture_bind_group.clone());
                     bind_group_layouts.push(texture_layout)
                 };
@@ -121,16 +112,18 @@ impl MaterialManager {
                         polygon_mode,
                         conservative: false,
                     },
-                    depth_stencil: Some(texture_manager.depth_stencil_state.clone()),
+                    depth_stencil: Some(managers.texture_manager.depth_stencil_state.clone()),
                     multisample: Default::default(),
                     multiview: None,
                     cache: None,
                 })
                 .into();
 
-            pipeline_manager
-                .render_pipelines
-                .insert(pipeline_key.clone(), default_pipeline.clone());
+            crate::CacheStorage::insert(
+                &mut managers.render_pipeline_manager,
+                pipeline_key.clone(),
+                default_pipeline,
+            );
 
             let material = std::sync::Arc::new(Material {
                 name: material_name.to_string(),
@@ -142,10 +135,165 @@ impl MaterialManager {
                 front_face,
                 topology,
             });
-            self.materials
+            managers
+                .material_manager
                 .insert(material_key.clone(), material.clone());
+            let material = managers.material_manager.get(&material_key).unwrap();
+            return Ok(material.clone());
+        }
+    }
+    pub fn load_tobj_materials(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        managers: &mut crate::Managers,
+        camera: &crate::camera::Camera,
+        surface_config: &wgpu::SurfaceConfiguration,
+        mats: &[tobj::Material],
+    ) -> Result<Vec<crate::Material>, crate::EngineError> {
+        mats.iter()
+            .map(|m| {
+                crate::Material::from_tobj_material(
+                    queue,
+                    device,
+                    managers,
+                    camera,
+                    surface_config,
+                    m,
+                )
+            })
+            .collect()
+    }
+    pub fn from_tobj_material(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        managers: &mut crate::Managers,
+        camera: &crate::camera::Camera,
+        surface_config: &wgpu::SurfaceConfiguration,
+        mat: &tobj::Material,
+    ) -> Result<crate::Material, crate::EngineError> {
+        let mut bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>> = Vec::new();
+        let mut bind_group_layouts = vec![];
+        if let Some(camera_bind_group) = managers.bind_group_manager.get(&camera.bind_group) {
+            bind_groups.push(camera_bind_group.clone());
+            bind_group_layouts.push(crate::BindGroupLayouts::camera());
+        }
 
-            return Ok(self.materials.get(&material_key).unwrap().clone());
+        let base_dir_path = crate::asset_dir()?.join("textures");
+        let texture_key = if let Some(diffuse_texture) = &mat.diffuse_texture {
+            let tex_path = base_dir_path.join(&diffuse_texture);
+            let img = image::open(&tex_path)
+                .map_err(|e| {
+                    crate::EngineError::AssetLoadError(format!("Texture load failed: {}", e))
+                })?
+                .to_rgba8();
+
+            let texture = crate::CacheStorage::get_or_create(
+                &mut managers.texture_manager,
+                crate::CacheKey {
+                    id: diffuse_texture.clone(),
+                },
+                || {
+                    crate::Texture::from_image(device, queue, surface_config, &img, diffuse_texture)
+                        .into()
+                },
+            );
+            let tex_key = crate::CacheKey::from(texture.label.clone());
+            Some(tex_key)
+        } else {
+            None
+        };
+        if let Some(tex_key) = &texture_key {
+            let texture_bind_group_layout = crate::BindGroupLayouts::texture();
+            if let Some(bind_group) = managers.bind_group_manager.bind_group_for(
+                &managers.texture_manager,
+                &tex_key.id,
+                &texture_bind_group_layout,
+            ) {
+                bind_groups.push(bind_group.clone());
+                bind_group_layouts.push(texture_bind_group_layout);
+            }
+        }
+        let shader_key = crate::CacheKey::from("v_texture.wgsl");
+        let shader_module = crate::AssetLoader::load_shader(managers, &shader_key.id).expect(
+            &format!("AssetLoader load shader failed for {}", shader_key.id),
+        );
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&format!("{} layout", shader_key.id)),
+            bind_group_layouts: &bind_group_layouts,
+            push_constant_ranges: &[],
+        });
+
+        let _pipeline = crate::CacheStorage::get_or_create(
+            &mut managers.render_pipeline_manager,
+            shader_key.clone(),
+            || {
+                device
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some(&shader_key.id),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader_module,
+                            entry_point: Some("vs_main"),
+                            buffers: &[crate::VertexTexture::LAYOUT, crate::InstanceData::LAYOUT],
+                            compilation_options: Default::default(),
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader_module,
+                            entry_point: Some("fs_main"),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: surface_config.format,
+                                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                            compilation_options: Default::default(),
+                        }),
+                        primitive: wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleList,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: None,
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            unclipped_depth: false,
+                            conservative: false,
+                        },
+                        depth_stencil: Some(managers.texture_manager.depth_stencil_state.clone()),
+
+                        multisample: wgpu::MultisampleState {
+                            count: 1,
+                            mask: !0,
+                            alpha_to_coverage_enabled: false,
+                        },
+                        multiview: None,
+                        cache: None,
+                    })
+                    .into()
+            },
+        );
+        let material = crate::Material {
+            name: mat.name.clone(),
+            bind_groups,
+            front_face: wgpu::FrontFace::Ccw,
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            shader_key,
+            texture_key,
+            blend_state: None,
+            cull_mode: Some(wgpu::Face::Back),
+        };
+        managers
+            .material_manager
+            .materials
+            .insert(material.name.clone().into(), material.clone().into());
+        Ok(material)
+    }
+}
+pub struct MaterialManager {
+    pub materials: crate::HashCache<std::sync::Arc<Material>>,
+}
+
+impl MaterialManager {
+    pub fn new() -> Self {
+        Self {
+            materials: crate::HashCache::new(),
         }
     }
 }

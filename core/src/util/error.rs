@@ -35,6 +35,9 @@ pub enum EngineError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
+    #[error("PoisonError: {0}")]
+    PoisonError(String),
+
     #[error("Image error: {0}")]
     ImageError(#[from] image::ImageError),
 

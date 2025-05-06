@@ -11,12 +11,12 @@ impl Mesh {
         &self,
         rpass: &mut wgpu::RenderPass,
         pipeline: &wgpu::RenderPipeline,
-        bind_groups: &[&wgpu::BindGroup],
+        bind_groups: &[&std::sync::Arc<wgpu::BindGroup>],
         w_buffers: &crate::WgpuBufferManager,
     ) {
         rpass.set_pipeline(pipeline);
         for (i, bind_group) in bind_groups.iter().enumerate() {
-            rpass.set_bind_group(i as u32, *bind_group, &[]);
+            rpass.set_bind_group(i as u32, bind_group.as_ref(), &[]);
         }
 
         if let (Some(vertex_buffer), Some(index_buffer)) = (

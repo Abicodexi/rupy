@@ -1,5 +1,4 @@
-use crate::assets::loader::AssetLoader;
-use crate::{BindGroupLayouts, CacheKey, CacheStorage, EngineError, HashCache};
+use crate::{CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
 use std::sync::Arc;
@@ -48,13 +47,29 @@ impl Texture {
             label: desc.label.map(|l| l.to_string()).unwrap_or_default(),
         }
     }
+    pub fn decode_hdr(data: &[u8]) -> Result<(Vec<[f32; 4]>, HdrMetadata), EngineError> {
+        let decoder = HdrDecoder::new(Cursor::new(data))?;
+        let meta = decoder.metadata();
+        let mut pixels = vec![[0.0; 4]; (meta.width * meta.height) as usize];
+
+        decoder.read_image_transform(
+            |pix| {
+                let rgb = pix.to_hdr();
+                [rgb.0[0], rgb.0[1], rgb.0[2], 1.0]
+            },
+            &mut pixels[..],
+        )?;
+
+        Ok((pixels, meta))
+    }
     pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        surface_config: &wgpu::SurfaceConfiguration,
         img: &image::RgbaImage,
         label: impl Into<String>,
     ) -> Texture {
-        let label = label.into();
+        let label: String = label.into();
         let (width, height) = img.dimensions();
         let size = wgpu::Extent3d {
             width,
@@ -68,24 +83,25 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: surface_config.format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
-        let bytes_per_pixel = 4;
-        let bytes_per_row = std::num::NonZeroU32::new(bytes_per_pixel * width).unwrap();
-        let rows_per_image = std::num::NonZeroU32::new(height).unwrap();
+        let bytes_per_row =
+            std::num::NonZeroU32::new(4 * width).expect("Bytes per row NonZeroU32 unwrap");
+        let rows_per_image =
+            std::num::NonZeroU32::new(height).expect("Rows per image NonZeroU32 unwrap");
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &img, // &[u8]
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row.into()),
                 rows_per_image: Some(rows_per_image.into()),
@@ -174,7 +190,7 @@ impl Texture {
         })
     }
 
-    pub fn create(
+    pub fn new(
         device: &wgpu::Device,
         size: wgpu::Extent3d,
         format: wgpu::TextureFormat,
@@ -244,7 +260,6 @@ impl Into<CacheKey> for Texture {
 
 pub struct TextureManager {
     textures: HashCache<Arc<Texture>>,
-    texture_bgs: std::collections::HashMap<String, wgpu::BindGroup>,
     pub depth_texture: Texture,
     pub depth_stencil_state: wgpu::DepthStencilState,
 }
@@ -278,25 +293,9 @@ impl TextureManager {
     pub fn new(depth_stencil_state: wgpu::DepthStencilState, depth_texture: Texture) -> Self {
         Self {
             textures: HashCache::new(),
-            texture_bgs: std::collections::HashMap::new(),
             depth_texture,
             depth_stencil_state,
         }
-    }
-
-    /// Load (or reload) a texture from disk
-    pub async fn load<K: Into<CacheKey>>(
-        &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        key: K,
-        rel_path: &str,
-    ) -> Result<Arc<Texture>, EngineError> {
-        let tex = crate::AssetLoader::load_texture(queue, device, rel_path).await?;
-
-        let arc = Arc::new(tex);
-        self.textures.insert(key.into(), arc.clone());
-        Ok(arc)
     }
 
     /// Retrieve a previously loaded texture
@@ -307,163 +306,5 @@ impl TextureManager {
     /// Unload a texture from the manager (will free when Arc drops)
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
-    }
-    pub fn bind_group(&self, key: &str) -> Option<wgpu::BindGroup> {
-        self.texture_bgs.get(key).cloned()
-    }
-    pub fn bind_group_for(
-        &self,
-        device: &wgpu::Device,
-        key: &str,
-        layout: &wgpu::BindGroupLayout,
-    ) -> Option<wgpu::BindGroup> {
-        if !self.texture_bgs.contains_key(key) {
-            let tex = self.get(key)?;
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("tex_bg:{}", key)),
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&tex.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&tex.sampler),
-                    },
-                ],
-            });
-            return Some(bg.clone());
-        }
-        self.texture_bgs.get(key).cloned()
-    }
-    pub fn decode_hdr(data: &[u8]) -> Result<(Vec<[f32; 4]>, HdrMetadata), EngineError> {
-        let decoder = HdrDecoder::new(Cursor::new(data))?;
-        let meta = decoder.metadata();
-        let mut pixels = vec![[0.0; 4]; (meta.width * meta.height) as usize];
-
-        decoder.read_image_transform(
-            |pix| {
-                let rgb = pix.to_hdr();
-                [rgb.0[0], rgb.0[1], rgb.0[2], 1.0]
-            },
-            &mut pixels[..],
-        )?;
-
-        Ok((pixels, meta))
-    }
-
-    pub fn insert_texture_bind_group(&mut self, key: &CacheKey, bind_group: wgpu::BindGroup) {
-        self.texture_bgs.insert(key.id.clone(), bind_group.into());
-    }
-    pub fn prepare_equirect_projection_textures(
-        &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        bind_group_layouts: &BindGroupLayouts,
-        rel_path: &str,
-        dst_size: u32,
-        format: wgpu::TextureFormat,
-    ) -> Result<(CacheKey, wgpu::BindGroup, CacheKey, wgpu::BindGroup), EngineError> {
-        let path = crate::AssetLoader::resolve(&format!("hdr\\{}", rel_path));
-        let bytes = AssetLoader::read_bytes(&path)?;
-        let (pixels, meta) = Self::decode_hdr(&bytes)?;
-
-        let src_key = CacheKey::new("equirect_projection_src");
-        let src = Texture::create(
-            &device,
-            wgpu::Extent3d {
-                width: meta.width,
-                height: meta.height,
-                depth_or_array_layers: 1,
-            },
-            format,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            None,
-            wgpu::FilterMode::Linear,
-            None,
-            Some(&format!("src:{}", rel_path)),
-        );
-
-        let dst_key = CacheKey::new("equirect_projection_dst");
-        let dst = Texture::create(
-            &device,
-            wgpu::Extent3d {
-                width: dst_size,
-                height: dst_size,
-                depth_or_array_layers: 6,
-            },
-            format,
-            1,
-            wgpu::TextureViewDimension::Cube,
-            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Nearest,
-            None,
-            Some(&format!("dst:{}", rel_path)),
-        );
-
-        let equirect_src_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layouts.equirect_src,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&src.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&dst.create_projection_view()),
-                },
-            ],
-            label: Some("Equirect projection bind group"),
-        });
-
-        let equirect_dst_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layouts.equirect_dst,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&dst.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&dst.sampler),
-                },
-            ],
-            label: Some("Skybox bind group"),
-        });
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &src.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            bytemuck::cast_slice(&pixels),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(meta.width * std::mem::size_of::<[f32; 4]>() as u32),
-                rows_per_image: Some(meta.height),
-            },
-            src.texture.size(),
-        );
-
-        self.texture_bgs
-            .insert(src_key.id.clone(), equirect_src_bind_group.clone());
-        self.texture_bgs
-            .insert(dst_key.id.clone(), equirect_dst_bind_group.clone());
-
-        self.textures.insert(src_key.clone(), src.into());
-        self.textures.insert(dst_key.clone(), dst.into());
-
-        Ok((
-            src_key,
-            equirect_src_bind_group,
-            dst_key,
-            equirect_dst_bind_group,
-        ))
     }
 }

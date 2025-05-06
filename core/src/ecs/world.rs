@@ -180,15 +180,14 @@ impl World {
         log_debug!("Spawned renderable entity: {} {}", entity.0, model_key);
     }
     pub fn load_object(
-        obj: &str,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
+        obj: &str,
         managers: &mut crate::Managers,
         camera: &crate::camera::Camera,
         surface_config: &wgpu::SurfaceConfiguration,
     ) -> Option<crate::CacheKey> {
-        match crate::AssetLoader::load_tobj(obj, queue, device, managers, &camera, &surface_config)
-        {
+        match crate::Model::from_obj(queue, device, obj, managers, &camera, &surface_config) {
             Ok(model) => {
                 managers
                     .model_manager

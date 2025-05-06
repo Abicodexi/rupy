@@ -1,3 +1,31 @@
+pub struct Shader;
+impl Shader {
+    pub fn load(
+        managers: &mut crate::Managers,
+        shader: &str,
+    ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
+        let start = std::time::Instant::now();
+        let cache_key: crate::CacheKey = shader.into();
+
+        if !crate::CacheStorage::contains(&managers.shader_manager, &cache_key) {
+            let module = crate::AssetLoader::load_shader(managers, shader)?;
+            managers
+                .shader_manager
+                .shaders
+                .insert(cache_key.clone(), module.into());
+        }
+        crate::log_debug!(
+            "[ShaderManager] Loaded shader `{}` in {:.2?}",
+            cache_key.id,
+            start.elapsed()
+        );
+        Ok(
+            crate::CacheStorage::get(&managers.shader_manager, &cache_key)
+                .expect("Loading shader failed. Shader not found in manager cache after creation")
+                .clone(),
+        )
+    }
+}
 pub struct ShaderManager {
     pub shaders: crate::HashCache<std::sync::Arc<wgpu::ShaderModule>>,
 }
@@ -8,60 +36,43 @@ impl ShaderManager {
             shaders: crate::HashCache::new(),
         }
     }
-    pub fn reload_shader(&mut self, device: &wgpu::Device, name: &str) {
-        let start = std::time::Instant::now();
-        match crate::AssetLoader::load_shader(device, name) {
-            Ok(module) => {
-                let arc_module = std::sync::Arc::new(module);
-                self.shaders.insert(crate::CacheKey::new(name), arc_module);
-                let elapsed = start.elapsed();
-                crate::log_debug!(
-                    "[ShaderManager] Reloaded shader `{}` in {:.2?}",
-                    name,
-                    elapsed
-                );
-            }
-            Err(e) => {
-                crate::log_error!("Shader reload error: {:?}", e);
-            }
-        }
+}
+
+impl crate::CacheStorage<std::sync::Arc<wgpu::ShaderModule>> for ShaderManager {
+    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::ShaderModule>> {
+        self.shaders.get(key)
     }
 
-    pub fn get<K: Into<crate::CacheKey>>(
-        &self,
-        name: K,
-    ) -> Option<&std::sync::Arc<wgpu::ShaderModule>> {
-        self.shaders.get(&name.into())
+    fn contains(&self, key: &crate::CacheKey) -> bool {
+        self.shaders.contains_key(key)
     }
-
-    pub fn get_or_create<K, F>(
+    fn get_mut(
         &mut self,
-        name: K,
+        key: &crate::CacheKey,
+    ) -> Option<&mut std::sync::Arc<wgpu::ShaderModule>> {
+        self.shaders.get_mut(key)
+    }
+    fn get_or_create<F>(
+        &mut self,
+        key: crate::CacheKey,
         create_fn: F,
     ) -> &mut std::sync::Arc<wgpu::ShaderModule>
     where
-        F: FnOnce() -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError>,
-        K: Into<crate::CacheKey>,
+        F: FnOnce() -> std::sync::Arc<wgpu::ShaderModule>,
     {
-        let cache_key: crate::CacheKey = name.into();
-
-        crate::CacheStorage::get_or_create(&mut self.shaders, cache_key.clone(), || {
-            let start = std::time::Instant::now();
-            let module = create_fn().expect("Failed to create shader module");
-            let elapsed = start.elapsed();
-            crate::log_debug!(
-                "[ShaderManager] Loaded shader `{}` in {:.2?}",
-                cache_key.id,
-                elapsed
-            );
-            module
-        })
+        self.shaders.entry(key).or_insert_with(create_fn)
+    }
+    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::ShaderModule>) {
+        self.shaders.insert(key, resource);
+    }
+    fn remove(&mut self, key: &crate::CacheKey) {
+        self.shaders.remove(key);
     }
 }
 
-pub struct ShaderHotReload {}
+pub struct ShaderHotReloader;
 
-impl ShaderHotReload {
+impl ShaderHotReloader {
     pub fn watch(
         watcher_tx: &std::sync::Arc<crossbeam::channel::Sender<crate::ApplicationEvent>>,
     ) -> Result<(), crate::EngineError> {

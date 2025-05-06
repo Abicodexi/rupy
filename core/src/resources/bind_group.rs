@@ -1,3 +1,5 @@
+use super::{CacheStorage, HashCache, TextureManager};
+
 static BGL: once_cell::sync::OnceCell<BindGroupLayouts> = once_cell::sync::OnceCell::new();
 
 fn init_bind_group_layouts(device: &wgpu::Device) {
@@ -157,5 +159,87 @@ impl BindGroupLayouts {
             equirect_src,
             equirect_dst,
         }
+    }
+}
+
+pub struct BindGroupManager {
+    bind_groups: super::HashCache<std::sync::Arc<wgpu::BindGroup>>,
+}
+
+impl BindGroupManager {
+    pub fn new() -> Self {
+        Self {
+            bind_groups: HashCache::new(),
+        }
+    }
+    pub fn bind_group(&self, key: &str) -> Option<std::sync::Arc<wgpu::BindGroup>> {
+        self.bind_groups
+            .get(&super::CacheKey { id: key.into() })
+            .cloned()
+    }
+    pub fn bind_group_for(
+        &mut self,
+        texture_manager: &TextureManager,
+        key: &str,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
+        let binding = crate::GPU::get();
+        let cache_key: crate::CacheKey = key.into();
+        if let Ok(gpu) = binding.read() {
+            if !self.bind_groups.contains(&super::CacheKey {
+                id: cache_key.id.clone(),
+            }) {
+                let tex = texture_manager.get(key)?;
+                let bind_group: std::sync::Arc<wgpu::BindGroup> = gpu
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&format!("tex_bg:{}", key)),
+                        layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&tex.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&tex.sampler),
+                            },
+                        ],
+                    })
+                    .into();
+                self.bind_groups.insert(cache_key.clone(), bind_group);
+            }
+        }
+
+        self.bind_groups.get(&cache_key).cloned()
+    }
+}
+
+impl super::CacheStorage<std::sync::Arc<wgpu::BindGroup>> for BindGroupManager {
+    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::BindGroup>> {
+        self.bind_groups.get(key)
+    }
+
+    fn contains(&self, key: &crate::CacheKey) -> bool {
+        self.bind_groups.contains_key(key)
+    }
+    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut std::sync::Arc<wgpu::BindGroup>> {
+        self.bind_groups.get_mut(key)
+    }
+    fn get_or_create<F>(
+        &mut self,
+        key: crate::CacheKey,
+        create_fn: F,
+    ) -> &mut std::sync::Arc<wgpu::BindGroup>
+    where
+        F: FnOnce() -> std::sync::Arc<wgpu::BindGroup>,
+    {
+        self.bind_groups.entry(key).or_insert_with(create_fn)
+    }
+    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::BindGroup>) {
+        self.bind_groups.insert(key, resource);
+    }
+    fn remove(&mut self, key: &crate::CacheKey) {
+        self.bind_groups.remove(key);
     }
 }

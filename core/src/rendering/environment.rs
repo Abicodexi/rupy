@@ -1,3 +1,5 @@
+use crate::CacheStorage;
+
 #[derive(Debug)]
 pub struct EquirectProjection {
     pub src_shader_key: crate::CacheKey,
@@ -34,10 +36,18 @@ impl EquirectProjection {
         let dst_shader_key = crate::CacheKey::from(dst_shader);
         let compute_pipeline_entry = "compute_equirect_to_cubemap";
 
-        let equirect_src_shader = managers.shader_manager.get_or_create(src_shader, || {
-            let shader_module = crate::AssetLoader::load_shader(&device, &src_shader)?;
-            Ok(std::sync::Arc::new(shader_module))
-        });
+        let equirect_src_shader = if !managers.shader_manager.contains(&src_shader_key) {
+            let shader_module = crate::AssetLoader::load_shader(managers, &src_shader).expect(
+                &format!("AssetLoader load shader failed for {}", src_shader),
+            );
+            shader_module
+        } else {
+            managers
+                .shader_manager
+                .get(&src_shader_key)
+                .unwrap()
+                .clone()
+        };
 
         let equirect_src_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -47,9 +57,9 @@ impl EquirectProjection {
             });
 
         managers
-            .pipeline_manager
-            .get_or_create_compute_pipeline(src_pipeline_key.clone(), || {
-                Ok(device
+            .compute_pipeline_manager
+            .get_or_create(src_pipeline_key.clone(), || {
+                device
                     .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                         label: Some(&src_pipeline_key.id),
                         layout: Some(&equirect_src_pipeline_layout),
@@ -58,12 +68,20 @@ impl EquirectProjection {
                         compilation_options: Default::default(),
                         cache: None,
                     })
-                    .into())
+                    .into()
             });
-        let equirect_dst_shader = managers.shader_manager.get_or_create(dst_shader, || {
-            let shader_module = crate::AssetLoader::load_shader(&device, &dst_shader)?;
-            Ok(std::sync::Arc::new(shader_module))
-        });
+        let equirect_dst_shader = if !managers.shader_manager.contains(&dst_shader_key) {
+            let shader_module = crate::AssetLoader::load_shader(managers, &dst_shader).expect(
+                &format!("AssetLoader load shader failed for {}", dst_shader),
+            );
+            shader_module
+        } else {
+            managers
+                .shader_manager
+                .get(&dst_shader_key)
+                .unwrap()
+                .clone()
+        };
 
         let equirect_dst_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} layout", dst_pipeline_key.id)),
@@ -74,9 +92,9 @@ impl EquirectProjection {
             push_constant_ranges: &[],
         });
         managers
-            .pipeline_manager
-            .get_or_create_render_pipeline(dst_pipeline_key.clone(), || {
-                Ok(device
+            .render_pipeline_manager
+            .get_or_create(dst_pipeline_key.clone(), || {
+                device
                     .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(&dst_pipeline_key.id),
                         layout: Some(&equirect_dst_layout),
@@ -115,14 +133,14 @@ impl EquirectProjection {
                         multiview: None,
                         cache: None,
                     })
-                    .into())
+                    .into()
             });
 
         let path = &crate::AssetLoader::resolve(&format!("hdr\\{}", hdr_rel_path));
         let bytes = crate::AssetLoader::read_bytes(&path)?;
-        let (pixels, meta) = crate::TextureManager::decode_hdr(&bytes)?;
+        let (pixels, meta) = crate::Texture::decode_hdr(&bytes)?;
 
-        let src = crate::Texture::create(
+        let src = crate::Texture::new(
             &device,
             wgpu::Extent3d {
                 width: meta.width,
@@ -139,7 +157,7 @@ impl EquirectProjection {
             Some(&format!("{} source texture", hdr_rel_path)),
         );
 
-        let dst = crate::Texture::create(
+        let dst = crate::Texture::new(
             &device,
             wgpu::Extent3d {
                 width: dst_size,
@@ -203,11 +221,11 @@ impl EquirectProjection {
         );
 
         managers
-            .texture_manager
-            .insert_texture_bind_group(&src_texture_key, src_bind_group.clone());
+            .bind_group_manager
+            .insert(src_texture_key.clone(), src_bind_group.into());
         managers
-            .texture_manager
-            .insert_texture_bind_group(&dst_texture_key, dst_bind_group.clone());
+            .bind_group_manager
+            .insert(dst_texture_key.clone(), dst_bind_group.into());
 
         crate::CacheStorage::insert(
             &mut managers.texture_manager,
@@ -236,17 +254,16 @@ impl EquirectProjection {
     pub fn compute_projection(
         &self,
         queue: &wgpu::Queue,
-        device: &wgpu::Device,
         mut encoder: wgpu::CommandEncoder,
-        managers: &crate::Managers,
+        managers: &mut crate::Managers,
         label: Option<&str>,
     ) {
         if let (Some(projection_compute_pipeline), Some(src_bind_group)) = (
             managers
-                .pipeline_manager
-                .get_compute_pipeline(self.src_pipeline_key.clone()),
-            managers.texture_manager.bind_group_for(
-                device,
+                .compute_pipeline_manager
+                .get(&self.src_pipeline_key),
+            managers.bind_group_manager.bind_group_for(
+                &managers.texture_manager,
                 &self.src_texture_key.id,
                 crate::BindGroupLayouts::equirect_src(),
             ),
@@ -258,7 +275,7 @@ impl EquirectProjection {
 
             let num_workgroups = (self.dst_size + 15) / 16;
             pass.set_pipeline(&projection_compute_pipeline);
-            pass.set_bind_group(0, &src_bind_group, &[]);
+            pass.set_bind_group(0, src_bind_group.as_ref(), &[]);
             pass.dispatch_workgroups(num_workgroups, num_workgroups, 6);
 
             drop(pass);
@@ -269,19 +286,23 @@ impl EquirectProjection {
         &self,
         rpass: &mut wgpu::RenderPass,
         managers: &crate::Managers,
-        camera_bind_group: &wgpu::BindGroup,
+        camera: &crate::camera::Camera,
     ) {
-        if let (Some(equirect_projection_bind_group), Some(equirect_projection_pipeline)) = (
+        if let (
+            Some(equirect_projection_bind_group),
+            Some(camera_bind_group),
+            Some(equirect_projection_pipeline),
+        ) = (
             managers
-                .texture_manager
+                .bind_group_manager
                 .bind_group(&self.dst_texture_key.id),
             managers
-                .pipeline_manager
-                .render_pipelines
-                .get(&self.dst_pipeline_key),
+                .bind_group_manager
+                .bind_group(&camera.bind_group.id),
+            managers.render_pipeline_manager.get(&self.dst_pipeline_key),
         ) {
-            rpass.set_bind_group(0, camera_bind_group, &[]);
-            rpass.set_bind_group(1, &equirect_projection_bind_group, &[]);
+            rpass.set_bind_group(0, camera_bind_group.as_ref(), &[]);
+            rpass.set_bind_group(1, equirect_projection_bind_group.as_ref(), &[]);
             rpass.set_pipeline(&equirect_projection_pipeline);
             rpass.draw(0..3, 0..1);
         }
@@ -302,10 +323,9 @@ impl Environment {
         &self,
         rpass: &mut wgpu::RenderPass,
         managers: &mut crate::Managers,
-        camera_bind_group: &wgpu::BindGroup,
+        camera: &crate::camera::Camera,
     ) {
-        self.equirect_projection
-            .render(rpass, managers, camera_bind_group);
+        self.equirect_projection.render(rpass, managers, camera);
     }
     pub fn projection(&self) -> &EquirectProjection {
         &self.equirect_projection

@@ -1,10 +1,10 @@
 use cgmath::{Deg, Point3, Vector3};
 use core::{
     camera::{Camera, CameraController, CameraUniform, Frustum},
-    log_error, BindGroupLayouts, BufferManager, CacheKey, CacheStorage, EngineError,
-    EquirectProjection, GlyphonBuffer, GlyphonRenderer, Managers, MaterialManager, MeshManager,
-    ModelManager, PipelineManager, Renderer, ShaderManager, SurfaceExt, Texture, TextureManager,
-    Time, WgpuBuffer, WgpuRenderer, World, GPU,
+    log_error, BindGroupLayouts, BindGroupManager, BufferManager, CacheKey, CacheStorage,
+    ComputePipelineManager, EngineError, EquirectProjection, GlyphonBuffer, GlyphonRenderer,
+    Managers, MaterialManager, MeshManager, ModelManager, RenderPipelineManager, Renderer,
+    ShaderManager, SurfaceExt, Texture, TextureManager, Time, WgpuBuffer, WgpuRenderer, World, GPU,
 };
 use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use std::sync::Arc;
@@ -63,7 +63,7 @@ impl Rupy {
             bias: wgpu::DepthBiasState::default(),
         };
 
-        let depth_texture = Texture::create(
+        let depth_texture = Texture::new(
             gpu.device(),
             wgpu::Extent3d {
                 width: surface_config.width,
@@ -92,25 +92,30 @@ impl Rupy {
         );
         let shader_manager = ShaderManager::new();
         let texture_manager = TextureManager::new(depth_stencil_state, depth_texture);
-        let pipeline_manager = PipelineManager::new();
+        let render_pipeline_manager = RenderPipelineManager::new();
+        let compute_pipeline_manager = ComputePipelineManager::new();
         let buffer_manager = BufferManager::new();
         let mesh_manager = MeshManager::new();
         let material_manager = MaterialManager::new();
         let model_manager = ModelManager::new();
+        let bind_group_manager = BindGroupManager::new();
         let mut managers = Managers {
             shader_manager,
-            pipeline_manager,
+            render_pipeline_manager,
+            compute_pipeline_manager,
             buffer_manager,
             texture_manager,
             mesh_manager,
             material_manager,
             model_manager,
+            bind_group_manager,
         };
 
         let camera_uniform = CameraUniform::new();
-        let camera_uniform_cache_key = CacheKey::new("camera_uniform_buffer");
+        let camera_uniform_cache_key = CacheKey::new("camera uniform buffer");
+        let camera_bind_group_cache_key = CacheKey::new("camera bind group");
         let camera_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera_bg"),
+            label: Some(&camera_bind_group_cache_key.id),
             layout: &BindGroupLayouts::camera(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -123,7 +128,7 @@ impl Rupy {
                             gpu.device(),
                             &[camera_uniform],
                             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            Some(&format!("camera uniform buffer")),
+                            Some(&camera_uniform_cache_key.id),
                         )
                         .into()
                     })
@@ -131,6 +136,10 @@ impl Rupy {
                     .as_entire_binding(),
             }],
         });
+        managers.bind_group_manager.insert(
+            camera_bind_group_cache_key.clone(),
+            camera_bind_group.into(),
+        );
         let camera = Camera {
             eye: Point3::new(0.0, 1.0, 2.0),
             target: Point3::new(0.0, 0.0, 0.0),
@@ -141,7 +150,7 @@ impl Rupy {
             zfar: 1000.0,
             uniform: camera_uniform,
             frustum: Frustum::new(),
-            bind_group: camera_bind_group.clone(),
+            bind_group: camera_bind_group_cache_key,
             uniform_cache_key: camera_uniform_cache_key,
         };
         let controller = CameraController::new(1.0, 0.5);
@@ -161,9 +170,9 @@ impl Rupy {
 
         let cube_obj = "cube.obj";
         if let Some(model_key) = World::load_object(
-            cube_obj,
             gpu.queue(),
             gpu.device(),
+            cube_obj,
             &mut managers,
             &camera,
             &surface_config,
@@ -232,7 +241,7 @@ impl Rupy {
                         height: self.surface_config.height,
                     },
                 );
-                self.managers.texture_manager.depth_texture = Texture::create(
+                self.managers.texture_manager.depth_texture = Texture::new(
                     gpu.device(),
                     wgpu::Extent3d {
                         width: self.surface_config.width,
@@ -267,22 +276,11 @@ impl Rupy {
             }
         };
     }
+
     pub fn load_shader(&mut self, rel_path: &str) {
-        let binding = GPU::get();
-        let _ = match binding.read() {
-            Ok(gpu) => {
-                self.managers
-                    .shader_manager
-                    .reload_shader(&gpu.device(), &rel_path);
-                self.wgpu_renderer = WgpuRenderer::new();
-                true
-            }
-            Err(e) => {
-                log_error!("Shader load failed, could not acquire gpu lock: {}", e);
-                false
-            }
-        };
+        let _ = core::Shader::load(&mut self.managers, &rel_path);
     }
+
     pub fn draw(&mut self) {
         let binding = GPU::get();
         match binding.read() {
@@ -360,6 +358,12 @@ impl Rupy {
                 }
                 Err(e) => {
                     log_error!("SurfaceError: {}", e);
+                    match e {
+                        wgpu::SurfaceError::Outdated => {
+                            self.resize(&self.window.inner_size());
+                        }
+                        _ => (),
+                    }
                 }
             },
             Err(e) => {

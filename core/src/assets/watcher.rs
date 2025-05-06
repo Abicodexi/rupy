@@ -23,7 +23,9 @@ impl AssetWatcher {
 
         thread::spawn(move || {
             while let Ok(event) = rx.recv() {
-                on_change(event.unwrap());
+                if let Ok(ev) = event {
+                    on_change(ev);
+                }
             }
         });
 

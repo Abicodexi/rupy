@@ -18,7 +18,7 @@ pub struct Camera {
     pub zfar: f32,
     pub uniform: uniform::CameraUniform,
     pub frustum: Frustum,
-    pub bind_group: wgpu::BindGroup,
+    pub bind_group: crate::CacheKey,
     pub uniform_cache_key: crate::CacheKey,
 }
 
