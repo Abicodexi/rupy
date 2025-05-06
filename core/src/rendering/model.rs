@@ -34,47 +34,16 @@ pub struct Model {
 }
 
 impl Model {
-    pub async fn load<V: bytemuck::Pod, I: bytemuck::Pod>(
+    pub async fn from_material<V: bytemuck::Pod, I: bytemuck::Pod>(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         managers: &mut crate::Managers,
-        config: &wgpu::SurfaceConfiguration,
-        bind_group_layouts: Vec<&wgpu::BindGroupLayout>,
-        bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
-        buffers: &[wgpu::VertexBufferLayout<'_>],
+        material: std::sync::Arc<crate::Material>,
         model_name: &str,
-        material_name: &str,
-        shader_rel_path: &str,
-        texture_rel_path: Option<&str>,
-        texture_bind_group_layout: Option<&wgpu::BindGroupLayout>,
-        blend_state: Option<wgpu::BlendState>,
-        cull_mode: Option<wgpu::Face>,
-        topology: wgpu::PrimitiveTopology,
-        front_face: wgpu::FrontFace,
-        polygon_mode: wgpu::PolygonMode,
         vertices: &[V],
         indices: &[I],
         aabb: crate::AABB,
     ) -> Result<std::sync::Arc<crate::Model>, crate::EngineError> {
-        let material = crate::Material::create(
-            device,
-            managers,
-            config,
-            bind_group_layouts,
-            bind_groups,
-            buffers,
-            material_name,
-            shader_rel_path,
-            texture_rel_path,
-            texture_bind_group_layout,
-            topology,
-            front_face,
-            polygon_mode,
-            blend_state,
-            cull_mode,
-        )
-        .await?;
-
         let mesh_instance =
             crate::MeshInstance::new(queue, device, managers, vertices, indices, &material);
         let model = std::sync::Arc::new(crate::Model {

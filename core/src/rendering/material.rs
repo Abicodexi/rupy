@@ -29,7 +29,7 @@ impl Default for Material {
     }
 }
 impl Material {
-    pub async fn create(
+    pub async fn new(
         device: &wgpu::Device,
         managers: &mut crate::Managers,
         config: &wgpu::SurfaceConfiguration,

@@ -115,27 +115,26 @@ impl AssetLoader {
         indices: &[I],
         aabb: crate::AABB,
     ) -> Result<std::sync::Arc<crate::Model>, crate::EngineError> {
-        crate::Model::load(
-            queue,
+        let material = crate::Material::new(
             device,
             managers,
             config,
             bind_group_layouts,
             bind_groups,
             buffers,
-            model_name,
             material_name,
             shader_rel_path,
             texture_rel_path,
             texture_bind_group_layout,
-            blend_state,
-            cull_mode,
             topology,
             front_face,
             polygon_mode,
-            vertices,
-            indices,
-            aabb,
+            blend_state,
+            cull_mode,
+        )
+        .await?;
+        crate::Model::from_material(
+            queue, device, managers, material, model_name, vertices, indices, aabb,
         )
         .await
     }
