@@ -1,25 +1,27 @@
+use std::sync::Arc;
+
 use crate::CacheStorage;
 
 static BASE_PATH: once_cell::sync::Lazy<std::path::PathBuf> =
     once_cell::sync::Lazy::new(|| super::asset_dir().expect("couldn’t find asset dir"));
 
-pub struct AssetLoader;
-impl AssetLoader {
+pub struct Asset;
+impl Asset {
     pub fn base_path() -> &'static std::path::PathBuf {
         &*BASE_PATH
     }
     pub fn resolve(rel_path: &str) -> std::path::PathBuf {
-        AssetLoader::base_path().join(rel_path)
+        Asset::base_path().join(rel_path)
     }
 
-    pub fn load_text(rel_path: &str) -> Result<String, crate::EngineError> {
-        let path = AssetLoader::resolve(rel_path);
+    pub fn read_text(rel_path: &str) -> Result<String, crate::EngineError> {
+        let path = Asset::resolve(rel_path);
         std::fs::read_to_string(&path).map_err(|e| {
             crate::EngineError::FileSystemError(format!("Failed to read {:?}: {}", path, e))
         })
     }
 
-    pub fn load_shader(
+    pub fn shader(
         managers: &mut crate::Managers,
         rel_path: &str,
     ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
@@ -27,7 +29,7 @@ impl AssetLoader {
             let cache_key = crate::CacheKey::from(rel_path);
 
             if !managers.shader_manager.contains(&cache_key) {
-                let path = AssetLoader::base_path().join("shaders").join(rel_path);
+                let path = Asset::base_path().join("shaders").join(rel_path);
 
                 let shader_source = std::fs::read_to_string(&path)?;
                 let shader_module =
@@ -52,14 +54,14 @@ impl AssetLoader {
         let bytes = std::fs::read(path)?;
         Ok(bytes)
     }
-    pub async fn load_texture(
+    pub async fn texture(
         managers: &mut crate::Managers,
         rel_path: &str,
     ) -> Result<std::sync::Arc<crate::Texture>, crate::EngineError> {
         if let Ok(gpu) = crate::GPU::get().read() {
             let cache_key = crate::CacheKey::from(rel_path);
             if !managers.texture_manager.contains(&cache_key) {
-                let path = AssetLoader::base_path()
+                let path = Asset::base_path()
                     .join("textures")
                     .join(cache_key.id.clone());
                 let bytes = Self::read_bytes(&path)?;
@@ -82,18 +84,18 @@ impl AssetLoader {
             ))
         }
     }
-    pub fn load_tobj<P: AsRef<std::path::Path>>(
+    pub fn tobj<P: AsRef<std::path::Path>>(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         obj: P,
         managers: &mut crate::Managers,
         camera: &crate::camera::Camera,
         surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<crate::Model, crate::EngineError> {
+    ) -> Result<Arc<crate::Model>, crate::EngineError> {
         crate::Model::from_obj(queue, device, obj, managers, camera, surface_config)
     }
 
-    pub async fn load_model<V: bytemuck::Pod, I: bytemuck::Pod>(
+    pub async fn model<V: bytemuck::Pod, I: bytemuck::Pod>(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         managers: &mut crate::Managers,

@@ -42,7 +42,7 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
         if let AppInnerState::Running(app) = &mut self.inner {
             match event {
-                ApplicationEvent::ShaderLoad(rel_path) => app.load_shader(&rel_path),
+                ApplicationEvent::ShaderLoad(rel_path) => {}
                 ApplicationEvent::WorldRequestRedraw => app.draw(),
                 ApplicationEvent::Shutdown => {
                     World::stop();

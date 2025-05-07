@@ -62,7 +62,7 @@ impl Material {
                     .texture_manager
                     .contains(&crate::CacheKey::from(texture_path))
                 {
-                    crate::AssetLoader::load_texture(managers, texture_path).await?;
+                    crate::Asset::texture(managers, texture_path).await?;
                 }
                 if let Some(texture_bind_group) = managers.bind_group_manager.bind_group_for(
                     &managers.texture_manager,
@@ -214,9 +214,10 @@ impl Material {
             }
         }
         let shader_key = crate::CacheKey::from("v_texture.wgsl");
-        let shader_module = crate::AssetLoader::load_shader(managers, &shader_key.id).expect(
-            &format!("AssetLoader load shader failed for {}", shader_key.id),
-        );
+        let shader_module = crate::Asset::shader(managers, &shader_key.id).expect(&format!(
+            "AssetLoader load shader failed for {}",
+            shader_key.id
+        ));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} layout", shader_key.id)),
             bind_group_layouts: &bind_group_layouts,

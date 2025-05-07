@@ -1,4 +1,6 @@
-use crate::CacheStorage;
+use std::sync::Arc;
+
+use crate::{log_info, CacheStorage};
 
 #[derive(Copy, Clone, Debug)]
 pub struct AABB {
@@ -66,9 +68,23 @@ impl Model {
         managers: &mut crate::Managers,
         camera: &crate::camera::Camera,
         surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<crate::Model, crate::EngineError> {
+    ) -> Result<Arc<crate::Model>, crate::EngineError> {
         let base_path = crate::asset_dir()?.join("models");
         let obj_path = base_path.join(obj.as_ref());
+        let name = obj
+            .as_ref()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unnamed")
+            .to_string();
+
+        let model_cache_key = crate::CacheKey::from(name.clone());
+
+        if let Some(cached_model) = managers.model_manager.get(&model_cache_key) {
+            log_info!("Returning cached model: {}", cached_model.name);
+            return Ok(cached_model.clone());
+        }
+
         let (models, materials) = tobj::load_obj(
             &obj_path,
             &tobj::LoadOptions {
@@ -134,18 +150,22 @@ impl Model {
                 }
             }
 
-            let name = obj
-                .as_ref()
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("unnamed")
-                .to_string();
+            let model_cache_key = crate::CacheKey { id: name.clone() };
+            managers.model_manager.insert(
+                model_cache_key.clone(),
+                crate::Model {
+                    meshes: instances,
+                    bounding_radius: aabb.unwrap(),
+                    name,
+                }
+                .into(),
+            );
 
-            return Ok(crate::Model {
-                meshes: instances,
-                bounding_radius: aabb.unwrap(),
-                name,
-            });
+            return Ok(managers
+                .model_manager
+                .get(&model_cache_key)
+                .unwrap()
+                .clone());
         }
         Err(crate::EngineError::AssetLoadError(format!(
             "Error loading obj",

@@ -1,5 +1,3 @@
-use crate::CacheStorage;
-
 #[derive(Debug)]
 pub struct EquirectProjection {
     pub src_shader_key: crate::CacheKey,
@@ -36,18 +34,18 @@ impl EquirectProjection {
         let dst_shader_key = crate::CacheKey::from(dst_shader);
         let compute_pipeline_entry = "compute_equirect_to_cubemap";
 
-        let equirect_src_shader = if !managers.shader_manager.contains(&src_shader_key) {
-            let shader_module = crate::AssetLoader::load_shader(managers, &src_shader).expect(
-                &format!("AssetLoader load shader failed for {}", src_shader),
-            );
-            shader_module
-        } else {
-            managers
-                .shader_manager
-                .get(&src_shader_key)
-                .unwrap()
-                .clone()
-        };
+        let equirect_src_shader =
+            if !crate::CacheStorage::contains(&managers.shader_manager, &src_shader_key) {
+                let shader_module = crate::Asset::shader(managers, &src_shader).expect(&format!(
+                    "AssetLoader load shader failed for {}",
+                    src_shader
+                ));
+                shader_module
+            } else {
+                crate::CacheStorage::get(&managers.shader_manager, &src_shader_key)
+                    .unwrap()
+                    .clone()
+            };
 
         let equirect_src_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -56,9 +54,10 @@ impl EquirectProjection {
                 push_constant_ranges: &[],
             });
 
-        managers
-            .compute_pipeline_manager
-            .get_or_create(src_pipeline_key.clone(), || {
+        crate::CacheStorage::get_or_create(
+            &mut managers.compute_pipeline_manager,
+            src_pipeline_key.clone(),
+            || {
                 device
                     .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                         label: Some(&src_pipeline_key.id),
@@ -69,19 +68,20 @@ impl EquirectProjection {
                         cache: None,
                     })
                     .into()
-            });
-        let equirect_dst_shader = if !managers.shader_manager.contains(&dst_shader_key) {
-            let shader_module = crate::AssetLoader::load_shader(managers, &dst_shader).expect(
-                &format!("AssetLoader load shader failed for {}", dst_shader),
-            );
-            shader_module
-        } else {
-            managers
-                .shader_manager
-                .get(&dst_shader_key)
-                .unwrap()
-                .clone()
-        };
+            },
+        );
+        let equirect_dst_shader =
+            if !crate::CacheStorage::contains(&managers.shader_manager, &dst_shader_key) {
+                let shader_module = crate::Asset::shader(managers, &dst_shader).expect(&format!(
+                    "AssetLoader load shader failed for {}",
+                    dst_shader
+                ));
+                shader_module
+            } else {
+                crate::CacheStorage::get(&managers.shader_manager, &dst_shader_key)
+                    .unwrap()
+                    .clone()
+            };
 
         let equirect_dst_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} layout", dst_pipeline_key.id)),
@@ -91,9 +91,10 @@ impl EquirectProjection {
             ],
             push_constant_ranges: &[],
         });
-        managers
-            .render_pipeline_manager
-            .get_or_create(dst_pipeline_key.clone(), || {
+        crate::CacheStorage::get_or_create(
+            &mut managers.render_pipeline_manager,
+            dst_pipeline_key.clone(),
+            || {
                 device
                     .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(&dst_pipeline_key.id),
@@ -134,10 +135,11 @@ impl EquirectProjection {
                         cache: None,
                     })
                     .into()
-            });
+            },
+        );
 
-        let path = &crate::AssetLoader::resolve(&format!("hdr\\{}", hdr_rel_path));
-        let bytes = crate::AssetLoader::read_bytes(&path)?;
+        let path = &crate::Asset::resolve(&format!("hdr\\{}", hdr_rel_path));
+        let bytes = crate::Asset::read_bytes(&path)?;
         let (pixels, meta) = crate::Texture::decode_hdr(&bytes)?;
 
         let src = crate::Texture::new(
@@ -220,12 +222,16 @@ impl EquirectProjection {
             src.texture.size(),
         );
 
-        managers
-            .bind_group_manager
-            .insert(src_texture_key.clone(), src_bind_group.into());
-        managers
-            .bind_group_manager
-            .insert(dst_texture_key.clone(), dst_bind_group.into());
+        crate::CacheStorage::insert(
+            &mut managers.bind_group_manager,
+            src_texture_key.clone(),
+            src_bind_group.into(),
+        );
+        crate::CacheStorage::insert(
+            &mut managers.bind_group_manager,
+            dst_texture_key.clone(),
+            dst_bind_group.into(),
+        );
 
         crate::CacheStorage::insert(
             &mut managers.texture_manager,
@@ -259,9 +265,7 @@ impl EquirectProjection {
         label: Option<&str>,
     ) {
         if let (Some(projection_compute_pipeline), Some(src_bind_group)) = (
-            managers
-                .compute_pipeline_manager
-                .get(&self.src_pipeline_key),
+            crate::CacheStorage::get(&managers.compute_pipeline_manager, &self.src_pipeline_key),
             managers.bind_group_manager.bind_group_for(
                 &managers.texture_manager,
                 &self.src_texture_key.id,
@@ -299,7 +303,7 @@ impl EquirectProjection {
             managers
                 .bind_group_manager
                 .bind_group(&camera.bind_group.id),
-            managers.render_pipeline_manager.get(&self.dst_pipeline_key),
+            crate::CacheStorage::get(&managers.render_pipeline_manager, &self.dst_pipeline_key),
         ) {
             rpass.set_bind_group(0, camera_bind_group.as_ref(), &[]);
             rpass.set_bind_group(1, equirect_projection_bind_group.as_ref(), &[]);

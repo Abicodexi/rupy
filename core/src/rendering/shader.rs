@@ -1,14 +1,16 @@
+use crate::{CacheStorage, Managers};
+
 pub struct Shader;
 impl Shader {
     pub fn load(
-        managers: &mut crate::Managers,
+        managers: &mut Managers,
         shader: &str,
     ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
         let start = std::time::Instant::now();
         let cache_key: crate::CacheKey = shader.into();
 
-        if !crate::CacheStorage::contains(&managers.shader_manager, &cache_key) {
-            let module = crate::AssetLoader::load_shader(managers, shader)?;
+        if !managers.shader_manager.contains(&cache_key) {
+            let module = crate::Asset::shader(managers, shader)?;
             managers
                 .shader_manager
                 .shaders
@@ -19,11 +21,11 @@ impl Shader {
             cache_key.id,
             start.elapsed()
         );
-        Ok(
-            crate::CacheStorage::get(&managers.shader_manager, &cache_key)
-                .expect("Loading shader failed. Shader not found in manager cache after creation")
-                .clone(),
-        )
+        Ok(managers
+            .shader_manager
+            .get(&cache_key)
+            .expect("Loading shader failed. Shader not found in manager cache after creation")
+            .clone())
     }
 }
 pub struct ShaderManager {
