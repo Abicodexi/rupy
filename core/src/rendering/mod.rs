@@ -22,5 +22,8 @@ pub use surface::*;
 pub mod vertex;
 pub use vertex::*;
 
+pub mod light;
+pub use light::*;
+
 pub mod traits;
 pub use traits::*;

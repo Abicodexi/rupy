@@ -57,12 +57,20 @@ impl Scale {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Transform {
-    pub matrix: cgmath::Matrix4<f32>,
+    pub model_matrix: cgmath::Matrix4<f32>,
+    pub normal_matrix: cgmath::Matrix4<f32>,
+}
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TransformRaw {
+    pub model_matrix: [[f32; 4]; 4],
+    pub normal_matrix: [[f32; 4]; 4],
 }
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            matrix: cgmath::Matrix4::<f32>::identity(),
+            model_matrix: cgmath::Matrix4::<f32>::identity(),
+            normal_matrix: cgmath::Matrix4::<f32>::identity(),
         }
     }
 }
@@ -74,13 +82,26 @@ impl Transform {
         let rotation = cgmath::Matrix4::from(rot.quat);
         let scaling =
             cgmath::Matrix4::from_nonuniform_scale(scale.value.x, scale.value.y, scale.value.z);
+        let model_matrix = translation * rotation * scaling;
+        let inv =
+            cgmath::SquareMatrix::invert(&model_matrix).expect("model matrix was not invertible");
+
+        // 2) transpose it
+        let inv_transpose = cgmath::Matrix::transpose(&inv);
+
+        // 3) extract the upper‐left 3×3 as your normal matrix
+        let normal_matrix = cgmath::Transform::inverse_transform(&inv_transpose).unwrap();
 
         Self {
-            matrix: translation * rotation * scaling,
+            model_matrix,
+            normal_matrix,
         }
     }
-    pub fn data(&self) -> [[f32; 4]; 4] {
-        self.matrix.into()
+    pub fn data(&self) -> TransformRaw {
+        TransformRaw {
+            model_matrix: self.model_matrix.into(),
+            normal_matrix: self.normal_matrix.into(),
+        }
     }
 }
 

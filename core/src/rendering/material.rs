@@ -1,241 +1,325 @@
-use crate::CacheStorage;
+use std::sync::Arc;
 
-#[derive(Clone)]
-pub struct Material {
-    pub name: String,
-    pub bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
+use crate::{log_info, CacheStorage};
+
+#[derive(Clone, Debug)]
+pub struct MaterialDescriptor<'a> {
+    pub name: &'a str,
+    pub key: crate::CacheKey,
+    pub shader: &'a str,
+    pub bind_groups: &'a [&'a std::sync::Arc<wgpu::BindGroup>],
+    pub bind_group_layouts: &'a [&'a wgpu::BindGroupLayout],
+    pub diffuse_texture: Option<&'a str>,
+    pub normal_texture: Option<&'a str>,
     pub front_face: wgpu::FrontFace,
     pub topology: wgpu::PrimitiveTopology,
-    pub shader_key: crate::CacheKey,
-    pub texture_key: Option<crate::CacheKey>,
+    polygon_mode: wgpu::PolygonMode,
     pub blend_state: Option<wgpu::BlendState>,
     pub cull_mode: Option<wgpu::Face>,
 }
-impl Default for Material {
+
+impl<'a> Default for MaterialDescriptor<'a> {
     fn default() -> Self {
         Self {
             name: Default::default(),
+            key: Default::default(),
+            shader: Default::default(),
             bind_groups: Default::default(),
+            bind_group_layouts: Default::default(),
+            diffuse_texture: Default::default(),
+            normal_texture: Default::default(),
             front_face: Default::default(),
             topology: Default::default(),
-            shader_key: crate::CacheKey {
-                id: "v_texture.wgsl".to_string(),
-            },
-
-            texture_key: Default::default(),
+            polygon_mode: Default::default(),
             blend_state: Default::default(),
             cull_mode: Default::default(),
         }
     }
 }
+
+impl<'a> MaterialDescriptor<'a> {
+    pub fn new(
+        name: &'a str,
+        key: crate::CacheKey,
+        shader: &'a str,
+        bind_groups: &'a [&'a std::sync::Arc<wgpu::BindGroup>],
+        bind_group_layouts: &'a [&'a wgpu::BindGroupLayout],
+        diffuse_texture: Option<&'a str>,
+        normal_texture: Option<&'a str>,
+        front_face: wgpu::FrontFace,
+        topology: wgpu::PrimitiveTopology,
+        polygon_mode: wgpu::PolygonMode,
+        blend_state: Option<wgpu::BlendState>,
+        cull_mode: Option<wgpu::Face>,
+    ) -> Self {
+        Self {
+            name,
+            key,
+            shader,
+            bind_groups,
+            bind_group_layouts,
+            diffuse_texture,
+            normal_texture,
+            front_face,
+            topology,
+            polygon_mode,
+            blend_state,
+            cull_mode,
+        }
+    }
+}
+
+impl<'a> Into<Material> for MaterialDescriptor<'a> {
+    fn into(self) -> Material {
+        let mut bind_groups = Vec::new();
+        let mut bind_group_layouts = Vec::new();
+
+        for layout in self.bind_group_layouts {
+            bind_group_layouts.push(layout.to_owned().clone());
+        }
+
+        for group in self.bind_groups {
+            bind_groups.push(group.to_owned().clone());
+        }
+        let key = crate::CacheKey::from(self.name);
+        Material {
+            name: self.name.into(),
+            key,
+            bind_groups,
+            bind_group_layouts,
+            front_face: self.front_face,
+            topology: self.topology,
+            polygon_mode: self.polygon_mode,
+            shader_key: crate::CacheKey::from(self.shader),
+            diffuse_texture_key: if let Some(d) = self.diffuse_texture {
+                Some(crate::CacheKey::from(d))
+            } else {
+                None
+            },
+            normal_texture_key: if let Some(n) = self.normal_texture {
+                Some(crate::CacheKey::from(n))
+            } else {
+                None
+            },
+            blend_state: self.blend_state,
+            cull_mode: self.cull_mode,
+        }
+    }
+}
+impl<'a> Into<Material> for &MaterialDescriptor<'a> {
+    fn into(self) -> Material {
+        let mut bind_groups = Vec::new();
+        let mut bind_group_layouts = Vec::new();
+
+        for layout in self.bind_group_layouts {
+            bind_group_layouts.push(layout.to_owned().clone());
+        }
+
+        for group in self.bind_groups {
+            bind_groups.push(group.to_owned().clone());
+        }
+
+        Material {
+            name: self.name.into(),
+            key: crate::CacheKey::from(self.name),
+            bind_groups,
+            bind_group_layouts,
+            front_face: self.front_face,
+            topology: self.topology,
+            polygon_mode: self.polygon_mode,
+            shader_key: crate::CacheKey::from(self.shader),
+            diffuse_texture_key: if let Some(d) = self.diffuse_texture {
+                Some(crate::CacheKey::from(d))
+            } else {
+                None
+            },
+            normal_texture_key: if let Some(n) = self.normal_texture {
+                Some(crate::CacheKey::from(n))
+            } else {
+                None
+            },
+            blend_state: self.blend_state,
+            cull_mode: self.cull_mode,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Material {
+    pub name: String,
+    pub key: crate::CacheKey,
+    pub bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
+    pub bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+    pub front_face: wgpu::FrontFace,
+    pub topology: wgpu::PrimitiveTopology,
+    pub polygon_mode: wgpu::PolygonMode,
+    pub shader_key: crate::CacheKey,
+    pub diffuse_texture_key: Option<crate::CacheKey>,
+    pub normal_texture_key: Option<crate::CacheKey>,
+    pub blend_state: Option<wgpu::BlendState>,
+    pub cull_mode: Option<wgpu::Face>,
+}
+impl Default for Material {
+    fn default() -> Self {
+        MaterialDescriptor::default().into()
+    }
+}
 impl Material {
-    pub async fn new(
-        device: &wgpu::Device,
-        managers: &mut crate::Managers,
-        config: &wgpu::SurfaceConfiguration,
-        mut bind_group_layouts: Vec<&wgpu::BindGroupLayout>,
-        mut bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
-        buffers: &[wgpu::VertexBufferLayout<'_>],
+    pub fn from_desc(desc: MaterialDescriptor) -> Self {
+        desc.into()
+    }
+    pub fn new(
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
         material_name: &str,
         shader_rel_path: &str,
-        texture_rel_path: Option<&str>,
-        texture_bind_group_layout: Option<&wgpu::BindGroupLayout>,
+        diffuse_texture: Option<&str>,
+        normal_texture: Option<&str>,
         topology: wgpu::PrimitiveTopology,
         front_face: wgpu::FrontFace,
         polygon_mode: wgpu::PolygonMode,
         blend_state: Option<wgpu::BlendState>,
         cull_mode: Option<wgpu::Face>,
-    ) -> Result<std::sync::Arc<Material>, crate::EngineError> {
-        let material_key: crate::CacheKey = material_name.into();
-
-        if let Some(cached_material) = managers.material_manager.get(&material_key) {
-            crate::log_info!("Returning cached material: {}", material_key.id);
-            return Ok(cached_material.clone());
-        } else {
-            let shader_key = crate::CacheKey::from(shader_rel_path);
-            let default_shader = crate::Shader::load(managers, shader_rel_path)?;
-
-            let texture_key = if let (Some(texture_path), Some(texture_layout)) =
-                (texture_rel_path, texture_bind_group_layout)
-            {
-                if !managers
-                    .texture_manager
-                    .contains(&crate::CacheKey::from(texture_path))
-                {
-                    crate::Asset::texture(managers, texture_path).await?;
-                }
-                if let Some(texture_bind_group) = managers.bind_group_manager.bind_group_for(
-                    &managers.texture_manager,
-                    material_name,
-                    texture_layout,
-                ) {
-                    bind_groups.push(texture_bind_group.clone());
-                    bind_group_layouts.push(texture_layout)
-                };
-                Some(crate::CacheKey::from(material_name))
+    ) -> Material {
+        Material {
+            name: material_name.to_string(),
+            key: crate::CacheKey::from(material_name),
+            bind_groups,
+            bind_group_layouts,
+            shader_key: crate::CacheKey::from(shader_rel_path),
+            diffuse_texture_key: if let Some(d) = diffuse_texture {
+                Some(crate::CacheKey::from(d))
             } else {
                 None
-            };
-            let default_pipeline_layout =
-                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("default pipeline layout"),
-                    bind_group_layouts: &bind_group_layouts,
-                    push_constant_ranges: &[],
-                });
-            let pipeline_key = crate::CacheKey::from(material_name);
-            let default_pipeline: std::sync::Arc<wgpu::RenderPipeline> = device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("default pipeline"),
-                    layout: Some(&default_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &default_shader,
-                        entry_point: Some("vs_main"),
-                        buffers,
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &default_shader,
-                        entry_point: Some("fs_main"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: config.format,
-                            blend: blend_state,
-                            write_mask: wgpu::ColorWrites::default(),
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: topology,
-                        strip_index_format: None,
-                        front_face: front_face,
-                        cull_mode: cull_mode,
-                        unclipped_depth: false,
-                        polygon_mode,
-                        conservative: false,
-                    },
-                    depth_stencil: Some(managers.texture_manager.depth_stencil_state.clone()),
-                    multisample: Default::default(),
-                    multiview: None,
-                    cache: None,
-                })
-                .into();
-
-            crate::CacheStorage::insert(
-                &mut managers.render_pipeline_manager,
-                pipeline_key.clone(),
-                default_pipeline,
-            );
-
-            let material = std::sync::Arc::new(Material {
-                name: material_name.to_string(),
-                bind_groups,
-                shader_key,
-                texture_key,
-                blend_state,
-                cull_mode,
-                front_face,
-                topology,
-            });
-            managers
-                .material_manager
-                .insert(material_key.clone(), material.clone());
-            let material = managers.material_manager.get(&material_key).unwrap();
-            return Ok(material.clone());
+            },
+            normal_texture_key: if let Some(n) = normal_texture {
+                Some(crate::CacheKey::from(n))
+            } else {
+                None
+            },
+            blend_state,
+            cull_mode,
+            front_face,
+            topology,
+            polygon_mode,
         }
     }
     pub fn load_tobj_materials(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         managers: &mut crate::Managers,
-        camera: &crate::camera::Camera,
+        uniform_bind_group: &wgpu::BindGroup,
         surface_config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: &Option<wgpu::DepthStencilState>,
+        camera: &crate::camera::Camera,
+        light: &crate::Light,
         mats: &[tobj::Material],
+        shader_rel_path: &str,
     ) -> Result<Vec<crate::Material>, crate::EngineError> {
         mats.iter()
             .map(|m| {
                 crate::Material::from_tobj_material(
-                    queue,
-                    device,
                     managers,
-                    camera,
+                    uniform_bind_group,
+                    light,
                     surface_config,
+                    depth_stencil_state,
                     m,
+                    shader_rel_path,
                 )
             })
             .collect()
     }
+
     pub fn from_tobj_material(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         managers: &mut crate::Managers,
-        camera: &crate::camera::Camera,
+        uniform_bind_group: &wgpu::BindGroup,
+        light: &crate::Light,
         surface_config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: &Option<wgpu::DepthStencilState>,
         mat: &tobj::Material,
+        shader_rel_path: &str,
     ) -> Result<crate::Material, crate::EngineError> {
-        let mut bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>> = Vec::new();
+        let mut bind_groups = Vec::new();
         let mut bind_group_layouts = vec![];
-        if let Some(camera_bind_group) = managers.bind_group_manager.get(&camera.bind_group) {
-            bind_groups.push(camera_bind_group.clone());
-            bind_group_layouts.push(crate::BindGroupLayouts::camera());
-        }
 
-        let base_dir_path = crate::asset_dir()?.join("textures");
-        let texture_key = if let Some(diffuse_texture) = &mat.diffuse_texture {
-            let tex_path = base_dir_path.join(&diffuse_texture);
-            let img = image::open(&tex_path)
-                .map_err(|e| {
-                    crate::EngineError::AssetLoadError(format!("Texture load failed: {}", e))
-                })?
-                .to_rgba8();
+        bind_groups.push(Arc::new(uniform_bind_group.clone()));
+        bind_group_layouts.push(crate::BindGroupLayouts::uniform().clone());
 
-            let texture = crate::CacheStorage::get_or_create(
-                &mut managers.texture_manager,
-                crate::CacheKey {
-                    id: diffuse_texture.clone(),
-                },
-                || {
-                    crate::Texture::from_image(device, queue, surface_config, &img, diffuse_texture)
-                        .into()
-                },
+        let base_dir = crate::asset_dir()?.join("textures");
+
+        let (d_key, n_key) = if let (Some(d), Some(n)) =
+            (mat.diffuse_texture.as_ref(), mat.normal_texture.as_ref())
+        {
+            let (diffuse_tex, diffuse_key) = managers.texture_manager.get_or_load_texture(
+                &managers.queue,
+                &managers.device,
+                d,
+                surface_config,
+                &base_dir,
+            )?;
+            let (normal_tex, normal_key) = managers.texture_manager.get_or_load_texture(
+                &managers.queue,
+                &managers.device,
+                n,
+                surface_config,
+                &base_dir,
+            )?;
+
+            bind_groups.push(
+                crate::BindGroup::normal_map(
+                    &managers.device,
+                    &diffuse_tex,
+                    &normal_tex,
+                    &format!("{} normal map", mat.name),
+                )
+                .into(),
             );
-            let tex_key = crate::CacheKey::from(texture.label.clone());
-            Some(tex_key)
+            bind_group_layouts.push(crate::BindGroupLayouts::normal_map().clone());
+            (Some(diffuse_key), Some(normal_key))
         } else {
-            None
+            (None, None)
         };
-        if let Some(tex_key) = &texture_key {
-            let texture_bind_group_layout = crate::BindGroupLayouts::texture();
-            if let Some(bind_group) = managers.bind_group_manager.bind_group_for(
-                &managers.texture_manager,
-                &tex_key.id,
-                &texture_bind_group_layout,
-            ) {
-                bind_groups.push(bind_group.clone());
-                bind_group_layouts.push(texture_bind_group_layout);
-            }
+
+        if let Some(bind_group) = managers.bind_group_manager.bind_group_for(
+            &managers.texture_manager,
+            &"equirect projection destination",
+            &crate::BindGroupLayouts::equirect_dst(),
+        ) {
+            bind_groups.push(bind_group.clone());
+            bind_group_layouts.push(crate::BindGroupLayouts::equirect_dst().clone());
         }
-        let shader_key = crate::CacheKey::from("v_texture.wgsl");
+
+        let shader_key = crate::CacheKey::from(shader_rel_path);
         let shader_module = crate::Asset::shader(managers, &shader_key.id).expect(&format!(
             "AssetLoader load shader failed for {}",
             shader_key.id
         ));
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&format!("{} layout", shader_key.id)),
-            bind_group_layouts: &bind_group_layouts,
-            push_constant_ranges: &[],
-        });
-
-        let _pipeline = crate::CacheStorage::get_or_create(
+        let bind_group_layout_refs: Vec<&wgpu::BindGroupLayout> =
+            bind_group_layouts.iter().collect();
+        log_info!("LAYOUTS: {:?}", bind_group_layout_refs.len());
+        let pipeline_layout =
+            managers
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("{} layout", shader_key.id)),
+                    bind_group_layouts: &bind_group_layout_refs,
+                    push_constant_ranges: &[],
+                });
+        crate::CacheStorage::get_or_create(
             &mut managers.render_pipeline_manager,
-            shader_key.clone(),
+            crate::CacheKey::from(mat.name.clone()),
             || {
-                device
+                managers
+                    .device
                     .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(&shader_key.id),
                         layout: Some(&pipeline_layout),
                         vertex: wgpu::VertexState {
                             module: &shader_module,
                             entry_point: Some("vs_main"),
-                            buffers: &[crate::VertexTexture::LAYOUT, crate::InstanceData::LAYOUT],
+                            buffers: &[
+                                crate::VertexNormal::LAYOUT,
+                                crate::VertexNormalInstance::LAYOUT,
+                            ],
                             compilation_options: Default::default(),
                         },
                         fragment: Some(wgpu::FragmentState {
@@ -252,12 +336,12 @@ impl Material {
                             topology: wgpu::PrimitiveTopology::TriangleList,
                             strip_index_format: None,
                             front_face: wgpu::FrontFace::Ccw,
-                            cull_mode: None,
+                            cull_mode: Some(wgpu::Face::Back),
                             polygon_mode: wgpu::PolygonMode::Fill,
                             unclipped_depth: false,
                             conservative: false,
                         },
-                        depth_stencil: Some(managers.texture_manager.depth_stencil_state.clone()),
+                        depth_stencil: depth_stencil_state.as_ref().cloned(),
 
                         multisample: wgpu::MultisampleState {
                             count: 1,
@@ -272,13 +356,17 @@ impl Material {
         );
         let material = crate::Material {
             name: mat.name.clone(),
+            key: crate::CacheKey::from(mat.name.clone()),
             bind_groups,
+            bind_group_layouts: bind_group_layouts.into(),
             front_face: wgpu::FrontFace::Ccw,
             topology: wgpu::PrimitiveTopology::TriangleList,
             shader_key,
-            texture_key,
+            diffuse_texture_key: d_key,
+            normal_texture_key: n_key,
             blend_state: None,
             cull_mode: Some(wgpu::Face::Back),
+            polygon_mode: wgpu::PolygonMode::Fill,
         };
         managers
             .material_manager

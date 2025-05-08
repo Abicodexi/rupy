@@ -11,7 +11,7 @@ impl GlyphonRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         swapchain_format: wgpu::TextureFormat,
-        depth_stencil: &wgpu::DepthStencilState,
+        depth_stencil: &Option<wgpu::DepthStencilState>,
     ) -> Self {
         let swash_cache = glyphon::SwashCache::new();
         let cache = glyphon::Cache::new(device);
@@ -22,7 +22,7 @@ impl GlyphonRenderer {
             &mut atlas,
             device,
             wgpu::MultisampleState::default(),
-            Some(depth_stencil.clone()),
+            depth_stencil.as_ref().cloned(),
         );
 
         let font_system = glyphon::FontSystem::new();

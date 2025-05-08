@@ -4,7 +4,6 @@ use winit::event_loop::EventLoopProxy;
 
 #[derive(Debug, Clone)]
 pub enum ApplicationEvent {
-    ShaderLoad(String),
     WorldRequestRedraw,
     Shutdown,
 }

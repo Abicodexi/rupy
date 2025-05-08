@@ -55,59 +55,68 @@ impl Asset {
         Ok(bytes)
     }
     pub async fn texture(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         managers: &mut crate::Managers,
+        surface_config: &wgpu::SurfaceConfiguration,
         rel_path: &str,
     ) -> Result<std::sync::Arc<crate::Texture>, crate::EngineError> {
-        if let Ok(gpu) = crate::GPU::get().read() {
-            let cache_key = crate::CacheKey::from(rel_path);
-            if !managers.texture_manager.contains(&cache_key) {
-                let path = Asset::base_path()
-                    .join("textures")
-                    .join(cache_key.id.clone());
-                let bytes = Self::read_bytes(&path)?;
-                let tex = crate::Texture::from_bytes(
-                    gpu.device(),
-                    gpu.queue(),
-                    &bytes,
-                    cache_key.id.clone(),
-                )
-                .await?;
-                managers
-                    .texture_manager
-                    .insert(cache_key.clone(), tex.into());
-            }
+        let cache_key = crate::CacheKey::from(rel_path);
+        if !managers.texture_manager.contains(&cache_key) {
+            let img = image::open(&cache_key.id)
+                .map_err(|e| {
+                    crate::EngineError::AssetLoadError(format!("Texture load failed: {}", e))
+                })?
+                .to_rgba8();
+            let tex = crate::Texture::from_image(
+                device,
+                queue,
+                surface_config,
+                &img,
+                cache_key.id.clone(),
+            );
+            managers
+                .texture_manager
+                .insert(cache_key.clone(), tex.into());
+        }
 
-            Ok(managers.texture_manager.get(cache_key).unwrap())
+        Ok(managers.texture_manager.get(cache_key).unwrap())
+    }
+    pub fn tobj<P: AsRef<std::path::Path>>(
+        obj: P,
+        managers: &mut crate::Managers,
+        uniform_bind_group: &wgpu::BindGroup,
+        camera: &crate::camera::Camera,
+        light: &crate::Light,
+        surface_config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: &Option<wgpu::DepthStencilState>,
+    ) -> Result<Arc<crate::Model>, crate::EngineError> {
+        if let Ok(Some(model)) = crate::Model::from_obj(
+            obj,
+            managers,
+            uniform_bind_group,
+            camera,
+            light,
+            surface_config,
+            depth_stencil_state,
+        ) {
+            Ok(model)
         } else {
-            Err(crate::EngineError::RwLockError(
-                "Loading shader failed. Could not acquire read lock on gpu device".into(),
+            Err(crate::EngineError::AssetLoadError(
+                "Failed to load model {} from obj".into(),
             ))
         }
     }
-    pub fn tobj<P: AsRef<std::path::Path>>(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        obj: P,
-        managers: &mut crate::Managers,
-        camera: &crate::camera::Camera,
-        surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<Arc<crate::Model>, crate::EngineError> {
-        crate::Model::from_obj(queue, device, obj, managers, camera, surface_config)
-    }
 
     pub async fn model<V: bytemuck::Pod, I: bytemuck::Pod>(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         managers: &mut crate::Managers,
-        config: &wgpu::SurfaceConfiguration,
-        bind_group_layouts: Vec<&wgpu::BindGroupLayout>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         bind_groups: Vec<std::sync::Arc<wgpu::BindGroup>>,
-        buffers: &[wgpu::VertexBufferLayout<'_>],
         model_name: &str,
         material_name: &str,
         shader_rel_path: &str,
-        texture_rel_path: Option<&str>,
-        texture_bind_group_layout: Option<&wgpu::BindGroupLayout>,
+        diffuse_texture: Option<&str>,
+        normal_texture: Option<&str>,
         blend_state: Option<wgpu::BlendState>,
         cull_mode: Option<wgpu::Face>,
         topology: wgpu::PrimitiveTopology,
@@ -118,26 +127,18 @@ impl Asset {
         aabb: crate::AABB,
     ) -> Result<std::sync::Arc<crate::Model>, crate::EngineError> {
         let material = crate::Material::new(
-            device,
-            managers,
-            config,
             bind_group_layouts,
             bind_groups,
-            buffers,
             material_name,
             shader_rel_path,
-            texture_rel_path,
-            texture_bind_group_layout,
+            diffuse_texture,
+            normal_texture,
             topology,
             front_face,
             polygon_mode,
             blend_state,
             cull_mode,
-        )
-        .await?;
-        crate::Model::from_material(
-            queue, device, managers, material, model_name, vertices, indices, aabb,
-        )
-        .await
+        );
+        crate::Model::from_material(managers, material, model_name, vertices, indices, aabb).await
     }
 }

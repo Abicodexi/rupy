@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use cgmath::{Matrix3, Transform};
+
 use crate::log_debug;
 
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
@@ -43,17 +45,18 @@ impl InstanceBatch {
         &self,
         target: super::Entity,
         frustum: Option<&crate::camera::Frustum>,
-    ) -> Vec<[[f32; 4]; 4]> {
+    ) -> Vec<crate::TransformRaw> {
         match self.batches.get(&target) {
             None => Vec::new(),
             Some(batch) => batch
                 .iter()
                 .filter_map(|&(_source, transform)| {
                     let pos = cgmath::Point3::new(
-                        transform.matrix.w.x,
-                        transform.matrix.w.y,
-                        transform.matrix.w.z,
+                        transform.model_matrix.w.x,
+                        transform.model_matrix.w.y,
+                        transform.model_matrix.w.z,
                     );
+
                     if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
                         Some(transform.data())
                     } else {
@@ -63,7 +66,10 @@ impl InstanceBatch {
                 .collect(),
         }
     }
-    pub fn raw_data(&self, frustum: Option<&crate::camera::Frustum>) -> Vec<Vec<[[f32; 4]; 4]>> {
+    pub fn raw_data(
+        &self,
+        frustum: Option<&crate::camera::Frustum>,
+    ) -> Vec<Vec<crate::TransformRaw>> {
         self.batches
             .values()
             .map(|batch| {
@@ -71,9 +77,9 @@ impl InstanceBatch {
                     .iter()
                     .filter_map(|&(_source_entity, transform)| {
                         let pos = cgmath::Point3::new(
-                            transform.matrix.w.x,
-                            transform.matrix.w.y,
-                            transform.matrix.w.z,
+                            transform.model_matrix.w.x,
+                            transform.model_matrix.w.y,
+                            transform.model_matrix.w.z,
                         );
                         if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
                             Some(transform.data())
@@ -180,15 +186,24 @@ impl World {
         log_debug!("Spawned renderable entity: {} {}", entity.0, model_key);
     }
     pub fn load_object(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         obj: &str,
         managers: &mut crate::Managers,
+        uniform_bind_group: &wgpu::BindGroup,
         camera: &crate::camera::Camera,
+        light: &crate::Light,
         surface_config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: &Option<wgpu::DepthStencilState>,
     ) -> Option<crate::CacheKey> {
-        match crate::Model::from_obj(queue, device, obj, managers, &camera, &surface_config) {
-            Ok(model) => {
+        match crate::Model::from_obj(
+            obj,
+            managers,
+            uniform_bind_group,
+            &camera,
+            light,
+            &surface_config,
+            depth_stencil_state,
+        ) {
+            Ok(Some(model)) => {
                 managers
                     .model_manager
                     .models
@@ -197,6 +212,10 @@ impl World {
             }
             Err(e) => {
                 crate::log_error!("Error loading tobj: {}", e);
+                None
+            }
+            _ => {
+                crate::log_error!("Error loading tobj: model returned as None");
                 None
             }
         }

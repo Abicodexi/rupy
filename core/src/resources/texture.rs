@@ -300,10 +300,30 @@ impl Into<CacheKey> for Texture {
 
 pub struct TextureManager {
     textures: HashCache<Arc<Texture>>,
-    pub depth_texture: Texture,
-    pub depth_stencil_state: wgpu::DepthStencilState,
 }
-
+impl TextureManager {
+    pub fn get_or_load_texture(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        key: &str,
+        surface_config: &wgpu::SurfaceConfiguration,
+        base_dir: &std::path::Path,
+    ) -> Result<(Arc<Texture>, CacheKey), EngineError> {
+        let cache_key = CacheKey::from(key.to_string());
+        if let Some(tex) = self.get(cache_key.clone()) {
+            Ok((tex.clone(), cache_key))
+        } else {
+            let img = image::open(base_dir.join(key))
+                .map_err(|e| EngineError::AssetLoadError(e.to_string()))?
+                .to_rgba8();
+            let tex = Texture::from_image(device, queue, surface_config, &img, key);
+            let arc = Arc::new(tex);
+            self.insert(cache_key.clone(), arc.clone());
+            Ok((arc, cache_key))
+        }
+    }
+}
 impl CacheStorage<Arc<Texture>> for TextureManager {
     fn get(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
         self.textures.get(key)
@@ -330,11 +350,9 @@ impl CacheStorage<Arc<Texture>> for TextureManager {
 }
 
 impl TextureManager {
-    pub fn new(depth_stencil_state: wgpu::DepthStencilState, depth_texture: Texture) -> Self {
+    pub fn new() -> Self {
         Self {
             textures: HashCache::new(),
-            depth_texture,
-            depth_stencil_state,
         }
     }
 

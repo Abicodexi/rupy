@@ -9,15 +9,24 @@ fn init_bind_group_layouts(device: &wgpu::Device) {
 fn texture_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").texture
 }
+fn uniform_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").uniform
+}
 
 fn camera_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").camera
+}
+fn normal_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").normal
 }
 fn equirect_src_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").equirect_src
 }
 fn equirect_dst_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").equirect_dst
+}
+fn light_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+    &BGL.get().expect("BGL not initialized").light
 }
 pub struct BindGroupLayoutBuilder<'a> {
     device: &'a wgpu::Device,
@@ -62,18 +71,31 @@ impl<'a> BindGroupLayoutBuilder<'a> {
 
 pub struct BindGroupLayouts {
     pub texture: wgpu::BindGroupLayout,
+    pub light: wgpu::BindGroupLayout,
     pub camera: wgpu::BindGroupLayout,
     pub equirect_src: wgpu::BindGroupLayout,
     pub equirect_dst: wgpu::BindGroupLayout,
+    pub uniform: wgpu::BindGroupLayout,
+    pub normal: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
     pub fn init(device: &wgpu::Device) {
         init_bind_group_layouts(device);
     }
+    pub fn uniform() -> &'static wgpu::BindGroupLayout {
+        uniform_bind_group_layout()
+    }
+    pub fn normal_map() -> &'static wgpu::BindGroupLayout {
+        normal_bind_group_layout()
+    }
     pub fn camera() -> &'static wgpu::BindGroupLayout {
         camera_bind_group_layout()
     }
+    pub fn light() -> &'static wgpu::BindGroupLayout {
+        light_bind_group_layout()
+    }
+
     pub fn texture() -> &'static wgpu::BindGroupLayout {
         texture_bind_group_layout()
     }
@@ -101,6 +123,20 @@ impl BindGroupLayouts {
                 wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             )
             .build();
+        let light = BindGroupLayoutBuilder::new(&device)
+            .label("texture bind group layout")
+            .binding(
+                0,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::LightUniform,
+                    >() as u64),
+                },
+            )
+            .build();
 
         let camera = BindGroupLayoutBuilder::new(&device)
             .label("camera bind group layout")
@@ -110,7 +146,9 @@ impl BindGroupLayouts {
                 wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: None,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::camera::uniform::CameraUniform,
+                    >() as u64),
                 },
             )
             .build();
@@ -153,12 +191,121 @@ impl BindGroupLayouts {
             )
             .build();
 
+        let uniform = BindGroupLayoutBuilder::new(&device)
+            .binding(
+                0,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::camera::uniform::CameraUniform,
+                    >() as _),
+                },
+            )
+            .binding(
+                1,
+                wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::light::LightUniform,
+                    >() as _),
+                },
+            )
+            .build();
+
+        let normal = BindGroupLayoutBuilder::new(&device)
+            .binding(
+                0,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+            )
+            .binding(
+                1,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            )
+            .binding(
+                2,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+            )
+            .binding(
+                3,
+                wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            )
+            .build();
+
         Self {
             texture,
+            light,
             camera,
             equirect_src,
             equirect_dst,
+            uniform,
+            normal,
         }
+    }
+}
+
+pub struct BindGroup;
+
+impl BindGroup {
+    pub fn normal_map(
+        device: &wgpu::Device,
+        diffuse: &std::sync::Arc<super::Texture>,
+        normal: &std::sync::Arc<super::Texture>,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{} texture bind group layout", label)),
+            layout: BindGroupLayouts::normal_map(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&normal.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&normal.sampler),
+                },
+            ],
+        })
+    }
+    pub fn hdr(device: &wgpu::Device, hdr: &super::Texture, label: &str) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{} texture bind group layout", label)),
+            layout: BindGroupLayouts::texture(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&hdr.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&hdr.sampler),
+                },
+            ],
+        })
     }
 }
 

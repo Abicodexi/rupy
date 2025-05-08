@@ -30,9 +30,8 @@ async fn main() -> Result<(), EngineError> {
 
     GPU::init();
     World::init();
+
     WorldTick::run_tokio(&arc_tx);
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
-    let _ = core::ShaderHotReloader::watch(&arc_tx);
-    let mut app = ApplicationState::new();
-    Ok(event_loop.run_app(&mut app)?)
+    Ok(event_loop.run_app(&mut ApplicationState::new())?)
 }

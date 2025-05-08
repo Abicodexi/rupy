@@ -59,19 +59,19 @@ impl GPU {
         }
     }
 
-    pub fn instance(&self) -> &wgpu::Instance {
+    pub fn instance(&self) -> &std::sync::Arc<wgpu::Instance> {
         &self.instance
     }
 
-    pub fn adapter(&self) -> &wgpu::Adapter {
+    pub fn adapter(&self) -> &std::sync::Arc<wgpu::Adapter> {
         &self.adapter
     }
 
-    pub fn device(&self) -> &wgpu::Device {
+    pub fn device(&self) -> &std::sync::Arc<wgpu::Device> {
         &self.device
     }
 
-    pub fn queue(&self) -> &wgpu::Queue {
+    pub fn queue(&self) -> &std::sync::Arc<wgpu::Queue> {
         &self.queue
     }
 }

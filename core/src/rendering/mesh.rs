@@ -23,8 +23,8 @@ impl Mesh {
             crate::CacheStorage::get(w_buffers, &self.vertex_buffer_key),
             crate::CacheStorage::get(w_buffers, &self.index_buffer_key),
         ) {
-            rpass.set_vertex_buffer(0, vertex_buffer.buffer.slice(..));
-            rpass.set_index_buffer(index_buffer.buffer.slice(..), wgpu::IndexFormat::Uint16);
+            rpass.set_vertex_buffer(0, vertex_buffer.get().slice(..));
+            rpass.set_index_buffer(index_buffer.get().slice(..), wgpu::IndexFormat::Uint32);
             rpass.draw(0..self.vertex_count, 0..1);
         }
     }
@@ -37,14 +37,19 @@ pub struct MeshInstance {
 }
 impl MeshInstance {
     pub fn new<V: bytemuck::Pod, I: bytemuck::Pod>(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         managers: &mut crate::Managers,
         vertices: &[V],
         indices: &[I],
         material: &crate::Material,
     ) -> Self {
         let material_key = crate::CacheKey::from(material.name.clone());
+        if let Some(cached_mesh) = crate::CacheStorage::get(&managers.mesh_manager, &material_key) {
+            return Self {
+                vertex_buffer_key: cached_mesh.vertex_buffer_key.clone(),
+                index_buffer_key: cached_mesh.index_buffer_key.clone(),
+                material_key,
+            };
+        }
 
         let vertex_buffer_key = crate::CacheKey {
             id: format!("{}:vertex_buffer", material_key.id),
@@ -55,8 +60,8 @@ impl MeshInstance {
 
         if !crate::CacheStorage::contains(&managers.buffer_manager.w_buffer, &vertex_buffer_key) {
             let vertex_buffer = crate::WgpuBuffer::from_data(
-                queue,
-                device,
+                &managers.queue,
+                &managers.device,
                 vertices,
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} mesh vertex buffer", vertex_buffer_key.id)),
@@ -70,8 +75,8 @@ impl MeshInstance {
 
         if !crate::CacheStorage::contains(&managers.buffer_manager.w_buffer, &index_buffer_key) {
             let index_buffer = crate::WgpuBuffer::from_data(
-                queue,
-                device,
+                &managers.queue,
+                &managers.device,
                 indices,
                 wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} mesh vertex buffer", index_buffer_key.id)),
@@ -84,17 +89,18 @@ impl MeshInstance {
             );
         }
 
-        if !crate::CacheStorage::contains(&managers.mesh_manager.meshes, &material_key) {
-            let vertex_count = vertices.len() as u32;
-            let index_count = indices.len() as u32;
-            let mesh = Mesh {
+        let vertex_count = vertices.len() as u32;
+        let index_count = indices.len() as u32;
+        crate::CacheStorage::insert(
+            &mut managers.mesh_manager,
+            material_key.clone(),
+            Mesh {
                 vertex_buffer_key: vertex_buffer_key.clone(),
                 index_buffer_key: index_buffer_key.clone(),
                 vertex_count,
                 index_count,
-            };
-            crate::CacheStorage::insert(&mut managers.mesh_manager, material_key.clone(), mesh);
-        }
+            },
+        );
 
         Self {
             vertex_buffer_key,

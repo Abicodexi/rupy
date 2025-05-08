@@ -1,10 +1,8 @@
-use cgmath::{Deg, Point3, Vector3};
 use core::{
-    camera::{Camera, CameraController, CameraUniform, Frustum},
-    log_error, BindGroupLayouts, BindGroupManager, BufferManager, CacheKey, CacheStorage,
-    ComputePipelineManager, EngineError, EquirectProjection, GlyphonBuffer, GlyphonRenderer,
-    Managers, MaterialManager, MeshManager, ModelManager, RenderPipelineManager, Renderer,
-    ShaderManager, SurfaceExt, Texture, TextureManager, Time, WgpuBuffer, WgpuRenderer, World, GPU,
+    camera::{Camera, CameraController},
+    log_error, BindGroupLayouts, CacheKey, CacheStorage, EngineError, EquirectProjection,
+    GlyphonBuffer, GlyphonRenderer, Light, Managers, Renderer, SurfaceExt, Texture, Time,
+    WgpuRenderer, World, GPU,
 };
 use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use std::sync::Arc;
@@ -24,140 +22,69 @@ pub struct Rupy {
     pub wgpu_renderer: WgpuRenderer,
     pub glyphon_renderer: GlyphonRenderer,
     pub camera: Camera,
+    pub light: Light,
     pub controller: CameraController,
     pub last_shape_time: std::time::Instant,
 }
 
 impl Rupy {
-    pub const TEXT_BUFFER: &'static str = "text_buffer";
     pub fn new(event_loop: &ActiveEventLoop) -> Result<Rupy, EngineError> {
-        let binding = GPU::get();
-        let gpu = binding.read().unwrap();
-        BindGroupLayouts::init(gpu.device());
-        let binding = World::get().expect("Start failed, World did not exist");
-        let mut world = binding.write().unwrap();
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
         let win_clone = Arc::clone(&window);
-
         let (width, height) = {
             let inenr_size = window.inner_size();
             (inenr_size.width, inenr_size.height)
         };
 
-        let surface = gpu.instance().create_surface(win_clone)?;
-        let mut surface_config = surface
-            .get_default_config(&gpu.adapter(), width, height)
-            .ok_or(EngineError::SurfaceConfigError(
-                "surface isn't supported by this adapter".into(),
-            ))?;
-        surface_config.present_mode = wgpu::PresentMode::Mailbox;
-        surface.configure(&gpu.device(), &surface_config);
+        let (surface, surface_config, mut managers) = {
+            let binding = crate::GPU::get();
+            let gpu = binding.read().map_err(|e| {
+                crate::EngineError::GpuError(format!(
+                    "Failed to acquire read lock: {}",
+                    e.to_string()
+                ))
+            })?;
+
+            let surface = gpu.instance().create_surface(win_clone)?;
+            let surface_config = surface
+                .get_default_config(&gpu.adapter(), width, height)
+                .ok_or(EngineError::SurfaceConfigError(
+                    "surface isn't supported by this adapter".into(),
+                ))?;
+
+            let managers = Managers::new(gpu.queue(), gpu.device());
+            (surface, surface_config, managers)
+        };
+
+        BindGroupLayouts::init(&managers.device);
+
+        surface.configure(&managers.device, &surface_config);
 
         let time = Time::new();
-        let depth_stencil_state = wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
-        let depth_texture = Texture::new(
-            gpu.device(),
-            wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(gpu.device().create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            })),
-            Some("Depth texture"),
+        let wgpu_renderer = WgpuRenderer::new(&mut managers, &surface_config)?;
+        let glyphon_renderer = GlyphonRenderer::new(
+            &managers.device,
+            &managers.queue,
+            surface_config.format,
+            wgpu_renderer.depth_stencil_state(),
         );
-        let shader_manager = ShaderManager::new();
-        let texture_manager = TextureManager::new(depth_stencil_state, depth_texture);
-        let render_pipeline_manager = RenderPipelineManager::new();
-        let compute_pipeline_manager = ComputePipelineManager::new();
-        let buffer_manager = BufferManager::new();
-        let mesh_manager = MeshManager::new();
-        let material_manager = MaterialManager::new();
-        let model_manager = ModelManager::new();
-        let bind_group_manager = BindGroupManager::new();
-        let mut managers = Managers {
-            shader_manager,
-            render_pipeline_manager,
-            compute_pipeline_manager,
-            buffer_manager,
-            texture_manager,
-            mesh_manager,
-            material_manager,
-            model_manager,
-            bind_group_manager,
-        };
-
-        let camera_uniform = CameraUniform::new();
-        let camera_uniform_cache_key = CacheKey::new("camera uniform buffer");
-        let camera_bind_group_cache_key = CacheKey::new("camera bind group");
-        let camera_bind_group = gpu.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&camera_bind_group_cache_key.id),
-            layout: &BindGroupLayouts::camera(),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: managers
-                    .buffer_manager
-                    .w_buffer
-                    .get_or_create(camera_uniform_cache_key.clone(), || {
-                        WgpuBuffer::from_data(
-                            gpu.queue(),
-                            gpu.device(),
-                            &[camera_uniform],
-                            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            Some(&camera_uniform_cache_key.id),
-                        )
-                        .into()
-                    })
-                    .buffer
-                    .as_entire_binding(),
-            }],
-        });
-        managers.bind_group_manager.insert(
-            camera_bind_group_cache_key.clone(),
-            camera_bind_group.into(),
+        let camera = Camera::new(
+            &managers.queue,
+            &managers.device,
+            width as f32 / height as f32,
         );
-        let camera = Camera {
-            eye: Point3::new(0.0, 1.0, 2.0),
-            target: Point3::new(0.0, 0.0, 0.0),
-            up: Vector3::unit_y(),
-            aspect: width as f32 / height as f32,
-            fovy: Deg(45.0),
-            znear: 0.1,
-            zfar: 1000.0,
-            uniform: camera_uniform,
-            frustum: Frustum::new(),
-            bind_group: camera_bind_group_cache_key,
-            uniform_cache_key: camera_uniform_cache_key,
-        };
-        let controller = CameraController::new(1.0, 0.5);
+
+        let light = Light::new(
+            &managers.queue,
+            &managers.device,
+            [0.0, 0.0, 0.0].into(),
+            [0.0, 0.0, 0.0].into(),
+        )?;
+
+        let controller = CameraController::new(0.1, 0.5);
 
         let equirect_projection = EquirectProjection::new(
-            gpu.queue(),
-            gpu.device(),
             &mut managers,
             &surface_config,
             "equirect_src.wgsl",
@@ -165,54 +92,57 @@ impl Rupy {
             "pure-sky.hdr",
             1080,
             wgpu::TextureFormat::Rgba32Float,
+            wgpu_renderer.depth_stencil_state(),
         )?;
-        world.set_projection(equirect_projection);
+        let bind_group_layout = core::BindGroupLayouts::uniform();
 
-        let cube_obj = "cube.obj";
-        if let Some(model_key) = World::load_object(
-            gpu.queue(),
-            gpu.device(),
-            cube_obj,
-            &mut managers,
-            &camera,
-            &surface_config,
-        ) {
-            let entity = world.spawn();
-            world.insert_position(entity, core::Position { x: 1.0, y: 1.0 });
-            let angle_deg = 00.0 % 360.0;
-            let angle = Deg(angle_deg);
-            world.insert_rotation(
-                entity,
-                core::Rotation {
-                    quat: <cgmath::Quaternion<f32> as cgmath::Rotation3>::from_angle_z(angle),
-                },
-            );
-            world.insert_scale(
-                entity,
-                core::Scale {
-                    value: cgmath::Vector3 {
-                        x: 1.0,
-                        y: 1.0,
-                        z: 1.0,
+        let uniform_bind_group = managers
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[
+                    // entry 0 → camera
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera.uniform_buffer.get().as_entire_binding(),
                     },
-                },
-            );
-            world.insert_renderable(
-                entity,
-                core::Renderable {
-                    model_key,
-                    visible: true,
-                },
-            );
-        }
+                    // entry 1 → light
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: light.uniform_buffer.get().as_entire_binding(),
+                    },
+                ],
+                label: Some("camera+light bind group"),
+            });
+        if let Some(world) = World::get() {
+            match world.write().as_mut() {
+                Ok(w) => {
+                    let cube_obj = "cube.obj";
+                    w.set_projection(equirect_projection);
 
-        let wgpu_renderer = WgpuRenderer::new();
-        let glyphon_renderer = GlyphonRenderer::new(
-            gpu.device(),
-            gpu.queue(),
-            surface_config.format,
-            &managers.texture_manager.depth_stencil_state,
-        );
+                    if let Some(model_key) = World::load_object(
+                        cube_obj,
+                        &mut managers,
+                        &uniform_bind_group,
+                        &camera,
+                        &light,
+                        &surface_config,
+                        wgpu_renderer.depth_stencil_state(),
+                    ) {
+                        let entity = w.spawn();
+                        w.insert_position(entity, core::Position { x: 1.0, y: 1.0 });
+                        w.insert_renderable(
+                            entity,
+                            core::Renderable {
+                                model_key,
+                                visible: true,
+                            },
+                        );
+                    }
+                }
+                _ => (),
+            }
+        }
 
         Ok(Rupy {
             managers,
@@ -223,62 +153,27 @@ impl Rupy {
             wgpu_renderer,
             glyphon_renderer,
             camera,
+            light,
             controller,
             last_shape_time: std::time::Instant::now(),
         })
     }
 
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
-        let binding = GPU::get();
-        let _ = match binding.read() {
-            Ok(gpu) => {
-                self.surface
-                    .resize(gpu.device(), &mut self.surface_config, *new_size);
-                self.glyphon_renderer.resize(
-                    gpu.queue(),
-                    glyphon::Resolution {
-                        width: self.surface_config.width,
-                        height: self.surface_config.height,
-                    },
-                );
-                self.managers.texture_manager.depth_texture = Texture::new(
-                    gpu.device(),
-                    wgpu::Extent3d {
-                        width: self.surface_config.width,
-                        height: self.surface_config.height,
-                        depth_or_array_layers: 1,
-                    },
-                    Texture::DEPTH_FORMAT,
-                    1,
-                    wgpu::TextureViewDimension::D2,
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                    Some(wgpu::AddressMode::ClampToEdge),
-                    wgpu::FilterMode::Linear,
-                    Some(gpu.device().create_sampler(&wgpu::SamplerDescriptor {
-                        address_mode_u: wgpu::AddressMode::ClampToEdge,
-                        address_mode_v: wgpu::AddressMode::ClampToEdge,
-                        address_mode_w: wgpu::AddressMode::ClampToEdge,
-                        mag_filter: wgpu::FilterMode::Linear,
-                        min_filter: wgpu::FilterMode::Linear,
-                        mipmap_filter: wgpu::FilterMode::Nearest,
-                        compare: Some(wgpu::CompareFunction::LessEqual),
-                        lod_min_clamp: 0.0,
-                        lod_max_clamp: 100.0,
-                        ..Default::default()
-                    })),
-                    Some("Depth texture"),
-                );
-                true
-            }
-            Err(e) => {
-                log_error!("Resize failed, could not acquire gpu lock: {}", e);
-                false
-            }
-        };
-    }
+        self.surface
+            .resize(&self.managers.device, &mut self.surface_config, *new_size);
+        self.glyphon_renderer.resize(
+            &self.managers.queue,
+            glyphon::Resolution {
+                width: self.surface_config.width,
+                height: self.surface_config.height,
+            },
+        );
 
-    pub fn load_shader(&mut self, rel_path: &str) {
-        let _ = core::Shader::load(&mut self.managers, &rel_path);
+        self.wgpu_renderer.set_depth_texture(Texture::depth_texture(
+            &self.managers.device,
+            &self.surface_config,
+        ));
     }
 
     pub fn draw(&mut self) {
@@ -319,11 +214,7 @@ impl Rupy {
                                         )],
                                         depth_stencil_attachment: Some(
                                             wgpu::RenderPassDepthStencilAttachment {
-                                                view: &self
-                                                    .managers
-                                                    .texture_manager
-                                                    .depth_texture
-                                                    .view,
+                                                view: &self.wgpu_renderer.depth_texture().view,
                                                 depth_ops: Some(wgpu::Operations {
                                                     load: wgpu::LoadOp::Clear(1.0),
                                                     store: wgpu::StoreOp::Store,
@@ -351,6 +242,8 @@ impl Rupy {
                                     &self.camera,
                                 );
                             }
+
+                            self.wgpu_renderer.process_hdr(&mut render_encoder, &view);
                             gpu.queue().submit(Some(render_encoder.finish()));
                             frame.present();
                         }
@@ -378,24 +271,16 @@ impl Rupy {
         let _ = match binding.read() {
             Ok(gpu) => {
                 self.camera.update(&mut self.controller);
-                let camera_uniform_buffer = self.managers.buffer_manager.w_buffer.get_or_create(
-                    self.camera.uniform_cache_key.clone(),
-                    || {
-                        WgpuBuffer::from_data(
-                            gpu.queue(),
-                            gpu.device(),
-                            &[self.camera.uniform],
-                            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            Some(&format!("camera uniform buffer")),
-                        )
-                        .into()
-                    },
-                );
-                camera_uniform_buffer.write_data(gpu.queue(), &[self.camera.uniform], None);
+                self.camera
+                    .uniform_buffer
+                    .write_data(gpu.queue(), &[self.camera.uniform()], None);
+                self.light
+                    .uniform_buffer
+                    .write_data(gpu.queue(), &[self.light.uniform()], None);
 
                 if self.last_shape_time.elapsed().as_millis() > 1000 {
                     let text_buffer = self.managers.buffer_manager.g_buffer.get_or_create(
-                        CacheKey::new(Self::TEXT_BUFFER),
+                        CacheKey::new("debug text buffer"),
                         || {
                             let metrics = glyphon::Metrics {
                                 font_size: 20.0,

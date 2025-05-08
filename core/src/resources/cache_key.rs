@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct CacheKey {
     pub id: String,
 }

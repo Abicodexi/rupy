@@ -1,7 +1,8 @@
 /// Wrapper around WGPU buffers
+#[derive(Debug)]
 pub struct WgpuBuffer {
-    pub buffer: wgpu::Buffer,
-    pub size: usize,
+    buffer: wgpu::Buffer,
+    size: usize,
 }
 
 impl WgpuBuffer {
@@ -26,6 +27,12 @@ impl WgpuBuffer {
             buffer,
             size: size as usize,
         }
+    }
+    pub fn get(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+    pub fn size(&self) -> usize {
+        self.size
     }
     /// Create a new empty GPU buffer with given usage flags
 

@@ -1,5 +1,5 @@
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub inv_proj: [[f32; 4]; 4],
