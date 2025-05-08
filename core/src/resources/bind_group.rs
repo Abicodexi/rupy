@@ -6,7 +6,7 @@ fn init_bind_group_layouts(device: &wgpu::Device) {
     BGL.get_or_init(|| BindGroupLayouts::new(device));
 }
 
-fn texture_bind_group_layout() -> &'static wgpu::BindGroupLayout {
+fn diffuse_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").texture
 }
 fn uniform_bind_group_layout() -> &'static wgpu::BindGroupLayout {
@@ -28,6 +28,39 @@ fn equirect_dst_bind_group_layout() -> &'static wgpu::BindGroupLayout {
 fn light_bind_group_layout() -> &'static wgpu::BindGroupLayout {
     &BGL.get().expect("BGL not initialized").light
 }
+
+pub struct BindGroupEntry{
+    stages: wgpu::ShaderStages,    
+    binding_type: wgpu::BindingType,
+
+};
+pub struct BindGroupBinding {
+    bindings: Vec<BindGroupEntry>
+
+};
+
+impl BindGroupBinding {
+    pub const TEXTURE2D: BindGroupBinding = BindGroupBinding {
+        bindings: vec![
+            BindGroupEntry {
+                stages: wgpu::ShaderStages::FRAGMENT,
+                binding_type:  wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                }
+
+            },
+            BindGroupEntry {
+                stages: wgpu::ShaderStages::FRAGMENT,
+                binding_type                 wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+
+            }
+        ]
+    }
+}
+
+
 pub struct BindGroupLayoutBuilder<'a> {
     device: &'a wgpu::Device,
     label: Option<&'a str>,
@@ -70,7 +103,7 @@ impl<'a> BindGroupLayoutBuilder<'a> {
 }
 
 pub struct BindGroupLayouts {
-    pub texture: wgpu::BindGroupLayout,
+    pub diffuse: wgpu::BindGroupLayout,
     pub light: wgpu::BindGroupLayout,
     pub camera: wgpu::BindGroupLayout,
     pub equirect_src: wgpu::BindGroupLayout,
@@ -86,7 +119,7 @@ impl BindGroupLayouts {
     pub fn uniform() -> &'static wgpu::BindGroupLayout {
         uniform_bind_group_layout()
     }
-    pub fn normal_map() -> &'static wgpu::BindGroupLayout {
+    pub fn normal() -> &'static wgpu::BindGroupLayout {
         normal_bind_group_layout()
     }
     pub fn camera() -> &'static wgpu::BindGroupLayout {
@@ -96,8 +129,8 @@ impl BindGroupLayouts {
         light_bind_group_layout()
     }
 
-    pub fn texture() -> &'static wgpu::BindGroupLayout {
-        texture_bind_group_layout()
+    pub fn diffuse() -> &'static wgpu::BindGroupLayout {
+        diffuse_bind_group_layout()
     }
     pub fn equirect_src() -> &'static wgpu::BindGroupLayout {
         equirect_src_bind_group_layout()
