@@ -33,5 +33,8 @@ async fn main() -> Result<(), EngineError> {
 
     WorldTick::run_tokio(&arc_tx);
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
+
+    let _ = core::BindGroupLayouts::get();
+
     Ok(event_loop.run_app(&mut ApplicationState::new())?)
 }

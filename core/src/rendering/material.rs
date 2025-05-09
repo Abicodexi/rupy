@@ -207,6 +207,7 @@ impl Material {
     pub fn load_tobj_materials(
         managers: &mut crate::Managers,
         uniform_bind_group: &wgpu::BindGroup,
+        equirect_projection_bind_group: &wgpu::BindGroup,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil_state: &Option<wgpu::DepthStencilState>,
         camera: &crate::camera::Camera,
@@ -219,6 +220,7 @@ impl Material {
                 crate::Material::from_tobj_material(
                     managers,
                     uniform_bind_group,
+                    equirect_projection_bind_group,
                     light,
                     surface_config,
                     depth_stencil_state,
@@ -232,6 +234,7 @@ impl Material {
     pub fn from_tobj_material(
         managers: &mut crate::Managers,
         uniform_bind_group: &wgpu::BindGroup,
+        equirect_projection_bind_group: &wgpu::BindGroup,
         light: &crate::Light,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil_state: &Option<wgpu::DepthStencilState>,
@@ -265,7 +268,7 @@ impl Material {
             )?;
 
             bind_groups.push(
-                crate::BindGroup::normal_map(
+                crate::BindGroup::normal(
                     &managers.device,
                     &diffuse_tex,
                     &normal_tex,
@@ -273,20 +276,14 @@ impl Material {
                 )
                 .into(),
             );
-            bind_group_layouts.push(crate::BindGroupLayouts::normal_map().clone());
+            bind_group_layouts.push(crate::BindGroupLayouts::normal().clone());
             (Some(diffuse_key), Some(normal_key))
         } else {
             (None, None)
         };
 
-        if let Some(bind_group) = managers.bind_group_manager.bind_group_for(
-            &managers.texture_manager,
-            &"equirect projection destination",
-            &crate::BindGroupLayouts::equirect_dst(),
-        ) {
-            bind_groups.push(bind_group.clone());
-            bind_group_layouts.push(crate::BindGroupLayouts::equirect_dst().clone());
-        }
+        bind_groups.push(equirect_projection_bind_group.clone().into());
+        bind_group_layouts.push(crate::BindGroupLayouts::equirect_dst().clone());
 
         let shader_key = crate::CacheKey::from(shader_rel_path);
         let shader_module = crate::Asset::shader(managers, &shader_key.id).expect(&format!(
@@ -295,7 +292,6 @@ impl Material {
         ));
         let bind_group_layout_refs: Vec<&wgpu::BindGroupLayout> =
             bind_group_layouts.iter().collect();
-        log_info!("LAYOUTS: {:?}", bind_group_layout_refs.len());
         let pipeline_layout =
             managers
                 .device

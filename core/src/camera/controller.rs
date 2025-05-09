@@ -102,4 +102,17 @@ impl CameraController {
 
         camera.target = camera.eye + front;
     }
+    pub fn buffer_line(
+        &mut self,
+        line_ending: &glyphon::cosmic_text::LineEnding,
+        attrs_list: &glyphon::AttrsList,
+        shaping: &glyphon::Shaping,
+    ) -> glyphon::BufferLine {
+        glyphon::BufferLine::new(
+            format!("yaw: {:.2} pitch: {:.2}", self.yaw, self.pitch),
+            *line_ending,
+            attrs_list.clone(),
+            *shaping,
+        )
+    }
 }

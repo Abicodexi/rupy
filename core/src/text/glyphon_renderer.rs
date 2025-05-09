@@ -81,8 +81,6 @@ impl GlyphonRenderer {
 impl crate::Renderer for GlyphonRenderer {
     fn render(
         &self,
-        _queue: &wgpu::Queue,
-        _device: &wgpu::Device,
         _managers: &mut crate::Managers,
         rpass: &mut wgpu::RenderPass,
         _world: &crate::World,

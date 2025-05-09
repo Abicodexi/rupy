@@ -34,6 +34,7 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
 
             if let WindowEvent::RedrawRequested = &event {
                 app.update();
+                app.upload();
                 app.window.request_redraw();
             }
         }

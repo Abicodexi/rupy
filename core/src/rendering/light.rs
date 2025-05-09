@@ -24,23 +24,31 @@ impl LightUniform {
 
 #[derive(Debug)]
 pub struct Light {
-    pub position: cgmath::Vector3<f32>,
-    pub color: cgmath::Vector3<f32>,
-    pub bind_group: wgpu::BindGroup,
-    pub uniform_buffer: crate::WgpuBuffer,
+    position: cgmath::Vector3<f32>,
+    color: cgmath::Vector3<f32>,
+    bind_group: wgpu::BindGroup,
+    uniform_buffer: crate::WgpuBuffer,
 }
 
 impl Light {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = LightUniform::LAYOUT;
-    pub fn new(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        position: cgmath::Vector3<f32>,
-        color: cgmath::Vector3<f32>,
-    ) -> Result<Self, crate::EngineError> {
+    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(10.0, 0.0, 10.0);
+    pub const RADIUS: f32 = 360.0;
+    pub const BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
+        binding: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: std::num::NonZeroU64::new(
+                std::mem::size_of::<crate::LightUniform>() as u64
+            ),
+        },
+    };
+
+    pub fn new(device: &wgpu::Device) -> Result<Self, crate::EngineError> {
+        let position: cgmath::Vector3<f32> = Self::CENTER.into();
+        let color: cgmath::Vector3<f32> = [5.0, 1.0, 1.0].into();
         let bind_group_layout = crate::BindGroupLayouts::light();
         let uniform_buffer = WgpuBuffer::from_data(
-            queue,
             device,
             &[LightUniform::new()],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -61,6 +69,35 @@ impl Light {
             bind_group,
             uniform_buffer,
         })
+    }
+
+    /// Directly set a new light position (and immediately upload it).
+    pub fn set_position(&mut self, new_position: cgmath::Vector3<f32>, queue: &wgpu::Queue) {
+        self.position = new_position;
+        self.upload(queue);
+    }
+
+    /// Orbit the light in a circle around `center` on the XZ plane.
+    ///
+    /// - `time_s` is the elapsed time in seconds (e.g. your frame time or total run time)..
+    pub fn orbit(&mut self, time_s: f32) {
+        let angle = time_s; // 1 rad/sec;
+        let (sin, cos) = angle.sin_cos();
+
+        self.position.x = Light::CENTER.x + Light::RADIUS * cos;
+        self.position.z = Light::CENTER.z + Light::RADIUS * sin;
+        self.color.x -= sin;
+        self.color.y += cos;
+    }
+    pub fn buffer(&self) -> &crate::WgpuBuffer {
+        &self.uniform_buffer
+    }
+    pub fn upload(&mut self, queue: &wgpu::Queue) {
+        self.uniform_buffer
+            .write_data(queue, &[self.uniform()], None);
+    }
+    pub fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
     }
     pub fn uniform(&self) -> LightUniform {
         let position: [f32; 3] = [self.position.x, self.position.y, self.position.z];

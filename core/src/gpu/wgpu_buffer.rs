@@ -8,7 +8,6 @@ pub struct WgpuBuffer {
 impl WgpuBuffer {
     /// Create a new GPU buffer with given data and usage flags
     pub fn from_data<T: bytemuck::Pod>(
-        queue: &wgpu::Queue,
         device: &wgpu::Device,
         data: &[T],
         usage: wgpu::BufferUsages,
@@ -22,7 +21,6 @@ impl WgpuBuffer {
             contents,
             usage,
         });
-        queue.write_buffer(&buffer, 0, contents);
         crate::WgpuBuffer {
             buffer,
             size: size as usize,

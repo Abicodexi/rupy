@@ -59,13 +59,15 @@ impl MeshInstance {
         };
 
         if !crate::CacheStorage::contains(&managers.buffer_manager.w_buffer, &vertex_buffer_key) {
+            let data = bytemuck::cast_slice(vertices);
             let vertex_buffer = crate::WgpuBuffer::from_data(
-                &managers.queue,
                 &managers.device,
-                vertices,
+                data,
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} mesh vertex buffer", vertex_buffer_key.id)),
             );
+            managers.queue.write_buffer(vertex_buffer.get(), 0, data);
+
             crate::CacheStorage::insert(
                 &mut managers.buffer_manager.w_buffer,
                 vertex_buffer_key.clone(),
@@ -74,14 +76,14 @@ impl MeshInstance {
         }
 
         if !crate::CacheStorage::contains(&managers.buffer_manager.w_buffer, &index_buffer_key) {
+            let data = bytemuck::cast_slice(indices);
             let index_buffer = crate::WgpuBuffer::from_data(
-                &managers.queue,
                 &managers.device,
-                indices,
+                data,
                 wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} mesh vertex buffer", index_buffer_key.id)),
             );
-
+            managers.queue.write_buffer(index_buffer.get(), 0, data);
             crate::CacheStorage::insert(
                 &mut managers.buffer_manager.w_buffer,
                 index_buffer_key.clone(),

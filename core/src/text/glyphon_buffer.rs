@@ -18,25 +18,29 @@ impl GlyphonBuffer {
         lines: &Vec<glyphon::BufferLine>,
     ) -> Self {
         let mut buffer = GlyphonBuffer::new(font_system, Some(metrics));
-        buffer.push_buffer_lines(lines);
+        buffer.push_lines(lines);
         buffer
     }
     /// Append lines into the buffer
-    pub fn push_buffer_lines(&mut self, lines: &Vec<glyphon::BufferLine>) {
+    pub fn push_lines(&mut self, lines: &Vec<glyphon::BufferLine>) {
         for line in lines.iter() {
             self.buffer.lines.push(line.clone());
         }
     }
     /// Append lines into the buffer
-    pub fn push_buffer_line(&mut self, line: glyphon::BufferLine) {
+    pub fn push_line(&mut self, line: glyphon::BufferLine) {
         self.buffer.lines.push(line);
     }
-    pub fn set_buffer_lines(&mut self, lines: Vec<glyphon::BufferLine>) {
+    pub fn set_lines(&mut self, lines: Vec<glyphon::BufferLine>) {
         self.buffer.lines = lines;
     }
     /// Clear all lines from the buffer
-    pub fn clear_buffer_lines(&mut self) {
+    pub fn clear_lines(&mut self) {
         self.buffer.lines.clear();
+    }
+    /// Clear all lines from the buffer
+    pub fn shape(&mut self, font_system: &mut glyphon::FontSystem) {
+        self.buffer.shape_until_scroll(font_system, false);
     }
 }
 

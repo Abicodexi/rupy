@@ -82,6 +82,7 @@ impl Model {
         obj: P,
         managers: &mut crate::Managers,
         uniform_bind_group: &wgpu::BindGroup,
+        equirect_project_bind_group: &wgpu::BindGroup,
         camera: &crate::camera::Camera,
         light: &crate::Light,
         surface_config: &wgpu::SurfaceConfiguration,
@@ -124,6 +125,7 @@ impl Model {
             let mats = crate::Material::load_tobj_materials(
                 managers,
                 uniform_bind_group,
+                equirect_project_bind_group,
                 surface_config,
                 depth_stencil_state,
                 camera,

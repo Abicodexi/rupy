@@ -2,6 +2,7 @@ use crate::{CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use std::io::Cursor;
 use std::sync::Arc;
+
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -12,6 +13,60 @@ pub struct Texture {
 
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+    pub const D2: [super::BindGroupBindingType; 2] = [
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Texture {
+                multisampled: false,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            },
+        },
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        },
+    ];
+
+    pub const PROJECTION: [super::BindGroupBindingType; 2] = [
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        },
+        crate::BindGroupBindingType {
+            binding: wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba32Float,
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+            },
+        },
+    ];
+    pub const NORMAL: [super::BindGroupBindingType; 4] = [
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Texture {
+                multisampled: false,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            },
+        },
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        },
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Texture {
+                multisampled: false,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            },
+        },
+        super::BindGroupBindingType {
+            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        },
+    ];
+
     pub async fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
         let texture = device.create_texture(desc);
 
@@ -281,6 +336,54 @@ impl Texture {
                 ..Default::default()
             })),
             Some("Depth texture"),
+        )
+    }
+    pub fn equirect_projection_src_texture(
+        device: &wgpu::Device,
+        texture: &str,
+        format: &wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Texture {
+        crate::Texture::new(
+            device,
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            *format,
+            1,
+            wgpu::TextureViewDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            None,
+            wgpu::FilterMode::Linear,
+            None,
+            Some(&format!("{} source texture", texture)),
+        )
+    }
+    pub fn equirect_projection_dst_texture(
+        device: &wgpu::Device,
+        texture: &str,
+        format: &wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Texture {
+        crate::Texture::new(
+            device,
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 6,
+            },
+            *format,
+            1,
+            wgpu::TextureViewDimension::Cube,
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            Some(wgpu::AddressMode::ClampToEdge),
+            wgpu::FilterMode::Nearest,
+            None,
+            Some(&format!("{} destination texture", texture)),
         )
     }
     pub fn create_projection_view(&self) -> wgpu::TextureView {

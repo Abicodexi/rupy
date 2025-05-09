@@ -144,28 +144,14 @@ impl WgpuRenderer {
     pub fn depth_stencil_state(&self) -> &Option<wgpu::DepthStencilState> {
         &self.depth_stencil_state
     }
-    pub fn compute_pass(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        world: &crate::World,
-        managers: &mut crate::Managers,
-    ) {
+    pub fn compute_pass(&self, world: &crate::World, managers: &mut crate::Managers) {
         if let Some(projection) = world.projection() {
-            let encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("compute encoder"),
-            });
-            projection.compute_projection(
-                queue,
-                encoder,
-                managers,
-                Some("equirect projection compute pass"),
-            );
+            projection.compute_projection(managers, Some("equirect projection compute pass"));
         }
     }
     pub fn process_hdr(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Hdr::process"),
+            label: Some("hdr compute pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: output,
                 resolve_target: None,
@@ -189,13 +175,15 @@ impl WgpuRenderer {
 impl crate::Renderer for WgpuRenderer {
     fn render(
         &self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
         managers: &mut crate::Managers,
         rpass: &mut wgpu::RenderPass,
         world: &crate::World,
         camera: &crate::camera::Camera,
     ) {
+        if let Some(projection) = world.projection() {
+            projection.render(rpass, managers, camera);
+        }
+
         let frustum = &camera.frustum();
 
         for (entity, rend_opt) in world.get_renderables().iter().enumerate() {
@@ -244,8 +232,7 @@ impl crate::Renderer for WgpuRenderer {
                             )
                             .unwrap();
                             let instance_buffer = crate::WgpuBuffer::from_data(
-                                queue,
-                                device,
+                                &managers.device,
                                 &instance_data,
                                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                                 Some(&format!("{} instance batch buffer", model.name)),
@@ -265,13 +252,12 @@ impl crate::Renderer for WgpuRenderer {
                     } else {
                         let instance_buffer = if let Some(tr) = &world.transforms[entity] {
                             let ib = crate::WgpuBuffer::from_data(
-                                queue,
-                                device,
+                                &managers.device,
                                 bytemuck::bytes_of(&tr.data()),
                                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                                 Some(&format!("{} instance buffer", model.name)),
                             );
-                            queue.write_buffer(
+                            managers.queue.write_buffer(
                                 &ib.get(),
                                 0,
                                 bytemuck::cast_slice(bytemuck::bytes_of(&tr.data())),
@@ -280,13 +266,12 @@ impl crate::Renderer for WgpuRenderer {
                         } else {
                             let tr = crate::Transform::default();
                             let ib = crate::WgpuBuffer::from_data(
-                                queue,
-                                device,
+                                &managers.device,
                                 &bytemuck::bytes_of(&crate::Transform::default().data()),
                                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                                 Some(&format!("{} instance buffer", model.name)),
                             );
-                            queue.write_buffer(
+                            managers.queue.write_buffer(
                                 &ib.get(),
                                 0,
                                 bytemuck::cast_slice(bytemuck::bytes_of(&tr.data())),
@@ -316,9 +301,6 @@ impl crate::Renderer for WgpuRenderer {
                     }
                 }
             }
-        }
-        if let Some(projection) = world.projection() {
-            projection.render(rpass, managers, camera);
         }
     }
 }
