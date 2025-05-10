@@ -32,7 +32,7 @@ pub struct Light {
 
 impl Light {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = LightUniform::LAYOUT;
-    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(10.0, 0.0, 10.0);
+    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(10.0, 10.0, 10.0);
     pub const RADIUS: f32 = 360.0;
     pub const BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
         binding: wgpu::BindingType::Buffer {
@@ -46,7 +46,7 @@ impl Light {
 
     pub fn new(device: &wgpu::Device) -> Result<Self, crate::EngineError> {
         let position: cgmath::Vector3<f32> = Self::CENTER.into();
-        let color: cgmath::Vector3<f32> = [5.0, 1.0, 1.0].into();
+        let color: cgmath::Vector3<f32> = [1.0, 1.0, 1.0].into();
         let bind_group_layout = crate::BindGroupLayouts::light();
         let uniform_buffer = WgpuBuffer::from_data(
             device,
@@ -71,23 +71,16 @@ impl Light {
         })
     }
 
-    /// Directly set a new light position (and immediately upload it).
-    pub fn set_position(&mut self, new_position: cgmath::Vector3<f32>, queue: &wgpu::Queue) {
+    pub fn set_position(&mut self, new_position: cgmath::Vector3<f32>) {
         self.position = new_position;
-        self.upload(queue);
     }
 
-    /// Orbit the light in a circle around `center` on the XZ plane.
-    ///
-    /// - `time_s` is the elapsed time in seconds (e.g. your frame time or total run time)..
     pub fn orbit(&mut self, time_s: f32) {
         let angle = time_s; // 1 rad/sec;
         let (sin, cos) = angle.sin_cos();
 
         self.position.x = Light::CENTER.x + Light::RADIUS * cos;
         self.position.z = Light::CENTER.z + Light::RADIUS * sin;
-        self.color.x -= sin;
-        self.color.y += cos;
     }
     pub fn buffer(&self) -> &crate::WgpuBuffer {
         &self.uniform_buffer

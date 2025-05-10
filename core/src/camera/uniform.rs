@@ -1,11 +1,11 @@
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct CameraUniform {
-    pub view_proj: [[f32; 4]; 4],
-    pub inv_proj: [[f32; 4]; 4],
-    pub inv_view: [[f32; 4]; 4],
-    pub world_pos: [f32; 3], // 12 bytes
-    pub _pad: f32,           // +4 bytes = 16-byte aligned
+    view_proj: [[f32; 4]; 4],
+    inv_proj: [[f32; 4]; 4],
+    inv_view: [[f32; 4]; 4],
+    world_pos: [f32; 3], // 12 bytes
+    _pad: f32,           // +4 bytes = 16-byte aligned
 }
 
 impl CameraUniform {

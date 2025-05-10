@@ -51,12 +51,8 @@ impl MeshInstance {
             };
         }
 
-        let vertex_buffer_key = crate::CacheKey {
-            id: format!("{}:vertex_buffer", material_key.id),
-        };
-        let index_buffer_key = crate::CacheKey {
-            id: format!("{}:index_buffer", material_key.id),
-        };
+        let vertex_buffer_key = crate::CacheKey::from(format!("{}:vertex", material_key.id()));
+        let index_buffer_key = crate::CacheKey::from(format!("{}:index", material_key.id()));
 
         if !crate::CacheStorage::contains(&managers.buffer_manager.w_buffer, &vertex_buffer_key) {
             let data = bytemuck::cast_slice(vertices);
@@ -64,7 +60,7 @@ impl MeshInstance {
                 &managers.device,
                 data,
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                Some(&format!("{} mesh vertex buffer", vertex_buffer_key.id)),
+                Some(&format!("{} mesh vertex buffer", material.name)),
             );
             managers.queue.write_buffer(vertex_buffer.get(), 0, data);
 
@@ -81,7 +77,7 @@ impl MeshInstance {
                 &managers.device,
                 data,
                 wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                Some(&format!("{} mesh vertex buffer", index_buffer_key.id)),
+                Some(&format!("{} mesh index buffer", material.name)),
             );
             managers.queue.write_buffer(index_buffer.get(), 0, data);
             crate::CacheStorage::insert(
@@ -138,7 +134,10 @@ impl crate::CacheStorage<Mesh> for MeshManager {
     where
         F: FnOnce() -> Mesh,
     {
-        self.meshes.entry(key).or_insert_with(create_fn)
+        let start = std::time::Instant::now();
+        let mesh = self.meshes.entry(key).or_insert_with(create_fn);
+        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
+        mesh
     }
     fn insert(&mut self, key: crate::CacheKey, resource: Mesh) {
         self.meshes.insert(key, resource);

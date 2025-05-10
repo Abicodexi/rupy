@@ -1,9 +1,8 @@
 use core::{
     camera::{Camera, CameraController},
-    log_error, CacheKey, CacheStorage, EngineError, EquirectProjection, GlyphonBuffer,
-    GlyphonRenderer, Light, Managers, Renderer, SurfaceExt, Texture, Time, WgpuRenderer, World,
+    log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer,
+    SurfaceExt, Texture, Time, WgpuRenderer, World,
 };
-use glyphon::{cosmic_text::LineEnding, Attrs, Shaping};
 use std::sync::Arc;
 use winit::{
     dpi::PhysicalSize,
@@ -22,6 +21,7 @@ pub struct Rupy {
     pub glyphon_renderer: GlyphonRenderer,
     pub camera: Camera,
     pub light: Light,
+    pub uniform_bind_group: wgpu::BindGroup,
     pub controller: CameraController,
     pub last_shape_time: std::time::Instant,
 }
@@ -52,7 +52,7 @@ impl Rupy {
                     "surface isn't supported by this adapter".into(),
                 ))?;
 
-            let managers = Managers::new(gpu.queue(), gpu.device());
+            let managers: Managers = gpu.into();
             (surface, surface_config, managers)
         };
 
@@ -81,33 +81,10 @@ impl Rupy {
             wgpu_renderer.depth_stencil_state(),
         )?;
 
-        let uniform_bind_group = managers
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &core::BindGroupLayouts::uniform(),
-                entries: &[
-                    // entry 0 → camera
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: camera.buffer().get().as_entire_binding(),
-                    },
-                    // entry 1 → light
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: light.buffer().get().as_entire_binding(),
-                    },
-                ],
-                label: Some("camera+light bind group"),
-            });
+        let uniform_bind_group =
+            core::BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
 
-        if let (Some(world), Some(equirect_projection_bind_group)) = (
-            World::get(),
-            managers.bind_group_manager.bind_group_for(
-                &managers.texture_manager,
-                &equirect_projection.dst_texture_key.id,
-                &core::BindGroupLayouts::equirect_dst(),
-            ),
-        ) {
+        if let Some(world) = World::get() {
             match world.write().as_mut() {
                 Ok(w) => {
                     let cube_obj = "cube.obj";
@@ -116,22 +93,12 @@ impl Rupy {
                     if let Some(model_key) = World::load_object(
                         cube_obj,
                         &mut managers,
-                        &uniform_bind_group,
-                        &equirect_projection_bind_group,
-                        &camera,
-                        &light,
                         &surface_config,
                         wgpu_renderer.depth_stencil_state(),
                     ) {
                         let entity = w.spawn();
-                        w.insert_position(entity, core::Position { x: 1.0, y: 1.0 });
-                        w.insert_renderable(
-                            entity,
-                            core::Renderable {
-                                model_key,
-                                visible: true,
-                            },
-                        );
+                        w.insert_position(entity, (1.0, 1.0).into());
+                        w.insert_renderable(entity, model_key.into());
                     }
                 }
                 _ => (),
@@ -148,6 +115,7 @@ impl Rupy {
             glyphon_renderer,
             camera,
             light,
+            uniform_bind_group,
             controller,
             last_shape_time: std::time::Instant::now(),
         })
@@ -156,13 +124,8 @@ impl Rupy {
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface
             .resize(&self.managers.device, &mut self.surface_config, *new_size);
-        self.glyphon_renderer.resize(
-            &self.managers.queue,
-            glyphon::Resolution {
-                width: self.surface_config.width,
-                height: self.surface_config.height,
-            },
-        );
+        self.glyphon_renderer
+            .resize(&self.managers.queue, *new_size);
 
         self.wgpu_renderer.set_depth_texture(Texture::depth_texture(
             &self.managers.device,
@@ -215,16 +178,18 @@ impl Rupy {
                                 &mut rpass,
                                 &w,
                                 &self.camera,
+                                &self.uniform_bind_group,
                             );
                             self.glyphon_renderer.render(
                                 &mut self.managers,
                                 &mut rpass,
                                 &w,
                                 &self.camera,
+                                &self.uniform_bind_group,
                             );
                         }
 
-                        self.wgpu_renderer.process_hdr(&mut render_encoder, &view);
+                        self.wgpu_renderer.hdr(&mut render_encoder, &view);
                         self.managers.queue.submit(Some(render_encoder.finish()));
                         frame.present();
                     }
@@ -281,7 +246,7 @@ impl Rupy {
             let lines = self.buffer_lines();
             let gb = core::CacheStorage::get_or_create(
                 &mut self.managers.buffer_manager.g_buffer,
-                core::CacheKey::new("text buffer"),
+                "text buffer".into(),
                 || {
                     core::GlyphonBuffer::new(
                         &mut self.glyphon_renderer.font_system,

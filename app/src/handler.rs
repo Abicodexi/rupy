@@ -22,20 +22,20 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
     ) {
         if let WindowEvent::CloseRequested = event {
             World::stop();
-            event_loop.exit();
+            event_loop.exit()
         }
 
         if let AppInnerState::Running(app) = &mut self.inner {
-            app.controller.process_events(&event);
+            app.controller.process(&event);
 
             if let WindowEvent::Resized(new_size) = &event {
-                app.resize(new_size);
+                app.resize(new_size)
             }
 
             if let WindowEvent::RedrawRequested = &event {
                 app.update();
                 app.upload();
-                app.window.request_redraw();
+                app.window.request_redraw()
             }
         }
     }
@@ -43,10 +43,10 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
         if let AppInnerState::Running(app) = &mut self.inner {
             match event {
-                ApplicationEvent::WorldRequestRedraw => app.draw(),
+                ApplicationEvent::Draw => app.draw(),
                 ApplicationEvent::Shutdown => {
                     World::stop();
-                    event_loop.exit();
+                    event_loop.exit()
                 }
             }
         }

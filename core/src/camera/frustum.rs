@@ -1,12 +1,12 @@
 #[derive(Copy, Clone, Debug)]
 pub struct Frustum {
-    pub planes: [Plane; 6],
+    planes: [Plane; 6],
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Plane {
-    pub normal: cgmath::Vector3<f32>,
-    pub d: f32,
+    normal: cgmath::Vector3<f32>,
+    d: f32,
 }
 
 impl Plane {

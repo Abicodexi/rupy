@@ -251,6 +251,7 @@ impl BindGroup {
             label: Some(&format!("{}  projection source bind group", src.label,)),
         })
     }
+
     pub fn camera(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera uniform bind group"),
@@ -273,14 +274,21 @@ impl BindGroup {
     }
     pub fn uniform(
         device: &wgpu::Device,
-        combined_uniform_buffer: &crate::WgpuBuffer,
+        camera_uniform_buffer: &crate::WgpuBuffer,
+        light_uniform_buffer: &crate::WgpuBuffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &crate::BindGroupLayouts::uniform(),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: combined_uniform_buffer.get().as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_uniform_buffer.get().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: light_uniform_buffer.get().as_entire_binding(),
+                },
+            ],
             label: Some("combined UBO bind group"),
         })
     }
@@ -358,28 +366,23 @@ impl BindGroupManager {
             bind_groups: HashCache::new(),
         }
     }
-    pub fn bind_group(&self, key: &str) -> Option<std::sync::Arc<wgpu::BindGroup>> {
-        self.bind_groups
-            .get(&super::CacheKey { id: key.into() })
-            .cloned()
+    pub fn bind_group(&self, key: &super::CacheKey) -> Option<&std::sync::Arc<wgpu::BindGroup>> {
+        self.bind_groups.get(key)
     }
     pub fn bind_group_for(
         &mut self,
         texture_manager: &TextureManager,
-        key: &str,
+        key: &super::CacheKey,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
         let binding = crate::GPU::get();
-        let cache_key: crate::CacheKey = key.into();
         if let Ok(gpu) = binding.read() {
-            if !self.bind_groups.contains(&super::CacheKey {
-                id: cache_key.id.clone(),
-            }) {
-                let tex = texture_manager.get(key)?;
+            if !self.bind_groups.contains(&key) {
+                let tex = texture_manager.get(*key)?;
                 let bind_group: std::sync::Arc<wgpu::BindGroup> = gpu
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("tex_bg:{}", key)),
+                        label: Some(&format!("tex_bg:{}", key.id())),
                         layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -393,11 +396,11 @@ impl BindGroupManager {
                         ],
                     })
                     .into();
-                self.bind_groups.insert(cache_key.clone(), bind_group);
+                self.bind_groups.insert(key.clone(), bind_group);
             }
         }
 
-        self.bind_groups.get(&cache_key).cloned()
+        self.bind_groups.get(key).cloned()
     }
 }
 

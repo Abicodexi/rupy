@@ -2,22 +2,62 @@ use cgmath::SquareMatrix;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Position {
-    pub x: f32,
-    pub y: f32,
+    x: f32,
+    y: f32,
+}
+impl Position {
+    pub fn update(&mut self, velocity: &crate::Velocity) {
+        self.x += velocity.dx;
+        self.y += velocity.dy;
+    }
+}
+impl From<(f32, f32)> for Position {
+    fn from(value: (f32, f32)) -> Self {
+        Self {
+            x: value.0,
+            y: value.1,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Velocity {
-    pub dx: f32,
-    pub dy: f32,
+    dx: f32,
+    dy: f32,
+}
+
+impl From<(f32, f32)> for Velocity {
+    fn from(value: (f32, f32)) -> Self {
+        Self {
+            dx: value.0,
+            dy: value.1,
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct Rotation {
-    pub quat: cgmath::Quaternion<f32>,
+    quat: cgmath::Quaternion<f32>,
+}
+
+impl From<cgmath::Quaternion<f32>> for Rotation {
+    fn from(value: cgmath::Quaternion<f32>) -> Self {
+        Self { quat: value }
+    }
+}
+
+impl From<cgmath::Deg<f32>> for Rotation {
+    fn from(value: cgmath::Deg<f32>) -> Self {
+        Rotation {
+            quat: <cgmath::Quaternion<f32> as cgmath::Rotation3>::from_angle_z(value),
+        }
+    }
 }
 
 impl Rotation {
+    pub fn update(&mut self, delta: cgmath::Quaternion<f32>) {
+        self.quat = delta * self.quat
+    }
     pub fn from_euler(yaw: f32, pitch: f32, roll: f32) -> Self {
         let yaw = cgmath::Rad(yaw);
         let pitch = cgmath::Rad(pitch);
@@ -52,6 +92,12 @@ impl Scale {
         Self {
             value: cgmath::Vector3::new(1.0, 1.0, 1.0),
         }
+    }
+}
+
+impl From<cgmath::Vector3<f32>> for Scale {
+    fn from(value: cgmath::Vector3<f32>) -> Self {
+        Self { value }
     }
 }
 
@@ -113,4 +159,22 @@ impl Transform {
 pub struct Renderable {
     pub model_key: crate::CacheKey,
     pub visible: bool,
+}
+
+impl From<crate::Entity> for Renderable {
+    fn from(value: crate::Entity) -> Self {
+        Self {
+            model_key: value.into(),
+            visible: true,
+        }
+    }
+}
+
+impl From<&crate::Entity> for Renderable {
+    fn from(value: &crate::Entity) -> Self {
+        Self {
+            model_key: value.clone().into(),
+            visible: true,
+        }
+    }
 }

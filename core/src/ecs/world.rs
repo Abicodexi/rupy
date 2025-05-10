@@ -154,66 +154,48 @@ impl World {
         }
     }
 
-    pub fn new_renderable(
+    pub fn spawn_model(
         &mut self,
-        model_key: &str,
+        model: &str,
         position: Option<super::Position>,
         rotation: Option<super::Rotation>,
         scale: Option<super::Scale>,
     ) {
         let entity: super::Entity = self.spawn();
-        let angle_deg = 00.0 % 360.0;
-        let angle = cgmath::Deg(angle_deg);
-        let position = position.unwrap_or(super::Position { x: 1.0, y: 1.0 });
-        let rotation = rotation.unwrap_or(super::Rotation {
-            quat: <cgmath::Quaternion<f32> as cgmath::Rotation3>::from_angle_z(angle),
-        });
-        let scale = scale.unwrap_or(super::Scale {
-            value: cgmath::Vector3 {
+        let position = position.unwrap_or((1.0, 1.0).into());
+        let rotation = rotation.unwrap_or(cgmath::Deg(00.0 % 360.0).into());
+        let scale = scale.unwrap_or(
+            cgmath::Vector3 {
                 x: 1.0,
                 y: 1.0,
                 z: 1.0,
-            },
-        });
+            }
+            .into(),
+        );
         let renderable = super::Renderable {
-            model_key: model_key.into(),
+            model_key: model.into(),
             visible: true,
         };
         self.insert_position(entity, position);
         self.insert_rotation(entity, rotation);
         self.insert_scale(entity, scale);
         self.insert_renderable(entity, renderable);
-        log_debug!("Spawned renderable entity: {} {}", entity.0, model_key);
+        log_debug!("Spawned renderable entity: {} {}", entity.0, model);
     }
     pub fn load_object(
         obj: &str,
         managers: &mut crate::Managers,
-        uniform_bind_group: &wgpu::BindGroup,
-        equirect_project_bind_group: &wgpu::BindGroup,
-        camera: &crate::camera::Camera,
-        light: &crate::Light,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil_state: &Option<wgpu::DepthStencilState>,
     ) -> Option<crate::CacheKey> {
-        match crate::Model::from_obj(
-            obj,
-            managers,
-            uniform_bind_group,
-            equirect_project_bind_group,
-            &camera,
-            light,
-            &surface_config,
-            depth_stencil_state,
-        ) {
-            Ok(Some(model)) => {
-                managers
-                    .model_manager
-                    .models
-                    .insert(obj.into(), model.into());
-                Some(crate::CacheKey::from(obj))
+        match crate::Asset::tobj(obj, managers, &surface_config, depth_stencil_state) {
+            Ok(model) => {
+                let key: crate::CacheKey = obj.into();
+                managers.model_manager.models.insert(key, model.into());
+                Some(key)
             }
             Err(e) => {
-                crate::log_error!("Error loading tobj: {}", e);
+                crate::log_error!("{}", e.to_string());
                 None
             }
             _ => {
@@ -280,7 +262,6 @@ impl World {
         self.transforms.get(entity.0)?.as_ref()
     }
 
-    /// Pure‐data tick: physics, transforms, and rebuild your instance_batches.
     pub fn update(&mut self, dt: f32) {
         self.update_physics();
         self.update_transforms(dt as f64);
@@ -288,8 +269,7 @@ impl World {
     pub fn update_physics(&mut self) {
         for i in 0..self.entity_count {
             if let (Some(pos), Some(vel)) = (&mut self.positions[i], self.velocities[i]) {
-                pos.x += vel.dx;
-                pos.y += vel.dy;
+                pos.update(&vel);
             }
         }
     }
@@ -310,7 +290,7 @@ impl World {
                 rotations[i].as_mut(),
                 scales[i].as_ref(),
             ) {
-                rot.quat = delta * rot.quat;
+                rot.update(delta);
                 let transform = super::Transform::from_components(pos, rot, scale);
                 transforms[i] = Some(transform);
 
@@ -378,7 +358,7 @@ impl WorldTick {
                     }
                 }
 
-                if let Err(e) = tx.send(crate::ApplicationEvent::WorldRequestRedraw) {
+                if let Err(e) = tx.send(crate::ApplicationEvent::Draw) {
                     crate::log_error!("Event loop closed, stopping world tick: {}", e);
                     break;
                 }
@@ -401,7 +381,7 @@ impl WorldTick {
                     w.update(dt);
                 }
 
-                if let Err(e) = update_tx.send(crate::ApplicationEvent::WorldRequestRedraw) {
+                if let Err(e) = update_tx.send(crate::ApplicationEvent::Draw) {
                     crate::log_error!("Event loop closed, stopping updater: {}", e);
                     break;
                 }

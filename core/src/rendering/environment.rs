@@ -75,41 +75,35 @@ impl EquirectProjection {
         let dst_bind_group = crate::BindGroup::equirect_dst(&managers.device, &dst);
         let src_bind_group = crate::BindGroup::equirect_src(&managers.device, &src, &dst);
 
-        let src_texture_key = crate::CacheKey::new(src.label.clone());
-        let dst_texture_key = crate::CacheKey::new(dst.label.clone());
+        let src_texture_key = crate::CacheKey::from(src.label.clone());
+        let dst_texture_key = crate::CacheKey::from(dst.label.clone());
 
         let src_shader_key = crate::CacheKey::from(src_shader);
         let dst_shader_key = crate::CacheKey::from(dst_shader);
 
-        let equirect_src_shader =
-            if !crate::CacheStorage::contains(&managers.shader_manager, &src_shader_key) {
-                crate::Asset::shader(managers, &src_shader).expect(&format!(
-                    "AssetLoader load shader failed for {}",
-                    src_shader
-                ))
-            } else {
-                crate::CacheStorage::get(&managers.shader_manager, &src_shader_key)
-                    .unwrap()
-                    .clone()
-            };
+        let equirect_src_shader = managers
+            .shader_manager
+            .load(&managers.device, src_shader)
+            .unwrap()
+            .clone();
 
         let equirect_src_pipeline_layout =
             managers
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("{} layout", src_shader_key.id)),
+                    label: Some(&format!("{} layout", src_shader)),
                     bind_group_layouts: &[&crate::BindGroupLayouts::equirect_src()],
                     push_constant_ranges: &[],
                 });
 
         crate::CacheStorage::get_or_create(
-            &mut managers.compute_pipeline_manager,
+            &mut managers.pipeline_manager.compute,
             src_shader_key.clone(),
             || {
                 managers
                     .device
                     .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some(&src_shader_key.id),
+                        label: Some(src_shader),
                         layout: Some(&equirect_src_pipeline_layout),
                         module: &equirect_src_shader,
                         entry_point: Some("compute_equirect_to_cubemap"),
@@ -119,23 +113,16 @@ impl EquirectProjection {
                     .into()
             },
         );
-        let equirect_dst_shader =
-            if !crate::CacheStorage::contains(&managers.shader_manager, &dst_shader_key) {
-                crate::Asset::shader(managers, &dst_shader).expect(&format!(
-                    "AssetLoader load shader failed for {}",
-                    dst_shader
-                ))
-            } else {
-                crate::CacheStorage::get(&managers.shader_manager, &dst_shader_key)
-                    .unwrap()
-                    .clone()
-            };
+        let equirect_dst_shader = managers
+            .shader_manager
+            .load(&managers.device, dst_shader)
+            .unwrap();
 
         let equirect_dst_layout =
             managers
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("{} layout", dst_shader_key.id)),
+                    label: Some(&format!("{} layout", dst_shader)),
                     bind_group_layouts: &[
                         crate::BindGroupLayouts::camera(),
                         crate::BindGroupLayouts::equirect_dst(),
@@ -144,13 +131,13 @@ impl EquirectProjection {
                 });
 
         crate::CacheStorage::get_or_create(
-            &mut managers.render_pipeline_manager,
+            &mut managers.pipeline_manager.render,
             dst_shader_key.clone(),
             || {
                 managers
                     .device
                     .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some(&dst_shader_key.id),
+                        label: Some(dst_shader),
                         layout: Some(&equirect_dst_layout),
                         vertex: wgpu::VertexState {
                             module: &equirect_dst_shader,
@@ -223,10 +210,10 @@ impl EquirectProjection {
 
     pub fn compute_projection(&self, managers: &mut crate::Managers, label: Option<&str>) {
         if let (Some(projection_compute_pipeline), Some(src_bind_group)) = (
-            crate::CacheStorage::get(&managers.compute_pipeline_manager, &self.src_shader_key),
+            crate::CacheStorage::get(&managers.pipeline_manager.compute, &self.src_shader_key),
             managers.bind_group_manager.bind_group_for(
                 &managers.texture_manager,
-                &self.src_texture_key.id,
+                &self.src_texture_key,
                 crate::BindGroupLayouts::equirect_src(),
             ),
         ) {
@@ -258,8 +245,8 @@ impl EquirectProjection {
         if let (Some(equirect_projection_bind_group), Some(equirect_projection_pipeline)) = (
             managers
                 .bind_group_manager
-                .bind_group(&self.dst_texture_key.id),
-            crate::CacheStorage::get(&managers.render_pipeline_manager, &self.dst_shader_key),
+                .bind_group(&self.dst_texture_key),
+            crate::CacheStorage::get(&managers.pipeline_manager.render, &self.dst_shader_key),
         ) {
             rpass.set_bind_group(0, camera.bind_group(), &[]);
             rpass.set_bind_group(1, equirect_projection_bind_group.as_ref(), &[]);

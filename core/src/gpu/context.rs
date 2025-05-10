@@ -1,14 +1,14 @@
 static GPU: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<GPU>>> =
     std::sync::OnceLock::new();
 
-fn init_global_gpu() {
+fn init_gpu() {
     let gpu = GPU::new();
     let arc_gpu = std::sync::Arc::new(std::sync::RwLock::new(gpu));
     GPU.set(arc_gpu)
         .expect("Global gpu was already initialized");
 }
 
-fn gpu() -> std::sync::Arc<std::sync::RwLock<GPU>> {
+fn get_gpu() -> std::sync::Arc<std::sync::RwLock<GPU>> {
     GPU.get().expect("Global gpu is not initialized").clone()
 }
 
@@ -22,10 +22,10 @@ pub struct GPU {
 
 impl GPU {
     pub fn get() -> std::sync::Arc<std::sync::RwLock<GPU>> {
-        gpu()
+        get_gpu()
     }
     pub fn init() {
-        init_global_gpu();
+        init_gpu();
     }
     pub fn new() -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {

@@ -37,16 +37,13 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // 1) your existing ray‐cast into the skybox:
     let view_pos_h = uniforms.inv_proj * in.clip_position;
     let view_dir   = normalize(view_pos_h.xyz / view_pos_h.w);
     let world_dir  = normalize((uniforms.inv_view * vec4(view_dir, 0.0)).xyz);
 
-    // 2) plane just below camera
     let plane_y = uniforms.world_pos.y - 0.1;
     let t1      = (plane_y - uniforms.world_pos.y) / world_dir.y;
 
-    // 3) compute forward‐hit in world space
     let center_clip     = vec4<f32>(0.0, 0.0, 1.0, 1.0);
     let center_view_h   = uniforms.inv_proj * center_clip;
     let center_view_dir = normalize(center_view_h.xyz / center_view_h.w);
@@ -54,19 +51,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t2              = (plane_y - uniforms.world_pos.y) / center_world_dir.y;
     let forward_hit     = uniforms.world_pos + center_world_dir * t2;
 
-    // 4) reconstruct the current fragment's normalized‐device UV
     let ndc = in.clip_position.xy / in.clip_position.w;          // in [-1,1]
     let uv  = ndc * 0.5 + vec2<f32>(0.5, 0.5);                  // in [0,1]
 
-    // 5) project the forward_hit back into clip space → UV
     let forward_clip = uniforms.view_proj * vec4<f32>(forward_hit, 1.0);
     let f_ndc        = forward_clip.xy / forward_clip.w;
     let f_uv         = f_ndc * 0.5 + vec2<f32>(0.5, 0.5);
 
-    // 6) sample the skybox
     var scene_rgb = textureSample(env_map, env_sampler, world_dir).rgb;
 
-    // 7) optionally draw your ground‐ring as before
     if (t1 > 0.0) {
         let hit1   = uniforms.world_pos + world_dir * t1;
         let h_fac  = clamp(uniforms.world_pos.y / 10.0, 0.0, 1.0);
@@ -78,7 +71,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // 8) draw a small circle around f_uv in screen‐space
     let d_uv = distance(uv, f_uv);
     let marker_radius = 0.02;   // adjust to taste
     let marker_thick  = 0.005;

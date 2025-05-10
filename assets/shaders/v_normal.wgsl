@@ -28,13 +28,14 @@ struct VertexOutput {
     @location(4)        world_bit: vec3<f32>
 }
 
-struct Uniforms {
+struct Camera {
     view_proj: mat4x4<f32>,
+    inv_proj:  mat4x4<f32>,  
     inv_view:  mat4x4<f32>,
     world_pos: vec3<f32>,
-    _pad:      f32             // 16-byte pad
-}
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+    _pad:      f32,
+};
+@group(0) @binding(0) var<uniform> camera: Camera;
 
 struct Light {
     position: vec3<f32>,
@@ -42,13 +43,15 @@ struct Light {
 }
 @group(0) @binding(1) var<uniform> light: Light;
 
-@group(1) @binding(0) var t_diffuse: texture_2d<f32>;
-@group(1) @binding(1) var s_diffuse: sampler;
-@group(1) @binding(2) var t_normal:  texture_2d<f32>;
-@group(1) @binding(3) var s_normal:   sampler;
+@group(1) @binding(0) var env_map:    texture_cube<f32>;
+@group(1) @binding(1) var env_sampler: sampler;
 
-@group(2) @binding(0) var env_map:    texture_cube<f32>;
-@group(2) @binding(1) var env_sampler: sampler;
+@group(2) @binding(0) var t_diffuse: texture_2d<f32>;
+@group(2) @binding(1) var s_diffuse: sampler;
+@group(2) @binding(2) var t_normal:  texture_2d<f32>;
+@group(2) @binding(3) var s_normal:   sampler;
+
+
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
@@ -64,7 +67,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     let wp4: vec4<f32> = model * vec4<f32>(in.position, 1.0);
 
     var out: VertexOutput;
-    out.clip_pos   = uniforms.view_proj * wp4;
+    out.clip_pos   = camera.view_proj * wp4;
     out.uv         = in.tex_coords;
     out.world_pos  = wp4.xyz;
 
@@ -88,7 +91,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // lighting
     let L = normalize(light.position - in.world_pos);
-    let V = normalize(uniforms.world_pos - in.world_pos);
+    let V = normalize(camera.world_pos - in.world_pos);
     let H = normalize(L + V);
 
     let diff = max(dot(N, L), 0.0);

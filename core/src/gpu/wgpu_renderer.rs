@@ -4,9 +4,7 @@ use crate::CacheStorage;
 pub struct WgpuRenderer {
     depth_stencil_state: Option<wgpu::DepthStencilState>,
     depth_texture: crate::Texture,
-    hdr_pipeline: wgpu::RenderPipeline,
-    hdr_texture: crate::Texture,
-    hdr_bind_group: wgpu::BindGroup,
+    hdr: crate::HDR,
 }
 
 impl WgpuRenderer {
@@ -14,89 +12,11 @@ impl WgpuRenderer {
         managers: &mut crate::Managers,
         surface_config: &wgpu::SurfaceConfiguration,
     ) -> Result<Self, crate::EngineError> {
-        let depth_stencil_state = wgpu::DepthStencilState {
-            format: crate::Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-        let hdr_sampler = managers.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        let hdr_texture = crate::Texture::new(
-            &managers.device,
-            wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            surface_config.format.add_srgb_suffix(),
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Nearest,
-            Some(hdr_sampler),
-            Some("hdr"),
-        );
-        let hdr_bind_group = crate::BindGroup::hdr(&managers.device, &hdr_texture, "hdr");
-        let hdr_pipeline_layout =
-            managers
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("hdr pipeline layout"),
-                    bind_group_layouts: &[&crate::BindGroupLayouts::texture()],
-                    push_constant_ranges: &[],
-                });
-        let hdr_shader = crate::Asset::shader(managers, "hdr.wgsl")?;
-        let hdr_pipeline =
-            managers
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some(&hdr_texture.label),
-                    layout: Some(&hdr_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &hdr_shader,
-                        entry_point: Some("vs_main"),
-                        buffers: &[],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &hdr_shader,
-                        entry_point: Some("fs_main"),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: surface_config.format.add_srgb_suffix(),
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: Some(wgpu::Face::Back),
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
+        let depth_stencil_state = crate::Texture::depth_stencil_state();
 
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                    cache: None,
-                });
+        let hdr = managers
+            .pipeline_manager
+            .hdr(&managers.device, surface_config)?;
 
         let depth_texture = crate::Texture::new(
             &managers.device,
@@ -128,9 +48,7 @@ impl WgpuRenderer {
         Ok(WgpuRenderer {
             depth_stencil_state: Some(depth_stencil_state),
             depth_texture,
-            hdr_texture,
-            hdr_bind_group,
-            hdr_pipeline,
+            hdr,
         })
     }
 
@@ -149,26 +67,8 @@ impl WgpuRenderer {
             projection.compute_projection(managers, Some("equirect projection compute pass"));
         }
     }
-    pub fn process_hdr(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("hdr compute pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        pass.set_pipeline(&self.hdr_pipeline);
-        pass.set_bind_group(0, &self.hdr_bind_group, &[]);
-        pass.draw(0..3, 0..1);
-        drop(pass);
+    pub fn hdr(&self, encoder: &mut wgpu::CommandEncoder, output: &wgpu::TextureView) {
+        self.hdr.compute(encoder, output);
     }
 }
 
@@ -179,12 +79,24 @@ impl crate::Renderer for WgpuRenderer {
         rpass: &mut wgpu::RenderPass,
         world: &crate::World,
         camera: &crate::camera::Camera,
+        uniform_bind_group: &wgpu::BindGroup,
     ) {
+        let mut bg_idx = 0;
         if let Some(projection) = world.projection() {
             projection.render(rpass, managers, camera);
         }
 
         let frustum = &camera.frustum();
+        rpass.set_bind_group(bg_idx, uniform_bind_group, &[]);
+        bg_idx += 1;
+        if let Some(projection) = world.projection() {
+            if let Some(projection_bind_group) =
+                managers.bind_group_manager.get(&projection.dst_shader_key)
+            {
+                rpass.set_bind_group(bg_idx, projection_bind_group.as_ref(), &[]);
+                bg_idx += 1;
+            }
+        }
 
         for (entity, rend_opt) in world.get_renderables().iter().enumerate() {
             let rend = match rend_opt {
@@ -203,13 +115,14 @@ impl crate::Renderer for WgpuRenderer {
                     )
                     .unwrap();
                     let pipeline = managers
-                        .render_pipeline_manager
-                        .get(&crate::CacheKey::from(material.name.clone()))
+                        .pipeline_manager
+                        .render
+                        .get(&crate::CacheKey::from(material.name.as_ref()))
                         .unwrap();
 
                     rpass.set_pipeline(&pipeline);
                     for (i, bg) in material.bind_groups.iter().enumerate() {
-                        rpass.set_bind_group(i as u32, bg.as_ref(), &[]);
+                        rpass.set_bind_group((i + 1) as u32 + bg_idx, bg.as_ref(), &[]);
                     }
 
                     if world

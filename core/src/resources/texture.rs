@@ -397,7 +397,7 @@ impl Texture {
 
 impl Into<CacheKey> for Texture {
     fn into(self) -> CacheKey {
-        CacheKey::new(self.label)
+        CacheKey::new(crate::CacheKey::hash(self.label))
     }
 }
 

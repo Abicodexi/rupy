@@ -2,14 +2,14 @@ use cgmath::InnerSpace as _;
 
 #[derive(Debug)]
 pub struct CameraController {
-    pub speed: f32,
-    pub sensitivity: f32,
-    pub forward: bool,
-    pub back: bool,
-    pub left: bool,
-    pub right: bool,
-    pub pitch: f32,
-    pub yaw: f32,
+    speed: f32,
+    sensitivity: f32,
+    forward: bool,
+    back: bool,
+    left: bool,
+    right: bool,
+    pitch: f32,
+    yaw: f32,
     last_mouse: Option<(f32, f32)>,
 }
 
@@ -28,7 +28,7 @@ impl CameraController {
         }
     }
 
-    pub fn process_events(&mut self, event: &winit::event::WindowEvent) -> bool {
+    pub fn process(&mut self, event: &winit::event::WindowEvent) -> bool {
         match event {
             winit::event::WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == winit::event::ElementState::Pressed;

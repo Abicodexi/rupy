@@ -36,8 +36,14 @@ impl GlyphonRenderer {
         }
     }
 
-    pub fn resize(&mut self, queue: &wgpu::Queue, resolution: glyphon::Resolution) {
-        self.viewport.update(queue, resolution);
+    pub fn resize(&mut self, queue: &wgpu::Queue, new_size: winit::dpi::PhysicalSize<u32>) {
+        self.viewport.update(
+            queue,
+            glyphon::Resolution {
+                width: new_size.width,
+                height: new_size.height,
+            },
+        );
     }
     pub fn prepare(
         &mut self,
@@ -85,6 +91,7 @@ impl crate::Renderer for GlyphonRenderer {
         rpass: &mut wgpu::RenderPass,
         _world: &crate::World,
         _camera: &crate::camera::Camera,
+        _uniform_bind_group: &wgpu::BindGroup,
     ) {
         if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
             crate::log_error!("Error rendering text: {}", e);

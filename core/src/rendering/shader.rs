@@ -1,31 +1,23 @@
-use crate::{CacheStorage, Managers};
+use wgpu::core::device;
 
 pub struct Shader;
 impl Shader {
-    pub fn load(
-        managers: &mut Managers,
-        shader: &str,
-    ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
-        let start = std::time::Instant::now();
-        let cache_key: crate::CacheKey = shader.into();
+    pub fn load(shader: &str) -> Result<wgpu::ShaderModule, crate::EngineError> {
+        let binding = crate::GPU::get();
+        let gpu = binding
+            .read()
+            .map_err(|e| crate::EngineError::PoisonError(format!("{}", e.to_string())))?;
 
-        if !managers.shader_manager.contains(&cache_key) {
-            let module = crate::Asset::shader(managers, shader)?;
-            managers
-                .shader_manager
-                .shaders
-                .insert(cache_key.clone(), module.into());
-        }
-        crate::log_debug!(
-            "[ShaderManager] Loaded shader `{}` in {:.2?}",
-            cache_key.id,
-            start.elapsed()
-        );
-        Ok(managers
-            .shader_manager
-            .get(&cache_key)
-            .expect("Loading shader failed. Shader not found in manager cache after creation")
-            .clone())
+        let path = crate::Asset::base_path().join("shaders").join(shader);
+
+        let shader_source = std::fs::read_to_string(&path)?;
+        let shader_module = gpu
+            .device()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(shader),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+        Ok(shader_module)
     }
 }
 pub struct ShaderManager {
@@ -37,6 +29,27 @@ impl ShaderManager {
         Self {
             shaders: crate::HashCache::new(),
         }
+    }
+    pub fn load(
+        &mut self,
+        device: &wgpu::Device,
+        shader: &str,
+    ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
+        let cache_key = crate::CacheKey::from(shader);
+        let start = std::time::Instant::now();
+
+        if !crate::CacheStorage::contains(self, &cache_key) {
+            let path = crate::Asset::base_path().join("shaders").join(shader);
+
+            let shader_source = std::fs::read_to_string(&path)?;
+            let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(shader),
+                source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+            });
+            crate::CacheStorage::insert(self, cache_key.clone(), shader_module.into());
+        }
+        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
+        Ok(crate::CacheStorage::get(self, &cache_key).unwrap().clone())
     }
 }
 
