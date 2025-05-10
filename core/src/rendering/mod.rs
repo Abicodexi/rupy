@@ -25,5 +25,8 @@ pub use vertex::*;
 pub mod light;
 pub use light::*;
 
+pub mod render_target;
+pub use render_target::*;
+
 pub mod traits;
 pub use traits::*;

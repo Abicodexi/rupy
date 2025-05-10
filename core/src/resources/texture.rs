@@ -6,9 +6,9 @@ use std::sync::Arc;
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
 pub struct Texture {
     pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
-    pub label: String,
+     pub view: wgpu::TextureView,
+     pub sampler: wgpu::Sampler,
+     pub label: String,
 }
 
 impl Texture {
@@ -66,8 +66,10 @@ impl Texture {
             binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         },
     ];
-
-    pub async fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
+    pub fn create_view(&self, desc: &wgpu::TextureViewDescriptor) -> wgpu::TextureView {
+        self.texture.create_view(desc)
+    }
+    pub  fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
         let texture = device.create_texture(desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -306,38 +308,7 @@ impl Texture {
             bias: wgpu::DepthBiasState::default(),
         }
     }
-    pub fn depth_texture(
-        device: &wgpu::Device,
-        surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Self {
-        Texture::new(
-            device,
-            wgpu::Extent3d {
-                width: surface_config.width,
-                height: surface_config.height,
-                depth_or_array_layers: 1,
-            },
-            Texture::DEPTH_FORMAT,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Linear,
-            Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            })),
-            Some("Depth texture"),
-        )
-    }
+    
     pub fn equirect_projection_src_texture(
         device: &wgpu::Device,
         texture: &str,
@@ -385,13 +356,6 @@ impl Texture {
             None,
             Some(&format!("{} destination texture", texture)),
         )
-    }
-    pub fn create_projection_view(&self) -> wgpu::TextureView {
-        self.texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("Cubemap projection view"),
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        })
     }
 }
 

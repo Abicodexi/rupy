@@ -36,7 +36,11 @@ impl From<&str> for CacheKey {
         CacheKey::new(CacheKey::hash(value))
     }
 }
-
+impl From<crate::Entity> for CacheKey {
+    fn from(value: crate::Entity) -> Self {
+        Self { id: value.0 as u64 }
+    }
+}
 impl Into<crate::Renderable> for CacheKey {
     fn into(self) -> crate::Renderable {
         crate::Renderable {

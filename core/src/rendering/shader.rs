@@ -1,4 +1,3 @@
-use wgpu::core::device;
 
 pub struct Shader;
 impl Shader {

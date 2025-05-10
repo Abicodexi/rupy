@@ -245,7 +245,11 @@ impl BindGroup {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&dst.create_projection_view()),
+                    resource: wgpu::BindingResource::TextureView(&dst.create_view(&wgpu::TextureViewDescriptor {
+                        label: Some("Cubemap projection view"),
+                        dimension: Some(wgpu::TextureViewDimension::D2Array),
+                        ..Default::default()
+                    })),
                 },
             ],
             label: Some(&format!("{}  projection source bind group", src.label,)),

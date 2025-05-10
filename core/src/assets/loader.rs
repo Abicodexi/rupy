@@ -20,23 +20,8 @@ impl Asset {
             .map_err(|e| crate::EngineError::FileSystemError(format!("{:?}: {}", path, e)))
     }
 
-    pub fn shader(file: &str) -> Result<wgpu::ShaderModule, crate::EngineError> {
-        if let Ok(gpu) = crate::GPU::get().read() {
-            let path = Asset::base_path().join("shaders").join(file);
-
-            let shader_source = std::fs::read_to_string(&path)?;
-            let shader_module = gpu
-                .device()
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some(file),
-                    source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-                });
-            Ok(shader_module)
-        } else {
-            Err(crate::EngineError::RwLockError(
-                "Loading shader failed. Could not acquire read lock on gpu device".into(),
-            ))
-        }
+    pub fn shader(managers: &mut crate::Managers, file: &str) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
+        managers.shader_manager.load(&managers.device, file)
     }
     pub fn read_bytes<P: AsRef<std::path::Path>>(path: &P) -> Result<Vec<u8>, crate::EngineError> {
         let bytes = std::fs::read(path)?;
@@ -329,6 +314,7 @@ impl Asset {
                     vertex_buffer_key: cached_mesh.vertex_buffer_key,
                     index_buffer_key: cached_mesh.index_buffer_key,
                     material_key: mat_key,
+                    index_count: cached_mesh.index_count
                 }
             } else {
                 let vertex_buffer_key = crate::CacheKey::from(format!("{}:vertex", mat_key.id()));
@@ -390,6 +376,7 @@ impl Asset {
                     vertex_buffer_key,
                     index_buffer_key,
                     material_key: mat_key,
+                    index_count
                 }
             }
         };

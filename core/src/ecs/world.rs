@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use cgmath::{Matrix3, Transform};
 
 use crate::log_debug;
 
@@ -26,16 +25,33 @@ fn still_running() -> bool {
 fn stop_running() {
     RUNNING.store(false, std::sync::atomic::Ordering::Relaxed)
 }
+
 #[derive(Debug)]
-pub struct InstanceBatch {
+pub struct InstanceBatcher {
     batches: std::collections::HashMap<super::Entity, Vec<(super::Entity, super::Transform)>>,
 }
-impl InstanceBatch {
+impl InstanceBatcher {
     pub fn new() -> Self {
         Self {
             batches: std::collections::HashMap::new(),
         }
     }
+    
+    pub fn batch(
+        &mut self,
+        target: super::Entity,
+        source: super::Entity,
+        transform: super::Transform,
+    ) {
+        if let Some(batch) = self.batches.get_mut(&target) {
+            batch.push((source, transform));
+        } else {
+            self
+                .batches
+                .insert(target, vec![(source, transform)]);
+        }
+    }
+
     pub fn batches(
         &self,
     ) -> &std::collections::HashMap<super::Entity, Vec<(super::Entity, super::Transform)>> {
@@ -101,7 +117,7 @@ pub struct World {
     pub scales: Vec<Option<super::Scale>>,
     pub transforms: Vec<Option<super::Transform>>,
     projection: Option<crate::EquirectProjection>,
-    pub instance: InstanceBatch,
+    pub instance: InstanceBatcher,
     entity_count: usize,
 }
 
@@ -127,7 +143,7 @@ impl World {
             scales: Vec::new(),
             transforms: Vec::new(),
             projection: None,
-            instance: InstanceBatch::new(),
+            instance: InstanceBatcher::new(),
             entity_count: 0,
         }
     }
@@ -142,16 +158,10 @@ impl World {
     pub fn batch_instance(
         &mut self,
         target: super::Entity,
-        source: super::Entity,
         transform: super::Transform,
     ) {
-        if let Some(batch) = self.instance.batches.get_mut(&target) {
-            batch.push((source, transform));
-        } else {
-            self.instance
-                .batches
-                .insert(target, vec![(source, transform)]);
-        }
+        let instance = self.spawn();
+        self.instance.batch(target, instance, transform);
     }
 
     pub fn spawn_model(
@@ -180,7 +190,7 @@ impl World {
         self.insert_rotation(entity, rotation);
         self.insert_scale(entity, scale);
         self.insert_renderable(entity, renderable);
-        log_debug!("Spawned renderable entity: {} {}", entity.0, model);
+        log_debug!("Spawned model entity: {} {}", entity.0, model);
     }
     pub fn load_object(
         obj: &str,

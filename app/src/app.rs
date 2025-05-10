@@ -1,7 +1,5 @@
 use core::{
-    camera::{Camera, CameraController},
-    log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer,
-    SurfaceExt, Texture, Time, WgpuRenderer, World,
+    camera::{Camera, CameraController}, log_error, render_target, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer, SurfaceExt, Time, WgpuRenderer, World
 };
 use std::sync::Arc;
 use winit::{
@@ -18,6 +16,7 @@ pub struct Rupy {
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
     pub wgpu_renderer: WgpuRenderer,
+    pub render_targets: core::RenderTargetManager,
     pub glyphon_renderer: GlyphonRenderer,
     pub camera: Camera,
     pub light: Light,
@@ -59,7 +58,7 @@ impl Rupy {
         surface.configure(&managers.device, &surface_config);
 
         let time = Time::new();
-        let wgpu_renderer = WgpuRenderer::new(&mut managers, &surface_config)?;
+        let wgpu_renderer = WgpuRenderer::new(&managers.device, &surface_config)?;
         let glyphon_renderer = GlyphonRenderer::new(
             &managers.device,
             &managers.queue,
@@ -104,6 +103,9 @@ impl Rupy {
                 _ => (),
             }
         }
+        let mut render_targets = core::RenderTargetManager::new();
+        render_targets.insert(core::FrameBuffer::new_with_depth(&managers.device, (surface_config.width, surface_config.height).into(), surface_config.format, core::Texture::DEPTH_FORMAT, "scene buffer"), core::RenderTargetKind::Scene);
+        render_targets.insert(core::FrameBuffer::new_color_only(&managers.device, (surface_config.width, surface_config.height).into(), surface_config.format,"hdr buffer"), core::RenderTargetKind::Hdr);
 
         Ok(Rupy {
             managers,
@@ -116,7 +118,7 @@ impl Rupy {
             camera,
             light,
             uniform_bind_group,
-            controller,
+            controller,render_targets,
             last_shape_time: std::time::Instant::now(),
         })
     }
@@ -126,53 +128,106 @@ impl Rupy {
             .resize(&self.managers.device, &mut self.surface_config, *new_size);
         self.glyphon_renderer
             .resize(&self.managers.queue, *new_size);
+        self.render_targets.resize(&self.managers.device, *new_size);
 
-        self.wgpu_renderer.set_depth_texture(Texture::depth_texture(
-            &self.managers.device,
-            &self.surface_config,
-        ));
     }
 
+    // pub fn draw(&mut self) {
+    //     match self.surface.texture() {
+    //         Ok(frame) => {
+    //             if let Some(world) = World::get() {
+    //                 if let Ok(w) = world.read() {
+    //                     let view = frame
+    //                         .texture
+    //                         .create_view(&wgpu::TextureViewDescriptor::default());
+    //                     let mut render_encoder = self.managers.device.create_command_encoder(
+    //                         &wgpu::CommandEncoderDescriptor {
+    //                             label: Some("render encoder"),
+    //                         },
+    //                     );
+
+    //                     self.wgpu_renderer.compute_pass(&w, &mut self.managers);
+    //                     {
+    //                         let mut rpass =
+    //                             render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    //                                 label: Some("main pass"),
+    //                                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+    //                                     view: &view,
+    //                                     resolve_target: None,
+    //                                     ops: wgpu::Operations {
+    //                                         load: wgpu::LoadOp::Load,
+    //                                         store: wgpu::StoreOp::Store,
+    //                                     },
+    //                                 })],
+    //                                 depth_stencil_attachment: Some(
+    //                                     wgpu::RenderPassDepthStencilAttachment {
+    //                                         view: &self.wgpu_renderer.depth_texture().view,
+    //                                         depth_ops: Some(wgpu::Operations {
+    //                                             load: wgpu::LoadOp::Clear(1.0),
+    //                                             store: wgpu::StoreOp::Store,
+    //                                         }),
+    //                                         stencil_ops: None,
+    //                                     },
+    //                                 ),
+    //                                 timestamp_writes: None,
+    //                                 occlusion_query_set: None,
+    //                             });
+    //                         self.wgpu_renderer.render(
+    //                             &mut self.managers,
+    //                             &mut rpass,
+    //                             &w,
+    //                             &self.camera,
+    //                             &self.uniform_bind_group,
+    //                         );
+    //                         self.glyphon_renderer.render(
+    //                             &mut self.managers,
+    //                             &mut rpass,
+    //                             &w,
+    //                             &self.camera,
+    //                             &self.uniform_bind_group,
+    //                         );
+    //                     }
+
+    //                     self.wgpu_renderer.hdr(&mut render_encoder, &view);
+    //                     self.managers.queue.submit(Some(render_encoder.finish()));
+    //                     frame.present();
+    //                 }
+    //             }
+    //         }
+    //         Err(e) => {
+    //             log_error!("SurfaceError: {}", e);
+    //             match e {
+    //                 wgpu::SurfaceError::Outdated => {
+    //                     self.resize(&self.window.inner_size());
+    //                 }
+    //                 _ => (),
+    //             }
+    //         }
+    //     };
+    // }
     pub fn draw(&mut self) {
         match self.surface.texture() {
             Ok(frame) => {
                 if let Some(world) = World::get() {
                     if let Ok(w) = world.read() {
-                        let view = frame
-                            .texture
-                            .create_view(&wgpu::TextureViewDescriptor::default());
-                        let mut render_encoder = self.managers.device.create_command_encoder(
+                        let surface_view = frame.texture.create_view(&Default::default());
+    
+                        // === 1. Render scene to scene framebuffer ===
+                        let mut encoder = self.managers.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor {
-                                label: Some("render encoder"),
+                                label: Some("Scene Encoder"),
                             },
                         );
+    
+                        if let Some(frame) = self.render_targets.get(&core::RenderTargetKind::Scene) {
+                            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("Scene Pass"),
+                                color_attachments: &[Some(frame.color_attachment())],
+                                depth_stencil_attachment: frame.depth_attachment(),
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
 
-                        self.wgpu_renderer.compute_pass(&w, &mut self.managers);
-                        {
-                            let mut rpass =
-                                render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                    label: Some("main pass"),
-                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                        view: &view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Load,
-                                            store: wgpu::StoreOp::Store,
-                                        },
-                                    })],
-                                    depth_stencil_attachment: Some(
-                                        wgpu::RenderPassDepthStencilAttachment {
-                                            view: &self.wgpu_renderer.depth_texture().view,
-                                            depth_ops: Some(wgpu::Operations {
-                                                load: wgpu::LoadOp::Clear(1.0),
-                                                store: wgpu::StoreOp::Store,
-                                            }),
-                                            stencil_ops: None,
-                                        },
-                                    ),
-                                    timestamp_writes: None,
-                                    occlusion_query_set: None,
-                                });
                             self.wgpu_renderer.render(
                                 &mut self.managers,
                                 &mut rpass,
@@ -180,6 +235,7 @@ impl Rupy {
                                 &self.camera,
                                 &self.uniform_bind_group,
                             );
+    
                             self.glyphon_renderer.render(
                                 &mut self.managers,
                                 &mut rpass,
@@ -189,24 +245,33 @@ impl Rupy {
                             );
                         }
 
-                        self.wgpu_renderer.hdr(&mut render_encoder, &view);
-                        self.managers.queue.submit(Some(render_encoder.finish()));
+                        self.wgpu_renderer.compute_pass(&w, &mut self.managers);
+
+                        // === 2. Postprocess Scene -> HDR ===
+                        if let Some(scene_fb) = self.render_targets.get(&core::RenderTargetKind::Scene) {
+                            if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr) {
+                                self.wgpu_renderer.hdr(&mut encoder, &self.managers,&scene_fb.color(), hdr_fb);
+                            }
+                        }
+    
+                        // === 3. Final HDR -> swapchain ===
+                        if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr) {
+                            self.wgpu_renderer.final_blit_to_surface(&mut encoder, hdr_fb.color(), &surface_view, &self.managers);
+                        }
+    
+                        self.managers.queue.submit(Some(encoder.finish()));
                         frame.present();
                     }
                 }
             }
             Err(e) => {
                 log_error!("SurfaceError: {}", e);
-                match e {
-                    wgpu::SurfaceError::Outdated => {
-                        self.resize(&self.window.inner_size());
-                    }
-                    _ => (),
+                if let wgpu::SurfaceError::Outdated = e {
+                    self.resize(&self.window.inner_size());
                 }
             }
         };
     }
-
     fn buffer_lines(&mut self) -> Vec<glyphon::BufferLine> {
         let line_ending = glyphon::cosmic_text::LineEnding::LfCr;
         let attrs_list = glyphon::AttrsList::new(glyphon::Attrs::new());
@@ -239,7 +304,7 @@ impl Rupy {
         self.time.update();
         self.camera.update(&mut self.controller);
         self.light
-            .orbit(self.time.elapsed * std::f32::consts::TAU / 5.0);
+            .orbit(self.time.elapsed * std::f32::consts::TAU / 50.0);
 
         if self.last_shape_time.elapsed().as_millis() > 1500 {
             self.last_shape_time = std::time::Instant::now();
