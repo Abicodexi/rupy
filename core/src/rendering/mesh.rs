@@ -35,6 +35,7 @@ pub struct MeshInstance {
     pub index_buffer_key: crate::CacheKey,
     pub material_key: crate::CacheKey,
     pub index_count: u32,
+    pub vertex_count: u32,
 }
 impl MeshInstance {
     pub fn new<V: bytemuck::Pod, I: bytemuck::Pod>(
@@ -49,7 +50,8 @@ impl MeshInstance {
                 vertex_buffer_key: cached_mesh.vertex_buffer_key.clone(),
                 index_buffer_key: cached_mesh.index_buffer_key.clone(),
                 material_key,
-                index_count: indices.len() as u32
+                index_count: indices.len() as u32,
+                vertex_count: vertices.len() as u32,
             };
         }
 
@@ -106,7 +108,8 @@ impl MeshInstance {
             vertex_buffer_key,
             index_buffer_key,
             material_key,
-            index_count
+            index_count,
+            vertex_count,
         }
     }
 }

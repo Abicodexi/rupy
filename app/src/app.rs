@@ -1,5 +1,8 @@
+use cgmath::One;
 use core::{
-    camera::{Camera, CameraController}, log_error, render_target, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer, SurfaceExt, Time, WgpuRenderer, World
+    camera::{Camera, CameraController},
+    log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer,
+    SurfaceExt, Time, WgpuRenderer, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -20,9 +23,9 @@ pub struct Rupy {
     pub glyphon_renderer: GlyphonRenderer,
     pub camera: Camera,
     pub light: Light,
-    pub uniform_bind_group: wgpu::BindGroup,
     pub controller: CameraController,
     pub last_shape_time: std::time::Instant,
+    pub uniform_bind_group: wgpu::BindGroup,
 }
 
 impl Rupy {
@@ -72,16 +75,14 @@ impl Rupy {
         let controller = CameraController::new(0.1, 0.5);
 
         let equirect_projection = EquirectProjection::new(
-            &mut managers,
+            &managers.queue,
+            &managers.device,
             &surface_config,
             "equirect_src.wgsl",
             "equirect_dst.wgsl",
             "pure-sky.hdr",
             wgpu_renderer.depth_stencil_state(),
         )?;
-
-        let uniform_bind_group =
-            core::BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
 
         if let Some(world) = World::get() {
             match world.write().as_mut() {
@@ -95,17 +96,42 @@ impl Rupy {
                         &surface_config,
                         wgpu_renderer.depth_stencil_state(),
                     ) {
-                        let entity = w.spawn();
-                        w.insert_position(entity, (1.0, 1.0).into());
-                        w.insert_renderable(entity, model_key.into());
+                        let entity_1 = w.spawn();
+                        w.insert_rotation(
+                            entity_1,
+                            cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        );
+                        // w.insert_velocity(entity_1, (0.1, 0.0).into());
+                        w.insert_scale(entity_1, core::Scale::new(5.0, 5.0, 2.0));
+                        w.insert_position(entity_1, (2.0, 2.0).into());
+                        w.insert_renderable(entity_1, model_key.into());
                     }
                 }
                 _ => (),
             }
         }
         let mut render_targets = core::RenderTargetManager::new();
-        render_targets.insert(core::FrameBuffer::new_with_depth(&managers.device, (surface_config.width, surface_config.height).into(), surface_config.format, core::Texture::DEPTH_FORMAT, "scene buffer"), core::RenderTargetKind::Scene);
-        render_targets.insert(core::FrameBuffer::new_color_only(&managers.device, (surface_config.width, surface_config.height).into(), surface_config.format,"hdr buffer"), core::RenderTargetKind::Hdr);
+        render_targets.insert(
+            core::FrameBuffer::new_with_depth(
+                &managers.device,
+                (surface_config.width, surface_config.height).into(),
+                surface_config.format,
+                core::Texture::DEPTH_FORMAT,
+                "scene buffer",
+            ),
+            core::RenderTargetKind::Scene,
+        );
+        render_targets.insert(
+            core::FrameBuffer::new_color_only(
+                &managers.device,
+                (surface_config.width, surface_config.height).into(),
+                surface_config.format,
+                "hdr buffer",
+            ),
+            core::RenderTargetKind::Hdr,
+        );
+        let uniform_bind_group =
+            core::BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
 
         Ok(Rupy {
             managers,
@@ -117,9 +143,10 @@ impl Rupy {
             glyphon_renderer,
             camera,
             light,
-            uniform_bind_group,
-            controller,render_targets,
+            controller,
+            render_targets,
             last_shape_time: std::time::Instant::now(),
+            uniform_bind_group,
         })
     }
 
@@ -129,136 +156,84 @@ impl Rupy {
         self.glyphon_renderer
             .resize(&self.managers.queue, *new_size);
         self.render_targets.resize(&self.managers.device, *new_size);
-
     }
 
-    // pub fn draw(&mut self) {
-    //     match self.surface.texture() {
-    //         Ok(frame) => {
-    //             if let Some(world) = World::get() {
-    //                 if let Ok(w) = world.read() {
-    //                     let view = frame
-    //                         .texture
-    //                         .create_view(&wgpu::TextureViewDescriptor::default());
-    //                     let mut render_encoder = self.managers.device.create_command_encoder(
-    //                         &wgpu::CommandEncoderDescriptor {
-    //                             label: Some("render encoder"),
-    //                         },
-    //                     );
-
-    //                     self.wgpu_renderer.compute_pass(&w, &mut self.managers);
-    //                     {
-    //                         let mut rpass =
-    //                             render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    //                                 label: Some("main pass"),
-    //                                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-    //                                     view: &view,
-    //                                     resolve_target: None,
-    //                                     ops: wgpu::Operations {
-    //                                         load: wgpu::LoadOp::Load,
-    //                                         store: wgpu::StoreOp::Store,
-    //                                     },
-    //                                 })],
-    //                                 depth_stencil_attachment: Some(
-    //                                     wgpu::RenderPassDepthStencilAttachment {
-    //                                         view: &self.wgpu_renderer.depth_texture().view,
-    //                                         depth_ops: Some(wgpu::Operations {
-    //                                             load: wgpu::LoadOp::Clear(1.0),
-    //                                             store: wgpu::StoreOp::Store,
-    //                                         }),
-    //                                         stencil_ops: None,
-    //                                     },
-    //                                 ),
-    //                                 timestamp_writes: None,
-    //                                 occlusion_query_set: None,
-    //                             });
-    //                         self.wgpu_renderer.render(
-    //                             &mut self.managers,
-    //                             &mut rpass,
-    //                             &w,
-    //                             &self.camera,
-    //                             &self.uniform_bind_group,
-    //                         );
-    //                         self.glyphon_renderer.render(
-    //                             &mut self.managers,
-    //                             &mut rpass,
-    //                             &w,
-    //                             &self.camera,
-    //                             &self.uniform_bind_group,
-    //                         );
-    //                     }
-
-    //                     self.wgpu_renderer.hdr(&mut render_encoder, &view);
-    //                     self.managers.queue.submit(Some(render_encoder.finish()));
-    //                     frame.present();
-    //                 }
-    //             }
-    //         }
-    //         Err(e) => {
-    //             log_error!("SurfaceError: {}", e);
-    //             match e {
-    //                 wgpu::SurfaceError::Outdated => {
-    //                     self.resize(&self.window.inner_size());
-    //                 }
-    //                 _ => (),
-    //             }
-    //         }
-    //     };
-    // }
     pub fn draw(&mut self) {
         match self.surface.texture() {
             Ok(frame) => {
                 if let Some(world) = World::get() {
                     if let Ok(w) = world.read() {
                         let surface_view = frame.texture.create_view(&Default::default());
-    
+
                         // === 1. Render scene to scene framebuffer ===
                         let mut encoder = self.managers.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor {
                                 label: Some("Scene Encoder"),
                             },
                         );
-    
-                        if let Some(frame) = self.render_targets.get(&core::RenderTargetKind::Scene) {
-                            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("Scene Pass"),
-                                color_attachments: &[Some(frame.color_attachment())],
-                                depth_stencil_attachment: frame.depth_attachment(),
-                                timestamp_writes: None,
-                                occlusion_query_set: None,
-                            });
+
+                        if let Some(frame) = self.render_targets.get(&core::RenderTargetKind::Scene)
+                        {
+                            if let Some(projection) = w.projection() {
+                                projection.compute_projection(
+                                    &mut self.managers,
+                                    Some("Equirect Projection Pass"),
+                                );
+                            }
+                            let mut rpass: wgpu::RenderPass<'_> =
+                                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                    label: Some("Scene Pass"),
+                                    color_attachments: &[Some(frame.color_attachment())],
+                                    depth_stencil_attachment: frame.depth_attachment(),
+                                    timestamp_writes: None,
+                                    occlusion_query_set: None,
+                                });
 
                             self.wgpu_renderer.render(
                                 &mut self.managers,
                                 &mut rpass,
                                 &w,
                                 &self.camera,
+                                &self.light,
                                 &self.uniform_bind_group,
                             );
-    
+
                             self.glyphon_renderer.render(
                                 &mut self.managers,
                                 &mut rpass,
                                 &w,
                                 &self.camera,
+                                &self.light,
                                 &self.uniform_bind_group,
                             );
                         }
 
-                        self.wgpu_renderer.compute_pass(&w, &mut self.managers);
-
                         // === 2. Postprocess Scene -> HDR ===
-                        if let Some(scene_fb) = self.render_targets.get(&core::RenderTargetKind::Scene) {
-                            if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr) {
-                                self.wgpu_renderer.hdr(&mut encoder, &self.managers,&scene_fb.color(), hdr_fb);
+                        if let Some(scene_fb) =
+                            self.render_targets.get(&core::RenderTargetKind::Scene)
+                        {
+                            if let Some(hdr_fb) =
+                                self.render_targets.get(&core::RenderTargetKind::Hdr)
+                            {
+                                self.wgpu_renderer.hdr(
+                                    &mut encoder,
+                                    &self.managers,
+                                    &scene_fb.color(),
+                                    hdr_fb,
+                                );
                             }
                         }
-    
+
                         // === 3. Final HDR -> swapchain ===
-                        if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr) {
-                            self.wgpu_renderer.final_blit_to_surface(&mut encoder, hdr_fb.color(), &surface_view, &self.managers);
+                        if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr)
+                        {
+                            self.wgpu_renderer.final_blit_to_surface(
+                                &mut encoder,
+                                hdr_fb.color(),
+                                &surface_view,
+                                &self.managers,
+                            );
                         }
-    
                         self.managers.queue.submit(Some(encoder.finish()));
                         frame.present();
                     }

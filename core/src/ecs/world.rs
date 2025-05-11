@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-
-use crate::log_debug;
+use crate::{log_debug, log_info};
 
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
     std::sync::OnceLock::new();
@@ -25,87 +24,60 @@ fn still_running() -> bool {
 fn stop_running() {
     RUNNING.store(false, std::sync::atomic::Ordering::Relaxed)
 }
-
 #[derive(Debug)]
 pub struct InstanceBatcher {
-    batches: std::collections::HashMap<super::Entity, Vec<(super::Entity, super::Transform)>>,
+    batches: std::collections::HashMap<crate::CacheKey, Vec<super::Transform>>,
 }
+
 impl InstanceBatcher {
     pub fn new() -> Self {
         Self {
             batches: std::collections::HashMap::new(),
         }
     }
-    
-    pub fn batch(
-        &mut self,
-        target: super::Entity,
-        source: super::Entity,
-        transform: super::Transform,
-    ) {
-        if let Some(batch) = self.batches.get_mut(&target) {
-            batch.push((source, transform));
-        } else {
-            self
-                .batches
-                .insert(target, vec![(source, transform)]);
-        }
+
+    pub fn add_instance(&mut self, model_key: crate::CacheKey, transform: super::Transform) {
+        log_info!(
+            "Containts {} {}",
+            model_key.id(),
+            self.batches.contains_key(&model_key)
+        );
+        self.batches.entry(model_key).or_default().push(transform);
     }
 
-    pub fn batches(
-        &self,
-    ) -> &std::collections::HashMap<super::Entity, Vec<(super::Entity, super::Transform)>> {
+    pub fn clear(&mut self) {
+        self.batches.clear();
+    }
+
+    pub fn batches(&self) -> &std::collections::HashMap<crate::CacheKey, Vec<super::Transform>> {
         &self.batches
     }
+
     pub fn raw_data_for(
         &self,
-        target: super::Entity,
+        model_key: &crate::CacheKey,
         frustum: Option<&crate::camera::Frustum>,
-    ) -> Vec<crate::TransformRaw> {
-        match self.batches.get(&target) {
-            None => Vec::new(),
-            Some(batch) => batch
-                .iter()
-                .filter_map(|&(_source, transform)| {
-                    let pos = cgmath::Point3::new(
-                        transform.model_matrix.w.x,
-                        transform.model_matrix.w.y,
-                        transform.model_matrix.w.z,
-                    );
-
-                    if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
-                        Some(transform.data())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-        }
-    }
-    pub fn raw_data(
-        &self,
-        frustum: Option<&crate::camera::Frustum>,
-    ) -> Vec<Vec<crate::TransformRaw>> {
+    ) -> Vec<crate::VertexNormalInstance> {
         self.batches
-            .values()
-            .map(|batch| {
-                batch
+            .get(model_key)
+            .map(|transforms| {
+                transforms
                     .iter()
-                    .filter_map(|&(_source_entity, transform)| {
+                    .filter_map(|t| {
                         let pos = cgmath::Point3::new(
-                            transform.model_matrix.w.x,
-                            transform.model_matrix.w.y,
-                            transform.model_matrix.w.z,
+                            t.model_matrix.w.x,
+                            t.model_matrix.w.y,
+                            t.model_matrix.w.z,
                         );
-                        if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
-                            Some(transform.data())
+                        if frustum.map_or(false, |f| f.contains_sphere(pos, 0.1)) {
+                            Some(t.to_vertex_instance())
                         } else {
                             None
                         }
                     })
                     .collect()
             })
-            .collect()
+            .unwrap_or_default()
     }
 }
 #[derive(Debug)]
@@ -155,13 +127,8 @@ impl World {
         &self.projection
     }
 
-    pub fn batch_instance(
-        &mut self,
-        target: super::Entity,
-        transform: super::Transform,
-    ) {
-        let instance = self.spawn();
-        self.instance.batch(target, instance, transform);
+    pub fn batch_instance(&mut self, model_key: crate::CacheKey, transform: super::Transform) {
+        self.instance.add_instance(model_key, transform);
     }
 
     pub fn spawn_model(
@@ -288,47 +255,33 @@ impl World {
             (dt * 90.0) as f32,
         ));
 
-        let len = self.entity_count;
-        let positions = &self.positions;
-        let rotations = &mut self.rotations;
-        let scales = &self.scales;
-        let transforms = &mut self.transforms;
-        let instance_batches = &mut self.instance.batches;
-        let mut update_entity = |i: usize| {
+        // === Update per-entity transforms ===
+        // === Rebuild instance batches ===
+        let mut new_batches: std::collections::HashMap<crate::CacheKey, Vec<super::Transform>> =
+            std::collections::HashMap::new();
+
+        for i in 0..self.entity_count {
             if let (Some(pos), Some(rot), Some(scale)) = (
-                positions[i].as_ref(),
-                rotations[i].as_mut(),
-                scales[i].as_ref(),
+                self.positions[i].as_ref(),
+                self.rotations[i].as_mut(),
+                self.scales[i].as_ref(),
             ) {
                 rot.update(delta);
                 let transform = super::Transform::from_components(pos, rot, scale);
-                transforms[i] = Some(transform);
-
-                if let Some(batch) = instance_batches.get_mut(&super::Entity(i)) {
-                    for (source, target_transform) in batch.iter_mut() {
-                        if source.0 < transforms.len() {
-                            if let Some(t) = transforms[source.0] {
-                                *target_transform = t;
-                            }
-                        }
-                    }
-                }
+                self.transforms[i] = Some(transform);
             }
-        };
-
-        let mut i = 0;
-        while i + 3 < len {
-            update_entity(i);
-            update_entity(i + 1);
-            update_entity(i + 2);
-            update_entity(i + 3);
-            i += 4;
         }
 
-        while i < len {
-            update_entity(i);
-            i += 1;
+        for (i, rend_opt) in self.renderables.iter().enumerate() {
+            if let (Some(rend), Some(transform)) = (rend_opt, self.transforms[i]) {
+                new_batches
+                    .entry(rend.model_key)
+                    .or_insert_with(Vec::new)
+                    .push(transform);
+            }
         }
+
+        self.instance.batches = new_batches;
     }
 }
 

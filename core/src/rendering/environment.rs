@@ -1,9 +1,13 @@
 #[derive(Debug)]
 pub struct EquirectProjection {
-    pub src_shader_key: crate::CacheKey,
-    pub dst_shader_key: crate::CacheKey,
-    pub src_texture_key: crate::CacheKey,
-    pub dst_texture_key: crate::CacheKey,
+    pub src_shader: wgpu::ShaderModule,
+    pub dst_shader: wgpu::ShaderModule,
+    pub src_texture: crate::Texture,
+    pub dst_texture: crate::Texture,
+    pub src_pipeline: wgpu::ComputePipeline,
+    pub dst_pipeline: wgpu::RenderPipeline,
+    pub src_bind_group: wgpu::BindGroup,
+    pub dst_bind_group: wgpu::BindGroup,
 }
 
 impl EquirectProjection {
@@ -11,7 +15,8 @@ impl EquirectProjection {
     pub const NUM_WORKGROUPS: u32 = (Self::DEST_SIZE + 15) / 16;
     pub const DEPTH_OR_ARRAY_LAYERS: u32 = 6;
     pub fn new(
-        managers: &mut crate::Managers,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         src_shader: &str,
         dst_shader: &str,
@@ -22,8 +27,8 @@ impl EquirectProjection {
         let bytes = crate::Asset::read_bytes(&path)?;
         let (pixels, meta) = crate::Texture::decode_hdr(&bytes)?;
 
-        let src = crate::Texture::new(
-            &managers.device,
+        let src_texture = crate::Texture::new(
+            device,
             wgpu::Extent3d {
                 width: meta.width,
                 height: meta.height,
@@ -39,8 +44,8 @@ impl EquirectProjection {
             Some(&format!("{} source texture", hdr_texture)),
         );
 
-        let dst = crate::Texture::new(
-            &managers.device,
+        let dst_texture = crate::Texture::new(
+            device,
             wgpu::Extent3d {
                 width: Self::DEST_SIZE,
                 height: Self::DEST_SIZE,
@@ -56,9 +61,9 @@ impl EquirectProjection {
             Some(&format!("{} destination texture", hdr_texture)),
         );
 
-        managers.queue.write_texture(
+        queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &src.texture,
+                texture: &src_texture.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -69,190 +74,114 @@ impl EquirectProjection {
                 bytes_per_row: Some(meta.width * std::mem::size_of::<[f32; 4]>() as u32),
                 rows_per_image: Some(meta.height),
             },
-            src.texture.size(),
+            src_texture.texture.size(),
         );
 
-        let dst_bind_group = crate::BindGroup::equirect_dst(&managers.device, &dst);
-        let src_bind_group = crate::BindGroup::equirect_src(&managers.device, &src, &dst);
+        let dst_bind_group = crate::BindGroup::equirect_dst(device, &dst_texture);
+        let src_bind_group = crate::BindGroup::equirect_src(device, &src_texture, &dst_texture);
 
-        let src_texture_key = crate::CacheKey::from(src.label.clone());
-        let dst_texture_key = crate::CacheKey::from(dst.label.clone());
-
-        let src_shader_key = crate::CacheKey::from(src_shader);
-        let dst_shader_key = crate::CacheKey::from(dst_shader);
-
-        let equirect_src_shader = managers
-            .shader_manager
-            .load(&managers.device, src_shader)
-            .unwrap()
-            .clone();
+        let equirect_src_shader = crate::Shader::load(src_shader)?;
 
         let equirect_src_pipeline_layout =
-            managers
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("{} layout", src_shader)),
-                    bind_group_layouts: &[&crate::BindGroupLayouts::equirect_src()],
-                    push_constant_ranges: &[],
-                });
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("{} layout", src_shader)),
+                bind_group_layouts: &[&crate::BindGroupLayouts::equirect_src()],
+                push_constant_ranges: &[],
+            });
 
-        crate::CacheStorage::get_or_create(
-            &mut managers.pipeline_manager.compute,
-            src_shader_key.clone(),
-            || {
-                managers
-                    .device
-                    .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some(src_shader),
-                        layout: Some(&equirect_src_pipeline_layout),
-                        module: &equirect_src_shader,
-                        entry_point: Some("compute_equirect_to_cubemap"),
-                        compilation_options: Default::default(),
-                        cache: None,
-                    })
-                    .into()
+        let src_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(src_shader),
+            layout: Some(&equirect_src_pipeline_layout),
+            module: &equirect_src_shader,
+            entry_point: Some("compute_equirect_to_cubemap"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let equirect_dst_shader = crate::Shader::load(dst_shader)?;
+
+        let equirect_dst_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&format!("{} layout", dst_shader)),
+            bind_group_layouts: &[
+                crate::BindGroupLayouts::uniform(),
+                crate::BindGroupLayouts::equirect_dst(),
+            ],
+            push_constant_ranges: &[],
+        });
+
+        let dst_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(dst_shader),
+            layout: Some(&equirect_dst_layout),
+            vertex: wgpu::VertexState {
+                module: &equirect_dst_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
             },
-        );
-        let equirect_dst_shader = managers
-            .shader_manager
-            .load(&managers.device, dst_shader)
-            .unwrap();
-
-        let equirect_dst_layout =
-            managers
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("{} layout", dst_shader)),
-                    bind_group_layouts: &[
-                        crate::BindGroupLayouts::camera(),
-                        crate::BindGroupLayouts::equirect_dst(),
-                    ],
-                    push_constant_ranges: &[],
-                });
-
-        crate::CacheStorage::get_or_create(
-            &mut managers.pipeline_manager.render,
-            dst_shader_key.clone(),
-            || {
-                managers
-                    .device
-                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some(dst_shader),
-                        layout: Some(&equirect_dst_layout),
-                        vertex: wgpu::VertexState {
-                            module: &equirect_dst_shader,
-                            entry_point: Some("vs_main"),
-                            buffers: &[],
-                            compilation_options: Default::default(),
-                        },
-                        fragment: Some(wgpu::FragmentState {
-                            module: &equirect_dst_shader,
-                            entry_point: Some("fs_main"),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format: config.format,
-                                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                            compilation_options: Default::default(),
-                        }),
-                        primitive: wgpu::PrimitiveState {
-                            topology: wgpu::PrimitiveTopology::TriangleList,
-                            strip_index_format: None,
-                            front_face: wgpu::FrontFace::Ccw,
-                            cull_mode: Some(wgpu::Face::Back),
-                            polygon_mode: wgpu::PolygonMode::Fill,
-                            unclipped_depth: false,
-                            conservative: false,
-                        },
-                        depth_stencil: depth_stencil_state.as_ref().cloned(),
-
-                        multisample: wgpu::MultisampleState {
-                            count: 1,
-                            mask: !0,
-                            alpha_to_coverage_enabled: false,
-                        },
-                        multiview: None,
-                        cache: None,
-                    })
-                    .into()
+            fragment: Some(wgpu::FragmentState {
+                module: &equirect_dst_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
             },
-        );
+            depth_stencil: depth_stencil_state.as_ref().cloned(),
 
-        crate::CacheStorage::insert(
-            &mut managers.bind_group_manager,
-            src_texture_key.clone(),
-            src_bind_group.into(),
-        );
-        crate::CacheStorage::insert(
-            &mut managers.bind_group_manager,
-            dst_texture_key.clone(),
-            dst_bind_group.into(),
-        );
-
-        crate::CacheStorage::insert(
-            &mut managers.texture_manager,
-            src_texture_key.clone(),
-            src.into(),
-        );
-        crate::CacheStorage::insert(
-            &mut managers.texture_manager,
-            src_texture_key.clone(),
-            dst.into(),
-        );
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
 
         Ok(EquirectProjection {
-            src_shader_key,
-            dst_shader_key,
-            src_texture_key,
-            dst_texture_key,
+            src_shader: equirect_src_shader,
+            dst_shader: equirect_dst_shader,
+            src_texture,
+            dst_texture,
+            dst_pipeline,
+            src_pipeline,
+            src_bind_group,
+            dst_bind_group,
         })
     }
 
     pub fn compute_projection(&self, managers: &mut crate::Managers, label: Option<&str>) {
-        if let (Some(projection_compute_pipeline), Some(src_bind_group)) = (
-            crate::CacheStorage::get(&managers.pipeline_manager.compute, &self.src_shader_key),
-            managers.bind_group_manager.bind_group_for(
-                &managers.texture_manager,
-                &self.src_texture_key,
-                crate::BindGroupLayouts::equirect_src(),
-            ),
-        ) {
-            let mut encoder =
-                managers
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("compute encoder"),
-                    });
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label,
-                timestamp_writes: None,
+        let mut encoder = managers
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("compute encoder"),
             });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label,
+            timestamp_writes: None,
+        });
 
-            pass.set_pipeline(&projection_compute_pipeline);
-            pass.set_bind_group(0, src_bind_group.as_ref(), &[]);
-            pass.dispatch_workgroups(Self::NUM_WORKGROUPS, Self::NUM_WORKGROUPS, 6);
+        pass.set_pipeline(&self.src_pipeline);
+        pass.set_bind_group(0, &self.src_bind_group, &[]);
+        pass.dispatch_workgroups(Self::NUM_WORKGROUPS, Self::NUM_WORKGROUPS, 6);
 
-            drop(pass);
-            managers.queue.submit([encoder.finish()]);
-        }
+        drop(pass);
+        managers.queue.submit([encoder.finish()]);
     }
-    pub fn render(
-        &self,
-        rpass: &mut wgpu::RenderPass,
-        managers: &crate::Managers,
-        camera: &crate::camera::Camera,
-    ) {
-        if let (Some(equirect_projection_bind_group), Some(equirect_projection_pipeline)) = (
-            managers
-                .bind_group_manager
-                .bind_group(&self.dst_texture_key),
-            crate::CacheStorage::get(&managers.pipeline_manager.render, &self.dst_shader_key),
-        ) {
-            rpass.set_bind_group(0, camera.bind_group(), &[]);
-            rpass.set_bind_group(1, equirect_projection_bind_group.as_ref(), &[]);
-            rpass.set_pipeline(&equirect_projection_pipeline);
-            rpass.draw(0..3, 0..1);
-        }
+    pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
+        rpass.set_bind_group(0, uniform_bind_group, &[]);
+        rpass.set_bind_group(1, &self.dst_bind_group, &[]);
+        rpass.set_pipeline(&self.dst_pipeline);
+        rpass.draw(0..3, 0..1);
     }
 }
 #[derive(Debug)]
@@ -266,13 +195,8 @@ impl Environment {
             equirect_projection,
         }
     }
-    pub fn render(
-        &self,
-        rpass: &mut wgpu::RenderPass,
-        managers: &mut crate::Managers,
-        camera: &crate::camera::Camera,
-    ) {
-        self.equirect_projection.render(rpass, managers, camera);
+    pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
+        self.equirect_projection.render(rpass, uniform_bind_group);
     }
     pub fn projection(&self) -> &EquirectProjection {
         &self.equirect_projection

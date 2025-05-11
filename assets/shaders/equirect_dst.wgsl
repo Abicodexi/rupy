@@ -2,7 +2,7 @@ struct Uniform {
     view_proj: mat4x4<f32>,
     inv_proj: mat4x4<f32>,
     inv_view: mat4x4<f32>,
-    world_pos: vec3<f32>,
+    view_pos: vec3<f32>,
     _pad:      f32,
 }
 
@@ -41,15 +41,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_dir   = normalize(view_pos_h.xyz / view_pos_h.w);
     let world_dir  = normalize((uniforms.inv_view * vec4(view_dir, 0.0)).xyz);
 
-    let plane_y = uniforms.world_pos.y - 0.1;
-    let t1      = (plane_y - uniforms.world_pos.y) / world_dir.y;
+    let plane_y = uniforms.view_pos.y - 0.1;
+    let t1      = (plane_y - uniforms.view_pos.y) / world_dir.y;
 
     let center_clip     = vec4<f32>(0.0, 0.0, 1.0, 1.0);
     let center_view_h   = uniforms.inv_proj * center_clip;
     let center_view_dir = normalize(center_view_h.xyz / center_view_h.w);
     let center_world_dir= normalize((uniforms.inv_view * vec4(center_view_dir,0.0)).xyz);
-    let t2              = (plane_y - uniforms.world_pos.y) / center_world_dir.y;
-    let forward_hit     = uniforms.world_pos + center_world_dir * t2;
+    let t2              = (plane_y - uniforms.view_pos.y) / center_world_dir.y;
+    let forward_hit     = uniforms.view_pos + center_world_dir * t2;
 
     let ndc = in.clip_position.xy / in.clip_position.w;          // in [-1,1]
     let uv  = ndc * 0.5 + vec2<f32>(0.5, 0.5);                  // in [0,1]
@@ -61,10 +61,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var scene_rgb = textureSample(env_map, env_sampler, world_dir).rgb;
 
     if (t1 > 0.0) {
-        let hit1   = uniforms.world_pos + world_dir * t1;
-        let h_fac  = clamp(uniforms.world_pos.y / 10.0, 0.0, 1.0);
+        let hit1   = uniforms.view_pos + world_dir * t1;
+        let h_fac  = clamp(uniforms.view_pos.y / 10.0, 0.0, 1.0);
         let radius = mix(0.0, 0.05, h_fac);
-        let edge   = abs(distance(hit1.xz, uniforms.world_pos.xz) - radius);
+        let edge   = abs(distance(hit1.xz, uniforms.view_pos.xz) - radius);
         if (edge < 0.001) {
             let a = smoothstep(0.001, 0.0, edge);
             scene_rgb = mix(scene_rgb, vec3<f32>(1.0, 0.0, 0.0), a);

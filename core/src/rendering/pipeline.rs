@@ -1,59 +1,55 @@
-
 pub struct HDR {
     pipeline: wgpu::RenderPipeline,
 }
 impl HDR {
-   
-
     fn create_pipeline(
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
     ) -> wgpu::RenderPipeline {
-        let layout =&device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let layout = &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hdr pipeline layout"),
             bind_group_layouts: &[&crate::BindGroupLayouts::texture()],
             push_constant_ranges: &[],
         });
-           device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("HDR pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: format.add_srgb_suffix(),
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: None,
-    
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            })
-       
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("HDR pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        })
     }
     pub fn create(
         device: &wgpu::Device,
@@ -61,19 +57,12 @@ impl HDR {
     ) -> Result<HDR, crate::EngineError> {
         let shader = "hdr.wgsl";
         let hdr_shader = crate::Shader::load(shader)?;
-        let pipeline = HDR::create_pipeline(
-            device,
-            &hdr_shader,
-            surface_config.format,
-        );
-        Ok(Self {
-            pipeline,
-        })
+        let pipeline = HDR::create_pipeline(device, &hdr_shader, surface_config.format);
+        Ok(Self { pipeline })
     }
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
     }
-   
 }
 
 pub struct PipelineManager {
@@ -90,7 +79,7 @@ impl PipelineManager {
     }
 
     pub fn hdr(
-        device:&wgpu::Device,
+        device: &wgpu::Device,
         cfg: &wgpu::SurfaceConfiguration,
     ) -> Result<HDR, crate::EngineError> {
         HDR::create(device, cfg)

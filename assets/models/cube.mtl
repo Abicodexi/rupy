@@ -11,5 +11,5 @@ Ni 1.450000
 d 1.000000
 illum 2
 
-map_Bump C:\\Users\\sebastian\\Desktop\\rupy\\assets\\textures\\cube-normal.png
-map_Kd C:\\Users\\sebastian\\Desktop\\rupy\\assets\\textures\\cube-diffuse.jpg
+map_Bump ..\\textures\\cube-normal.png
+map_Kd ..\\textures\\cube-diffuse.jpg

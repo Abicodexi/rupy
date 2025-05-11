@@ -4,11 +4,12 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 /// A GPU-ready texture: the texture itself, a view, and a sampler.
+#[derive(Debug)]
 pub struct Texture {
     pub texture: wgpu::Texture,
-     pub view: wgpu::TextureView,
-     pub sampler: wgpu::Sampler,
-     pub label: String,
+    pub view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
+    pub label: String,
 }
 
 impl Texture {
@@ -69,7 +70,7 @@ impl Texture {
     pub fn create_view(&self, desc: &wgpu::TextureViewDescriptor) -> wgpu::TextureView {
         self.texture.create_view(desc)
     }
-    pub  fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
+    pub fn from_desc(device: &wgpu::Device, desc: &wgpu::TextureDescriptor<'_>) -> Self {
         let texture = device.create_texture(desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -308,7 +309,7 @@ impl Texture {
             bias: wgpu::DepthBiasState::default(),
         }
     }
-    
+
     pub fn equirect_projection_src_texture(
         device: &wgpu::Device,
         texture: &str,

@@ -82,6 +82,11 @@ pub struct Scale {
 }
 
 impl Scale {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Self {
+            value: cgmath::Vector3 { x, y, z },
+        }
+    }
     pub fn uniform(s: f32) -> Self {
         Self {
             value: cgmath::Vector3::new(s, s, s),
@@ -141,6 +146,32 @@ impl Transform {
         Self {
             model_matrix,
             normal_matrix,
+        }
+    }
+    pub fn to_vertex_instance(&self) -> crate::VertexNormalInstance {
+        let model = &self.model_matrix;
+        let normal = &self.normal_matrix;
+
+        let extract = |m: &cgmath::Matrix4<f32>| -> ([f32; 3], [f32; 3], [f32; 3]) {
+            (
+                [m.x.x, m.x.y, m.x.z],
+                [m.y.x, m.y.y, m.y.z],
+                [m.z.x, m.z.y, m.z.z],
+            )
+        };
+        let (nrm, tan, bit) = extract(normal);
+
+        crate::VertexNormalInstance {
+            row0: model.x.into(),
+            row1: model.y.into(),
+            row2: model.z.into(),
+            row3: model.w.into(),
+            normal: nrm,
+            _pad0: 0.0,
+            tangent: tan,
+            _pad1: 0.0,
+            bitangent: bit,
+            _pad2: 0.0,
         }
     }
     pub fn data(&self) -> TransformRaw {
