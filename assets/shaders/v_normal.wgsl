@@ -30,6 +30,7 @@ struct InstanceInput {
     @location(9) normal_matrix_0: vec3<f32>,
     @location(10) normal_matrix_1: vec3<f32>,
     @location(11) normal_matrix_2: vec3<f32>,
+    @location(12) color:          vec4<f32>
 };
 
 struct VertexOutput {
@@ -41,6 +42,7 @@ struct VertexOutput {
     @location(4) world_normal: vec3<f32>,
     @location(5) world_tangent: vec3<f32>,
     @location(6) world_bitangent: vec3<f32>,
+    @location(7) color:          vec4<f32>
 };
 @vertex
 fn vs_main(
@@ -78,6 +80,7 @@ fn vs_main(
     out.world_bitangent = normalize(normal_matrix * model.bitangent);
     out.world_position = world_position.xyz;
     out.world_view_position = camera.view_pos.xyz;
+    out.color = instance.color;
     return out;
 }
 
@@ -124,7 +127,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let reflection = textureSample(env_map, env_sampler, world_reflect).rgb;
     let shininess = 0.1;
 
-    let final_color = (diffuse_color + specular_color) * object_color.xyz + reflection * shininess;
+    let final_color = (diffuse_color + specular_color) * (object_color.xyz * in.color.xyz) + reflection * shininess;
 
     return vec4<f32>(final_color, object_color.a);
 }

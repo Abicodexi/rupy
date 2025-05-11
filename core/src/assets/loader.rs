@@ -5,6 +5,124 @@ use crate::CacheStorage;
 static BASE_PATH: once_cell::sync::Lazy<std::path::PathBuf> =
     once_cell::sync::Lazy::new(|| super::asset_dir().expect("couldn’t find asset dir"));
 
+fn compute_vertex_space(m: &tobj::Model) -> Vec<crate::VertexNormal> {
+    let mesh = &m.mesh;
+    // build base vertices with zeros
+    let mut vertices: Vec<crate::VertexNormal> = mesh
+        .positions
+        .chunks(3)
+        .zip(
+            mesh.texcoords
+                .chunks(2)
+                .chain(std::iter::repeat(&[0.0, 0.0][..])),
+        )
+        .map(|(pos, uv)| crate::VertexNormal {
+            position: [pos[0], pos[1], pos[2]],
+            tex_coords: [uv[0], uv[1]],
+            normal: [0.0; 3],
+            tangent: [0.0; 3],
+            bitangent: [0.0; 3],
+        })
+        .collect();
+
+    // prepare accumulators
+    let mut accum_normals = vec![[0.0f32; 3]; vertices.len()];
+    let mut accum_tangents = vec![[0.0f32; 3]; vertices.len()];
+    let mut accum_bitangents = vec![[0.0f32; 3]; vertices.len()];
+
+    // process each triangle
+    for idx in mesh.indices.chunks(3) {
+        let i0 = idx[0] as usize;
+        let i1 = idx[1] as usize;
+        let i2 = idx[2] as usize;
+
+        let v0 = vertices[i0].position;
+        let v1 = vertices[i1].position;
+        let v2 = vertices[i2].position;
+
+        let uv0 = vertices[i0].tex_coords;
+        let uv1 = vertices[i1].tex_coords;
+        let uv2 = vertices[i2].tex_coords;
+
+        // edges in 3D
+        let edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+        let edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+
+        // UV deltas
+        let delta_uv1 = [uv1[0] - uv0[0], uv1[1] - uv0[1]];
+        let delta_uv2 = [uv2[0] - uv0[0], uv2[1] - uv0[1]];
+        let r = 1.0 / (delta_uv1[0] * delta_uv2[1] - delta_uv1[1] * delta_uv2[0]);
+
+        // tangent & bitangent
+        let tangent = [
+            r * (delta_uv2[1] * edge1[0] - delta_uv1[1] * edge2[0]),
+            r * (delta_uv2[1] * edge1[1] - delta_uv1[1] * edge2[1]),
+            r * (delta_uv2[1] * edge1[2] - delta_uv1[1] * edge2[2]),
+        ];
+        let bitangent = [
+            r * (-delta_uv2[0] * edge1[0] + delta_uv1[0] * edge2[0]),
+            r * (-delta_uv2[0] * edge1[1] + delta_uv1[0] * edge2[1]),
+            r * (-delta_uv2[0] * edge1[2] + delta_uv1[0] * edge2[2]),
+        ];
+
+        // face normal = normalize(cross(edge1, edge2))
+        let n = {
+            let n_unnorm = [
+                edge1[1] * edge2[2] - edge1[2] * edge2[1],
+                edge1[2] * edge2[0] - edge1[0] * edge2[2],
+                edge1[0] * edge2[1] - edge1[1] * edge2[0],
+            ];
+            let len =
+                (n_unnorm[0] * n_unnorm[0] + n_unnorm[1] * n_unnorm[1] + n_unnorm[2] * n_unnorm[2])
+                    .sqrt()
+                    .max(1e-6);
+            [n_unnorm[0] / len, n_unnorm[1] / len, n_unnorm[2] / len]
+        };
+
+        // accumulate into each corner
+        for &i in &[i0, i1, i2] {
+            for j in 0..3 {
+                accum_normals[i][j] += n[j];
+                accum_tangents[i][j] += tangent[j];
+                accum_bitangents[i][j] += bitangent[j];
+            }
+        }
+    }
+
+    // normalize and orthogonalize per‐vertex
+    for i in 0..vertices.len() {
+        // normalize normal
+        let n = {
+            let nn = accum_normals[i];
+            let len = (nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2])
+                .sqrt()
+                .max(1e-6);
+            [nn[0] / len, nn[1] / len, nn[2] / len]
+        };
+
+        let t = {
+            let tt = accum_tangents[i];
+            // remove component along n
+            let dot = n[0] * tt[0] + n[1] * tt[1] + n[2] * tt[2];
+            let tg = [tt[0] - n[0] * dot, tt[1] - n[1] * dot, tt[2] - n[2] * dot];
+            let len = (tg[0] * tg[0] + tg[1] * tg[1] + tg[2] * tg[2])
+                .sqrt()
+                .max(1e-6);
+            [tg[0] / len, tg[1] / len, tg[2] / len]
+        };
+        // bitangent = cross(n, t)
+        let b = [
+            n[1] * t[2] - n[2] * t[1],
+            n[2] * t[0] - n[0] * t[2],
+            n[0] * t[1] - n[1] * t[0],
+        ];
+
+        vertices[i].normal = n;
+        vertices[i].tangent = t;
+        vertices[i].bitangent = b;
+    }
+    vertices
+}
 pub struct Asset;
 impl Asset {
     pub fn base_path() -> &'static std::path::PathBuf {
@@ -106,131 +224,10 @@ impl Asset {
             let mut instances = Vec::with_capacity(models.len() + 1);
             let mut aabb: Option<crate::AABB> = None;
             for m in models {
-                let mesh = m.mesh;
-
-                // 1) build base vertices with zeros
-                let mut vertices: Vec<crate::VertexNormal> = mesh
-                    .positions
-                    .chunks(3)
-                    .zip(
-                        mesh.texcoords
-                            .chunks(2)
-                            .chain(std::iter::repeat(&[0.0, 0.0][..])),
-                    )
-                    .map(|(pos, uv)| crate::VertexNormal {
-                        position: [pos[0], pos[1], pos[2]],
-                        tex_coords: [uv[0], uv[1]],
-                        normal: [0.0; 3],
-                        tangent: [0.0; 3],
-                        bitangent: [0.0; 3],
-                    })
-                    .collect();
-
-                // 2) prepare accumulators
-                let mut accum_normals = vec![[0.0f32; 3]; vertices.len()];
-                let mut accum_tangents = vec![[0.0f32; 3]; vertices.len()];
-                let mut accum_bitangents = vec![[0.0f32; 3]; vertices.len()];
-
-                // 3) process each triangle
-                for idx in mesh.indices.chunks(3) {
-                    let i0 = idx[0] as usize;
-                    let i1 = idx[1] as usize;
-                    let i2 = idx[2] as usize;
-
-                    let v0 = vertices[i0].position;
-                    let v1 = vertices[i1].position;
-                    let v2 = vertices[i2].position;
-
-                    let uv0 = vertices[i0].tex_coords;
-                    let uv1 = vertices[i1].tex_coords;
-                    let uv2 = vertices[i2].tex_coords;
-
-                    // edges in 3D
-                    let edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
-                    let edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
-
-                    // UV deltas
-                    let delta_uv1 = [uv1[0] - uv0[0], uv1[1] - uv0[1]];
-                    let delta_uv2 = [uv2[0] - uv0[0], uv2[1] - uv0[1]];
-                    let r = 1.0 / (delta_uv1[0] * delta_uv2[1] - delta_uv1[1] * delta_uv2[0]);
-
-                    // tangent & bitangent
-                    let tangent = [
-                        r * (delta_uv2[1] * edge1[0] - delta_uv1[1] * edge2[0]),
-                        r * (delta_uv2[1] * edge1[1] - delta_uv1[1] * edge2[1]),
-                        r * (delta_uv2[1] * edge1[2] - delta_uv1[1] * edge2[2]),
-                    ];
-                    let bitangent = [
-                        r * (-delta_uv2[0] * edge1[0] + delta_uv1[0] * edge2[0]),
-                        r * (-delta_uv2[0] * edge1[1] + delta_uv1[0] * edge2[1]),
-                        r * (-delta_uv2[0] * edge1[2] + delta_uv1[0] * edge2[2]),
-                    ];
-
-                    // face normal = normalize(cross(edge1, edge2))
-                    let n = {
-                        let n_unnorm = [
-                            edge1[1] * edge2[2] - edge1[2] * edge2[1],
-                            edge1[2] * edge2[0] - edge1[0] * edge2[2],
-                            edge1[0] * edge2[1] - edge1[1] * edge2[0],
-                        ];
-                        let len = (n_unnorm[0] * n_unnorm[0]
-                            + n_unnorm[1] * n_unnorm[1]
-                            + n_unnorm[2] * n_unnorm[2])
-                            .sqrt()
-                            .max(1e-6);
-                        [n_unnorm[0] / len, n_unnorm[1] / len, n_unnorm[2] / len]
-                    };
-
-                    // accumulate into each corner
-                    for &i in &[i0, i1, i2] {
-                        for j in 0..3 {
-                            accum_normals[i][j] += n[j];
-                            accum_tangents[i][j] += tangent[j];
-                            accum_bitangents[i][j] += bitangent[j];
-                        }
-                    }
-                }
-
-                // 4) normalize and orthogonalize per‐vertex
-                for i in 0..vertices.len() {
-                    // normalize normal
-                    let n = {
-                        let nn = accum_normals[i];
-                        let len = (nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2])
-                            .sqrt()
-                            .max(1e-6);
-                        [nn[0] / len, nn[1] / len, nn[2] / len]
-                    };
-
-                    let t = {
-                        let tt = accum_tangents[i];
-                        // remove component along n
-                        let dot = n[0] * tt[0] + n[1] * tt[1] + n[2] * tt[2];
-                        let tg = [tt[0] - n[0] * dot, tt[1] - n[1] * dot, tt[2] - n[2] * dot];
-                        let len = (tg[0] * tg[0] + tg[1] * tg[1] + tg[2] * tg[2])
-                            .sqrt()
-                            .max(1e-6);
-                        [tg[0] / len, tg[1] / len, tg[2] / len]
-                    };
-                    // bitangent = cross(n, t)
-                    let b = [
-                        n[1] * t[2] - n[2] * t[1],
-                        n[2] * t[0] - n[0] * t[2],
-                        n[0] * t[1] - n[1] * t[0],
-                    ];
-
-                    vertices[i].normal = n;
-                    vertices[i].tangent = t;
-                    vertices[i].bitangent = b;
-                }
-
-                if let Some(mat) = mats.get(mesh.material_id.unwrap_or(0)) {
-                    instances.push(crate::MeshInstance::new(
-                        managers,
-                        &vertices,
-                        &mesh.indices,
-                        &mat,
-                    ));
+                let vertices = compute_vertex_space(&m);
+                let indices = &m.mesh.indices;
+                if let Some(mat) = mats.get(m.mesh.material_id.unwrap_or(0)) {
+                    instances.push(crate::MeshInstance::new(managers, &vertices, indices, &mat));
                 }
 
                 if aabb.is_none() {
@@ -276,7 +273,7 @@ impl Asset {
         indices: &[I],
         aabb: crate::AABB,
     ) -> Result<std::sync::Arc<crate::Model>, crate::EngineError> {
-        let mat_key = crate::CacheKey::from(material_name);
+        let mat_key: crate::CacheKey = material_name.into();
         if !managers.material_manager.contains(&mat_key) {
             let _ = crate::MaterialManager::create(
                 managers,
@@ -301,7 +298,7 @@ impl Asset {
                 ],
             );
         }
-        let model_cache_key = crate::CacheKey::from(model_name);
+        let model_cache_key: crate::CacheKey = model_name.into();
 
         if let Some(cached_model) =
             crate::CacheStorage::get(&mut managers.model_manager, &model_cache_key)

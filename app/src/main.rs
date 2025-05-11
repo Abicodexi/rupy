@@ -19,9 +19,8 @@ async fn main() -> Result<(), EngineError> {
         let _ = logger.init();
     }
 
-    let (tx, rx): (Sender<ApplicationEvent>, Receiver<ApplicationEvent>) = channel::unbounded();
+    let (_tx, rx): (Sender<ApplicationEvent>, Receiver<ApplicationEvent>) = channel::unbounded();
 
-    let arc_tx = Arc::new(tx);
     let arc_rx = Arc::new(rx);
 
     let event_loop = EventLoop::<ApplicationEvent>::with_user_event().build()?;
@@ -31,7 +30,7 @@ async fn main() -> Result<(), EngineError> {
     GPU::init();
     World::init();
 
-    WorldTick::run_tokio(&arc_tx);
+    WorldTick::run_tokio();
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
 
     let _ = core::BindGroupLayouts::get();

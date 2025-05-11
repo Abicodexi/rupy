@@ -4,18 +4,21 @@ use cgmath::SquareMatrix;
 pub struct Position {
     x: f32,
     y: f32,
+    z: f32,
 }
 impl Position {
     pub fn update(&mut self, velocity: &crate::Velocity) {
         self.x += velocity.dx;
         self.y += velocity.dy;
+        self.z += velocity.dz;
     }
 }
-impl From<(f32, f32)> for Position {
-    fn from(value: (f32, f32)) -> Self {
+impl From<(f32, f32, f32)> for Position {
+    fn from(value: (f32, f32, f32)) -> Self {
         Self {
             x: value.0,
             y: value.1,
+            z: value.2,
         }
     }
 }
@@ -24,13 +27,15 @@ impl From<(f32, f32)> for Position {
 pub struct Velocity {
     dx: f32,
     dy: f32,
+    dz: f32,
 }
 
-impl From<(f32, f32)> for Velocity {
-    fn from(value: (f32, f32)) -> Self {
+impl From<(f32, f32, f32)> for Velocity {
+    fn from(value: (f32, f32, f32)) -> Self {
         Self {
             dx: value.0,
             dy: value.1,
+            dz: value.2,
         }
     }
 }
@@ -111,12 +116,7 @@ pub struct Transform {
     pub model_matrix: cgmath::Matrix4<f32>,
     pub normal_matrix: cgmath::Matrix4<f32>,
 }
-#[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TransformRaw {
-    pub model_matrix: [[f32; 4]; 4],
-    pub normal_matrix: [[f32; 4]; 4],
-}
+
 impl Default for Transform {
     fn default() -> Self {
         Self {
@@ -129,7 +129,7 @@ impl Default for Transform {
 impl Transform {
     pub fn from_components(pos: &Position, rot: &Rotation, scale: &Scale) -> Self {
         let translation =
-            cgmath::Matrix4::from_translation(cgmath::Vector3::new(pos.x, pos.y, 0.0));
+            cgmath::Matrix4::from_translation(cgmath::Vector3::new(pos.x, pos.y, pos.z));
         let rotation = cgmath::Matrix4::from(rot.quat);
         let scaling =
             cgmath::Matrix4::from_nonuniform_scale(scale.value.x, scale.value.y, scale.value.z);
@@ -172,12 +172,7 @@ impl Transform {
             _pad1: 0.0,
             bitangent: bit,
             _pad2: 0.0,
-        }
-    }
-    pub fn data(&self) -> TransformRaw {
-        TransformRaw {
-            model_matrix: self.model_matrix.into(),
-            normal_matrix: self.normal_matrix.into(),
+            color: [1.0, 1.0, 1.0, 0.0].into(),
         }
     }
 }

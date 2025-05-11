@@ -105,7 +105,7 @@ impl VertexTextureInstance {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VertexNormalInstance {
     // your 4×4 model matrix:
     pub row0: [f32; 4], // offset  0
@@ -119,7 +119,8 @@ pub struct VertexNormalInstance {
     pub tangent: [f32; 3],   // offset 80
     pub _pad1: f32,          // offset 92
     pub bitangent: [f32; 3], // offset 96
-    pub _pad2: f32,          // offset108
+    pub _pad2: f32,          // offset 108
+    pub color: [f32; 4],     // offset 112
 }
 
 // 64 bytes for the matrix + 3×16 bytes for N/T/B = 112 bytes total
@@ -166,6 +167,11 @@ impl VertexNormalInstance {
                 offset: 96,
                 shader_location: 11,
                 format: wgpu::VertexFormat::Float32x3,
+            },
+            wgpu::VertexAttribute {
+                offset: 112,
+                shader_location: 12,
+                format: wgpu::VertexFormat::Float32x4,
             },
         ],
     };

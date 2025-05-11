@@ -1,5 +1,5 @@
 pub mod controller;
-use cgmath::EuclideanSpace;
+use cgmath::{EuclideanSpace, Zero};
 pub use controller::*;
 
 pub mod frustum;
@@ -19,6 +19,8 @@ pub struct Camera {
     fovy: cgmath::Deg<f32>,
     znear: f32,
     zfar: f32,
+    forward: cgmath::Vector3<f32>,
+    pick_distance: f32,
     bind_group: wgpu::BindGroup,
     uniform_buffer: WgpuBuffer,
 }
@@ -42,13 +44,15 @@ impl Camera {
         );
         let bind_group = crate::BindGroup::camera(device, &uniform_buffer);
         Camera {
-            eye: cgmath::Point3::new(0.0, 0.0, 5.0),
-            target: cgmath::Point3::new(0.0, 0.0, -5.0),
+            eye: cgmath::Point3::new(0.0, 0.0, 0.0),
+            target: cgmath::Point3::new(0.0, 0.0, 0.0),
             up: cgmath::Vector3::unit_y(),
             aspect,
             fovy: cgmath::Deg(45.0),
-            znear: 0.1,
-            zfar: 100.0,
+            znear: 1.0,
+            zfar: 1000.0,
+            pick_distance: 10.0,
+            forward: cgmath::Vector3::zero(),
             bind_group,
             uniform_buffer,
         }
@@ -79,6 +83,8 @@ impl Camera {
 
     pub fn update(&mut self, controller: &mut CameraController) {
         controller.update(self, 1.0 / 60.0);
+        let origin = *self.eye();
+        self.forward = cgmath::InnerSpace::normalize(self.target() - origin); // or from inv_view as above
     }
     pub fn view_projection_matrix(
         &self,
@@ -133,5 +139,37 @@ impl Camera {
                 *shaping,
             ),
         )
+    }
+    /// Returns `Some(t)` for the nearest positive t, or `None` if no hit.
+    fn intersect_ray_sphere(
+        &self,
+        ray_origin: cgmath::Point3<f32>,
+        ray_dir: cgmath::Vector3<f32>,
+        sphere_center: cgmath::Point3<f32>,
+        sphere_radius: f32,
+    ) -> Option<f32> {
+        let L = sphere_center - ray_origin;
+        let tca = cgmath::InnerSpace::dot(L, ray_dir);
+        let d2 = cgmath::InnerSpace::dot(L, L) - tca * tca;
+        if d2 > sphere_radius * sphere_radius {
+            return None;
+        }
+        let thc = (sphere_radius * sphere_radius - d2).sqrt();
+        let t0 = tca - thc;
+        let t1 = tca + thc;
+        // pick the nearest positive t
+        if t0 >= 0.0 {
+            Some(t0)
+        } else if t1 >= 0.0 {
+            Some(t1)
+        } else {
+            None
+        }
+    }
+    pub fn pick_distance(&self) -> f32 {
+        self.pick_distance
+    }
+    pub fn is_looking_at(&self, center: cgmath::Point3<f32>, radius: f32) -> Option<f32> {
+        self.intersect_ray_sphere(*self.eye(), self.forward, center, radius)
     }
 }

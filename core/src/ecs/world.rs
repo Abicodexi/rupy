@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{log_debug, log_info, CacheKey};
+use cgmath::InnerSpace;
 
-use super::Transform;
+use crate::log_debug;
 
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
     std::sync::OnceLock::new();
@@ -20,103 +20,20 @@ fn world() -> Option<std::sync::Arc<std::sync::RwLock<World>>> {
 }
 pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-fn still_running() -> bool {
+fn _still_running() -> bool {
     RUNNING.load(std::sync::atomic::Ordering::Relaxed)
 }
-fn stop_running() {
+fn _stop_running() {
     RUNNING.store(false, std::sync::atomic::Ordering::Relaxed)
 }
-#[derive(Debug, Default)]
-pub struct InstanceBatcher {
-    /// Maps a model (identified by CacheKey) to a set of per-instance transforms.
-    batches: HashMap<CacheKey, Vec<Transform>>,
-    /// Maps an entity to the model it contributes transforms to.
-    entity_to_model: HashMap<crate::Entity, CacheKey>,
-    /// Maps an entity to a set of additional transform offsets it contributes.
-    entity_instances: HashMap<crate::Entity, Vec<usize>>,
+
+pub static BATCH_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn _is_batch_dirty() -> bool {
+    BATCH_DIRTY.load(std::sync::atomic::Ordering::Relaxed)
 }
-
-impl InstanceBatcher {
-    pub fn new() -> Self {
-        Self {
-            batches: HashMap::new(),
-            entity_to_model: HashMap::new(),
-            entity_instances: HashMap::new(),
-        }
-    }
-
-    /// Adds a transform to the batch of the given model key, associated with the given entity.
-    pub fn batch_instance(
-        &mut self,
-        entity: crate::Entity,
-        model_key: crate::CacheKey,
-        transform: super::Transform,
-    ) {
-        let entry = self.batches.entry(model_key).or_default();
-        let index = entry.len();
-        entry.push(transform);
-
-        self.entity_to_model.insert(entity, model_key);
-        self.entity_instances.entry(entity).or_default().push(index);
-    }
-
-    /// Clears all instance data.
-    pub fn clear(&mut self) {
-        self.batches.clear();
-        self.entity_to_model.clear();
-        self.entity_instances.clear();
-    }
-
-    /// Accessor for batches.
-    pub fn batches(&self) -> &std::collections::HashMap<crate::CacheKey, Vec<super::Transform>> {
-        &self.batches
-    }
-
-    /// Rebuilds all batched transforms based on the current entity transforms.
-    pub fn rebuild(
-        &mut self,
-        world: &crate::World,
-    ) {
-        for (entity, model_key) in &self.entity_to_model {
-            if let Some(t) = world.get_transform(*entity) {
-                if let Some(indices) = self.entity_instances.get(entity) {
-                    if let Some(batch) = self.batches.get_mut(model_key) {
-                        for &i in indices {
-                            if i < batch.len() {
-                                batch[i] = *t;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Returns per-instance GPU data for a model key, filtered by frustum.
-    pub fn raw_data_for(
-        &self,
-        model_key: &crate::CacheKey,
-        frustum: Option<&crate::camera::Frustum>,
-    ) -> Vec<crate::VertexNormalInstance> {
-        self.batches.get(model_key)
-            .map(|transforms| {
-                transforms.iter()
-                    .filter_map(|t| {
-                        let pos = cgmath::Point3::new(
-                            t.model_matrix.w.x,
-                            t.model_matrix.w.y,
-                            t.model_matrix.w.z,
-                        );
-                        if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
-                            Some(t.to_vertex_instance())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
+fn _set_batch_dirty(val: bool) {
+    BATCH_DIRTY.store(val, std::sync::atomic::Ordering::Relaxed)
 }
 
 #[derive(Debug)]
@@ -128,7 +45,6 @@ pub struct World {
     pub scales: Vec<Option<super::Scale>>,
     pub transforms: Vec<Option<super::Transform>>,
     projection: Option<crate::EquirectProjection>,
-    pub instance: InstanceBatcher,
     entity_count: usize,
 }
 
@@ -140,11 +56,12 @@ impl World {
         init_world();
     }
     pub fn running() -> bool {
-        still_running()
+        _still_running()
     }
     pub fn stop() {
-        stop_running();
+        _stop_running();
     }
+
     pub fn new() -> Self {
         Self {
             positions: Vec::new(),
@@ -154,7 +71,6 @@ impl World {
             scales: Vec::new(),
             transforms: Vec::new(),
             projection: None,
-            instance: InstanceBatcher::new(),
             entity_count: 0,
         }
     }
@@ -166,10 +82,6 @@ impl World {
         &self.projection
     }
 
-    pub fn batch_instance(&mut self, entity: super::Entity,model_key: crate::CacheKey, transform: super::Transform) {
-        self.instance.batch_instance(entity, model_key, transform);
-    }
-
     pub fn spawn_model(
         &mut self,
         model: &str,
@@ -178,7 +90,7 @@ impl World {
         scale: Option<super::Scale>,
     ) {
         let entity: super::Entity = self.spawn();
-        let position = position.unwrap_or((1.0, 1.0).into());
+        let position = position.unwrap_or((1.0, 1.0, 1.0).into());
         let rotation = rotation.unwrap_or(cgmath::Deg(00.0 % 360.0).into());
         let scale = scale.unwrap_or(
             cgmath::Vector3 {
@@ -279,8 +191,8 @@ impl World {
     }
 
     pub fn update(&mut self, dt: f32) {
-        self.update_physics();
-        self.update_transforms(dt as f64);
+        // self.update_physics();
+        // self.update_transforms(dt as f64);
     }
     pub fn update_physics(&mut self) {
         for i in 0..self.entity_count {
@@ -294,11 +206,6 @@ impl World {
             (dt * 90.0) as f32,
         ));
 
-        // === Update per-entity transforms ===
-        // === Rebuild instance batches ===
-        let mut new_batches: std::collections::HashMap<crate::CacheKey, Vec<super::Transform>> =
-            std::collections::HashMap::new();
-
         for i in 0..self.entity_count {
             if let (Some(pos), Some(rot), Some(scale)) = (
                 self.positions[i].as_ref(),
@@ -310,27 +217,125 @@ impl World {
                 self.transforms[i] = Some(transform);
             }
         }
+    }
 
-        for (i, rend_opt) in self.renderables.iter().enumerate() {
-            if let (Some(rend), Some(transform)) = (rend_opt, self.transforms[i]) {
-                new_batches
-                    .entry(rend.model_key)
-                    .or_insert_with(Vec::new)
-                    .push(transform);
+    // pub fn render_batch(
+    //     &self,
+    //     frustum: Option<&crate::camera::Frustum>,
+    // ) -> std::collections::HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> {
+    //     let mut batch: std::collections::HashMap<
+    //         crate::CacheKey,
+    //         Vec<crate::VertexNormalInstance>,
+    //     > = HashMap::new();
+    //     let highlight: [f32; 4] = [1.0, 10.0, 1.0, 0.0];
+    //     for idx in 0..self.entity_count {
+    //         let renderable = match &self.renderables[idx] {
+    //             Some(r) if r.visible => r,
+    //             _ => continue,
+    //         };
+
+    //         let transform = match &self.transforms[idx] {
+    //             Some(t) => t,
+    //             None => continue,
+    //         };
+    //         let magnitude = match &self.scales[idx] {
+    //             Some(s) => cgmath::InnerSpace::magnitude(s.value),
+    //             None => crate::Scale::one().value.magnitude(),
+    //         };
+    //         let center = cgmath::Point3::new(
+    //             transform.model_matrix.w.x,
+    //             transform.model_matrix.w.y,
+    //             transform.model_matrix.w.z,
+    //         );
+    //         if let Some(f) = frustum {
+    //             if !f.contains_sphere(center, magnitude) {
+    //                 continue;
+    //             }
+    //         }
+    //         let mut data: crate::VertexNormalInstance = transform.to_vertex_instance();
+    //         data.color = highlight;
+    //         batch.entry(renderable.model_key).or_default().push(data);
+    //     }
+    //     batch
+    // }
+
+    pub fn render_batch(
+        &self,
+        camera: &crate::camera::Camera,
+    ) -> HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> {
+        let mut best_hit: Option<(usize, f32)> = None;
+        for idx in 0..self.entity_count {
+            let (_, t, s) = match (
+                &self.renderables[idx],
+                &self.transforms[idx],
+                &self.scales[idx],
+            ) {
+                (Some(r), Some(t), Some(s)) if r.visible => (r, t, s),
+                _ => continue,
+            };
+
+            let center =
+                cgmath::Point3::new(t.model_matrix.w.x, t.model_matrix.w.y, t.model_matrix.w.z);
+            let radius = cgmath::InnerSpace::magnitude(s.value);
+
+            if let Some(t_ray) = camera.is_looking_at(center, radius) {
+                if t_ray <= camera.pick_distance() {
+                    if best_hit.is_none() || t_ray < best_hit.unwrap().1 {
+                        best_hit = Some((idx, t_ray));
+                    }
+                }
             }
         }
+        let picked_idx = best_hit.map(|(i, _)| i);
 
-        self.instance.batches = new_batches;
+        let default_color: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        let highlight: [f32; 4] = [1.0, 25.0, 1.0, 1.0];
+
+        let mut batch: HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> = HashMap::new();
+        let frustum = camera.frustum();
+        for idx in 0..self.entity_count {
+            let renderable = match &self.renderables[idx] {
+                Some(r) if r.visible => r,
+                _ => continue,
+            };
+            let transform = match &self.transforms[idx] {
+                Some(t) => t,
+                _ => continue,
+            };
+
+            let center = cgmath::Point3::new(
+                transform.model_matrix.w.x,
+                transform.model_matrix.w.y,
+                transform.model_matrix.w.z,
+            );
+            let magnitude = match &self.scales[idx] {
+                Some(s) => cgmath::InnerSpace::magnitude(s.value),
+                None => 1.0,
+            };
+            if !frustum.contains_sphere(center, magnitude) {
+                continue;
+            }
+
+            let mut data: crate::VertexNormalInstance = transform.to_vertex_instance();
+            data.color = if Some(idx) == picked_idx {
+                highlight
+            } else {
+                default_color
+            };
+
+            batch.entry(renderable.model_key).or_default().push(data);
+        }
+
+        batch
     }
 }
 
 pub struct WorldTick;
 
 impl WorldTick {
-    pub fn run_tokio(update_tx: &Arc<crossbeam::channel::Sender<crate::ApplicationEvent>>) {
-        let tx = update_tx.clone();
+    pub fn run_tokio() {
         tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(16));
+            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(80));
             let mut last = std::time::Instant::now();
             loop {
                 ticker.tick().await;
@@ -359,18 +364,10 @@ impl WorldTick {
                         }
                     }
                 }
-
-                if let Err(e) = tx.send(crate::ApplicationEvent::Draw) {
-                    crate::log_error!("Event loop closed, stopping world tick: {}", e);
-                    break;
-                }
             }
         });
     }
-    pub fn run(
-        world: std::sync::Arc<std::sync::RwLock<World>>,
-        update_tx: std::sync::Arc<crossbeam::channel::Sender<crate::ApplicationEvent>>,
-    ) {
+    pub fn run(world: std::sync::Arc<std::sync::RwLock<World>>) {
         std::thread::spawn(move || {
             let mut last = std::time::Instant::now();
             while World::running() {
@@ -381,11 +378,6 @@ impl WorldTick {
                 {
                     let mut w = world.write().unwrap();
                     w.update(dt);
-                }
-
-                if let Err(e) = update_tx.send(crate::ApplicationEvent::Draw) {
-                    crate::log_error!("Event loop closed, stopping updater: {}", e);
-                    break;
                 }
 
                 // ~60Hz

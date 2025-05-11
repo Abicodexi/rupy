@@ -1,5 +1,3 @@
-use crate::{log_debug, CacheStorage};
-
 #[warn(dead_code)]
 pub struct WgpuRenderer {
     depth_stencil_state: Option<wgpu::DepthStencilState>,
@@ -102,28 +100,20 @@ impl crate::Renderer for WgpuRenderer {
             rpass.draw(0..3, 0..1);
         }
 
-        // === Instanced Model Rendering ===
-        let frustum = camera.frustum();
-        for (model_key, transforms) in world.instance.batches() {
-            if transforms.is_empty() {
-                continue;
-            }
-
-            let instance_data: Vec<_> = world.instance.raw_data_for(model_key, Some(&frustum));
-
-            if instance_data.is_empty() {
+        for (model_key, instances) in world.render_batch(camera) {
+            if instances.is_empty() {
                 continue;
             }
 
             let instance_buffer = crate::WgpuBuffer::from_data(
                 &managers.device,
-                &instance_data,
+                &instances,
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} instance buffer", model_key.id())),
             );
 
             // === Render All Meshes for This Model ===
-            let model = crate::CacheStorage::get(&managers.model_manager, model_key).unwrap();
+            let model = crate::CacheStorage::get(&managers.model_manager, &model_key).unwrap();
 
             for mesh_instance in &model.meshes {
                 let material = crate::CacheStorage::get(
@@ -131,11 +121,11 @@ impl crate::Renderer for WgpuRenderer {
                     &mesh_instance.material_key,
                 )
                 .unwrap();
-                let pipeline = managers
-                    .pipeline_manager
-                    .render
-                    .get(&crate::CacheKey::from(material.name.as_str()))
-                    .unwrap();
+                let pipeline = crate::CacheStorage::get(
+                    &managers.pipeline_manager.render,
+                    &crate::CacheKey::from(material.name.as_str()),
+                )
+                .unwrap();
 
                 rpass.set_pipeline(pipeline);
 
@@ -157,11 +147,7 @@ impl crate::Renderer for WgpuRenderer {
                 rpass.set_vertex_buffer(0, vertex_buffer.get().slice(..));
                 rpass.set_vertex_buffer(1, instance_buffer.get().slice(..));
                 rpass.set_index_buffer(index_buffer.get().slice(..), wgpu::IndexFormat::Uint32);
-                rpass.draw_indexed(
-                    0..mesh_instance.index_count,
-                    0,
-                    0..instance_data.len() as u32,
-                );
+                rpass.draw_indexed(0..mesh_instance.index_count, 0, 0..instances.len() as u32);
             }
         }
     }

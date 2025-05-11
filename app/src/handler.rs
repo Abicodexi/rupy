@@ -35,15 +35,15 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
             if let WindowEvent::RedrawRequested = &event {
                 app.update();
                 app.upload();
+                app.draw();
                 app.window.request_redraw()
             }
         }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
-        if let AppInnerState::Running(app) = &mut self.inner {
+        if let AppInnerState::Running(_app) = &mut self.inner {
             match event {
-                ApplicationEvent::Draw => app.draw(),
                 ApplicationEvent::Shutdown => {
                     World::stop();
                     event_loop.exit()

@@ -1,8 +1,8 @@
 use cgmath::One;
 use core::{
     camera::{Camera, CameraController},
-    log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers, Renderer,
-    SurfaceExt, Time, WgpuRenderer, World,
+    log_debug, log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers,
+    Renderer, SurfaceExt, Time, WgpuRenderer, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -48,12 +48,12 @@ impl Rupy {
             })?;
 
             let surface = gpu.instance().create_surface(win_clone)?;
-            let surface_config = surface
+            let mut surface_config = surface
                 .get_default_config(&gpu.adapter(), width, height)
                 .ok_or(EngineError::SurfaceConfigError(
                     "surface isn't supported by this adapter".into(),
                 ))?;
-
+            surface_config.present_mode = wgpu::PresentMode::AutoVsync;
             let managers: Managers = gpu.into();
             (surface, surface_config, managers)
         };
@@ -72,7 +72,7 @@ impl Rupy {
 
         let light = Light::new(&managers.device)?;
 
-        let controller = CameraController::new(0.1, 0.5);
+        let controller = CameraController::new(5.0, 0.5);
 
         let equirect_projection = EquirectProjection::new(
             &managers.queue,
@@ -96,22 +96,105 @@ impl Rupy {
                         &surface_config,
                         wgpu_renderer.depth_stencil_state(),
                     ) {
-                        let entity_1 = w.spawn();
-                        w.insert_rotation(
-                            entity_1,
-                            cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        );
-                        // w.insert_velocity(entity_1, (0.1, 0.0).into());
-                        w.insert_scale(entity_1, core::Scale::new(2.0, 2.0, 2.0));
-                        w.insert_position(entity_1, (0.0, 0.0).into());
-                        w.insert_renderable(entity_1, model_key.into());
+                        let size = 10;
+                        let wall_height = 15;
+                        let wall_y_offset = 0.0; // if your floor is at y=0
 
-                       
+                        // Floor
+                        for x in 0..size {
+                            for z in 0..size {
+                                let entity = w.spawn();
+                                w.insert_rotation(
+                                    entity,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(entity, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(entity, (x as f32, 0.0, z as f32).into());
+                                w.insert_renderable(entity, model_key.into());
+                            }
+                        }
 
-                        w.batch_instance(entity_1, model_key, core::Transform::from_components(&(5.0,5.0).into(),& core::Rotation::identity(), &core::Scale::new(1.0, 1.0, 1.0)));
-                        w.insert_renderable(entity_1, model_key.into());
+                        // Ceiling at y = wall_height – 1
+                        for x in 0..size {
+                            for z in 0..size {
+                                let entity = w.spawn();
+                                w.insert_rotation(
+                                    entity,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(entity, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    entity,
+                                    (x as f32, (wall_height - 1) as f32, z as f32).into(),
+                                );
+                                w.insert_renderable(entity, model_key.into());
+                            }
+                        }
+
+                        // Front & Back walls (vary x & y, fix z)
+
+                        for x in 0..size {
+                            for y in 0..wall_height {
+                                // front wall at z = 0
+                                // let e1 = w.spawn();
+                                // w.insert_rotation(
+                                //     e1,
+                                //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                // );
+                                // w.insert_scale(e1, core::Scale::new(0.5, 0.5, 0.5));
+                                // w.insert_position(
+                                //     e1,
+                                //     (x as f32, y as f32 + wall_y_offset, 0.0).into(),
+                                // );
+                                // w.insert_renderable(e1, model_key.into());
+
+                                // back wall at z = size - 1
+                                let e2 = w.spawn();
+                                w.insert_rotation(
+                                    e2,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e2, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e2,
+                                    (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
+                                );
+                                w.insert_renderable(e2, model_key.into());
+                            }
+                        }
+
+                        // Left & Right walls (vary z & y, fix x)
+                        for z in 0..size {
+                            for y in 0..wall_height {
+                                // left wall at x = 0
+                                let e1 = w.spawn();
+                                w.insert_rotation(
+                                    e1,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e1, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e1,
+                                    (0.0, y as f32 + wall_y_offset, z as f32).into(),
+                                );
+                                w.insert_renderable(e1, model_key.into());
+
+                                // right wall at x = size - 1
+                                let e2 = w.spawn();
+                                w.insert_rotation(
+                                    e2,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e2, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e2,
+                                    ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
+                                );
+                                w.insert_renderable(e2, model_key.into());
+                            }
+                        }
+                        w.update_transforms(time.delta_time as f64);
                     }
-
                 }
                 _ => (),
             }

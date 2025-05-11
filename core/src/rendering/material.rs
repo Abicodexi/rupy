@@ -190,7 +190,7 @@ impl MaterialManager {
         desc.front_face = wgpu::FrontFace::Ccw;
         desc.topology = wgpu::PrimitiveTopology::TriangleList;
         desc.polygon_mode = wgpu::PolygonMode::Fill;
-        desc.blend_state = Some(wgpu::BlendState::ALPHA_BLENDING);
+        desc.blend_state = Some(wgpu::BlendState::REPLACE);
         desc.cull_mode = Some(wgpu::Face::Back);
 
         let material = Self::create(
