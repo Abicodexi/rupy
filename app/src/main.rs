@@ -1,12 +1,12 @@
 mod app;
 mod handler;
 mod state;
-use core::{
+use crossbeam::channel::{self, Receiver, Sender};
+use engine::{
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
     logger::LogFactory,
-    ApplicationEvent, EngineError, World, WorldTick, GPU,
+    ApplicationEvent, BindGroupLayouts, EngineError, World, WorldTick, GPU,
 };
-use crossbeam::channel::{self, Receiver, Sender};
 use state::ApplicationState;
 use std::sync::Arc;
 use winit::event_loop::EventLoop;
@@ -33,7 +33,7 @@ async fn main() -> Result<(), EngineError> {
     WorldTick::run_tokio();
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
 
-    let _ = core::BindGroupLayouts::get();
+    let _ = BindGroupLayouts::get();
 
     Ok(event_loop.run_app(&mut ApplicationState::new())?)
 }

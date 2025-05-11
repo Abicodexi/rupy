@@ -1,5 +1,5 @@
 use crate::state::{AppInnerState, ApplicationState};
-use core::{ApplicationEvent, World};
+use engine::{ApplicationEvent, World};
 use pollster::FutureExt;
 use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
 

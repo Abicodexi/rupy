@@ -1,8 +1,8 @@
-use cgmath::One;
-use core::{
+use engine::{
     camera::{Camera, CameraController},
-    log_debug, log_error, EngineError, EquirectProjection, GlyphonRenderer, Light, Managers,
-    Renderer, SurfaceExt, Time, WgpuRenderer, World,
+    log_error, BindGroup, CacheStorage, EngineError, EquirectProjection, FrameBuffer,
+    GlyphonBuffer, GlyphonRenderer, Light, Managers, RenderTargetKind, RenderTargetManager,
+    Renderer, Scale, SurfaceExt, Texture, Time, WgpuRenderer, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -19,7 +19,7 @@ pub struct Rupy {
     pub surface: wgpu::Surface<'static>,
     pub surface_config: wgpu::SurfaceConfiguration,
     pub wgpu_renderer: WgpuRenderer,
-    pub render_targets: core::RenderTargetManager,
+    pub render_targets: RenderTargetManager,
     pub glyphon_renderer: GlyphonRenderer,
     pub camera: Camera,
     pub light: Light,
@@ -108,7 +108,7 @@ impl Rupy {
                                     entity,
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
-                                w.insert_scale(entity, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
                                 w.insert_position(entity, (x as f32, 0.0, z as f32).into());
                                 w.insert_renderable(entity, model_key.into());
                             }
@@ -122,7 +122,7 @@ impl Rupy {
                                     entity,
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
-                                w.insert_scale(entity, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
                                 w.insert_position(
                                     entity,
                                     (x as f32, (wall_height - 1) as f32, z as f32).into(),
@@ -141,7 +141,7 @@ impl Rupy {
                                 //     e1,
                                 //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 // );
-                                // w.insert_scale(e1, core::Scale::new(0.5, 0.5, 0.5));
+                                // w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
                                 // w.insert_position(
                                 //     e1,
                                 //     (x as f32, y as f32 + wall_y_offset, 0.0).into(),
@@ -154,7 +154,7 @@ impl Rupy {
                                     e2,
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
-                                w.insert_scale(e2, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
                                 w.insert_position(
                                     e2,
                                     (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
@@ -172,7 +172,7 @@ impl Rupy {
                                     e1,
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
-                                w.insert_scale(e1, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
                                 w.insert_position(
                                     e1,
                                     (0.0, y as f32 + wall_y_offset, z as f32).into(),
@@ -185,7 +185,7 @@ impl Rupy {
                                     e2,
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
-                                w.insert_scale(e2, core::Scale::new(0.5, 0.5, 0.5));
+                                w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
                                 w.insert_position(
                                     e2,
                                     ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
@@ -199,28 +199,28 @@ impl Rupy {
                 _ => (),
             }
         }
-        let mut render_targets = core::RenderTargetManager::new();
+        let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
-            core::FrameBuffer::new_with_depth(
+            FrameBuffer::new_with_depth(
                 &managers.device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
-                core::Texture::DEPTH_FORMAT,
+                Texture::DEPTH_FORMAT,
                 "scene buffer",
             ),
-            core::RenderTargetKind::Scene,
+            RenderTargetKind::Scene,
         );
         render_targets.insert(
-            core::FrameBuffer::new_color_only(
+            FrameBuffer::new_color_only(
                 &managers.device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
                 "hdr buffer",
             ),
-            core::RenderTargetKind::Hdr,
+            RenderTargetKind::Hdr,
         );
         let uniform_bind_group =
-            core::BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
+            BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
 
         Ok(Rupy {
             managers,
@@ -261,8 +261,7 @@ impl Rupy {
                             },
                         );
 
-                        if let Some(frame) = self.render_targets.get(&core::RenderTargetKind::Scene)
-                        {
+                        if let Some(frame) = self.render_targets.get(&RenderTargetKind::Scene) {
                             if let Some(projection) = w.projection() {
                                 projection.compute_projection(
                                     &mut self.managers,
@@ -298,12 +297,8 @@ impl Rupy {
                         }
 
                         // === 2. Postprocess Scene -> HDR ===
-                        if let Some(scene_fb) =
-                            self.render_targets.get(&core::RenderTargetKind::Scene)
-                        {
-                            if let Some(hdr_fb) =
-                                self.render_targets.get(&core::RenderTargetKind::Hdr)
-                            {
+                        if let Some(scene_fb) = self.render_targets.get(&RenderTargetKind::Scene) {
+                            if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
                                 self.wgpu_renderer.hdr(
                                     &mut encoder,
                                     &self.managers,
@@ -314,8 +309,7 @@ impl Rupy {
                         }
 
                         // === 3. Final HDR -> swapchain ===
-                        if let Some(hdr_fb) = self.render_targets.get(&core::RenderTargetKind::Hdr)
-                        {
+                        if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
                             self.wgpu_renderer.final_blit_to_surface(
                                 &mut encoder,
                                 hdr_fb.color(),
@@ -373,11 +367,11 @@ impl Rupy {
         if self.last_shape_time.elapsed().as_millis() > 1500 {
             self.last_shape_time = std::time::Instant::now();
             let lines = self.buffer_lines();
-            let gb = core::CacheStorage::get_or_create(
+            let gb = CacheStorage::get_or_create(
                 &mut self.managers.buffer_manager.g_buffer,
                 "text buffer".into(),
                 || {
-                    core::GlyphonBuffer::new(
+                    GlyphonBuffer::new(
                         &mut self.glyphon_renderer.font_system,
                         Some(glyphon::Metrics {
                             font_size: 20.0,

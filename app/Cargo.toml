@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-core = { path = "../core" }
+engine = { path = "../engine" }
 wgpu =  "24.0.3"
 winit = "0.30.9"
 cgmath = "0.18.0"

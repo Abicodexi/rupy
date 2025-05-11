@@ -1,5 +1,5 @@
 use crate::app::Rupy;
-use core::EngineError;
+use engine::EngineError;
 use winit::event_loop::ActiveEventLoop;
 
 #[allow(dead_code)]
