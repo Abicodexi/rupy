@@ -102,10 +102,16 @@ impl Rupy {
                             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                         );
                         // w.insert_velocity(entity_1, (0.1, 0.0).into());
-                        w.insert_scale(entity_1, core::Scale::new(5.0, 5.0, 2.0));
-                        w.insert_position(entity_1, (2.0, 2.0).into());
+                        w.insert_scale(entity_1, core::Scale::new(2.0, 2.0, 2.0));
+                        w.insert_position(entity_1, (0.0, 0.0).into());
+                        w.insert_renderable(entity_1, model_key.into());
+
+                       
+
+                        w.batch_instance(entity_1, model_key, core::Transform::from_components(&(5.0,5.0).into(),& core::Rotation::identity(), &core::Scale::new(1.0, 1.0, 1.0)));
                         w.insert_renderable(entity_1, model_key.into());
                     }
+
                 }
                 _ => (),
             }

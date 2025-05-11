@@ -1,6 +1,8 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::{log_debug, log_info};
+use crate::{log_debug, log_info, CacheKey};
+
+use super::Transform;
 
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
     std::sync::OnceLock::new();
@@ -24,52 +26,88 @@ fn still_running() -> bool {
 fn stop_running() {
     RUNNING.store(false, std::sync::atomic::Ordering::Relaxed)
 }
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InstanceBatcher {
-    batches: std::collections::HashMap<crate::CacheKey, Vec<super::Transform>>,
+    /// Maps a model (identified by CacheKey) to a set of per-instance transforms.
+    batches: HashMap<CacheKey, Vec<Transform>>,
+    /// Maps an entity to the model it contributes transforms to.
+    entity_to_model: HashMap<crate::Entity, CacheKey>,
+    /// Maps an entity to a set of additional transform offsets it contributes.
+    entity_instances: HashMap<crate::Entity, Vec<usize>>,
 }
 
 impl InstanceBatcher {
     pub fn new() -> Self {
         Self {
-            batches: std::collections::HashMap::new(),
+            batches: HashMap::new(),
+            entity_to_model: HashMap::new(),
+            entity_instances: HashMap::new(),
         }
     }
 
-    pub fn add_instance(&mut self, model_key: crate::CacheKey, transform: super::Transform) {
-        log_info!(
-            "Containts {} {}",
-            model_key.id(),
-            self.batches.contains_key(&model_key)
-        );
-        self.batches.entry(model_key).or_default().push(transform);
+    /// Adds a transform to the batch of the given model key, associated with the given entity.
+    pub fn batch_instance(
+        &mut self,
+        entity: crate::Entity,
+        model_key: crate::CacheKey,
+        transform: super::Transform,
+    ) {
+        let entry = self.batches.entry(model_key).or_default();
+        let index = entry.len();
+        entry.push(transform);
+
+        self.entity_to_model.insert(entity, model_key);
+        self.entity_instances.entry(entity).or_default().push(index);
     }
 
+    /// Clears all instance data.
     pub fn clear(&mut self) {
         self.batches.clear();
+        self.entity_to_model.clear();
+        self.entity_instances.clear();
     }
 
+    /// Accessor for batches.
     pub fn batches(&self) -> &std::collections::HashMap<crate::CacheKey, Vec<super::Transform>> {
         &self.batches
     }
 
+    /// Rebuilds all batched transforms based on the current entity transforms.
+    pub fn rebuild(
+        &mut self,
+        world: &crate::World,
+    ) {
+        for (entity, model_key) in &self.entity_to_model {
+            if let Some(t) = world.get_transform(*entity) {
+                if let Some(indices) = self.entity_instances.get(entity) {
+                    if let Some(batch) = self.batches.get_mut(model_key) {
+                        for &i in indices {
+                            if i < batch.len() {
+                                batch[i] = *t;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns per-instance GPU data for a model key, filtered by frustum.
     pub fn raw_data_for(
         &self,
         model_key: &crate::CacheKey,
         frustum: Option<&crate::camera::Frustum>,
     ) -> Vec<crate::VertexNormalInstance> {
-        self.batches
-            .get(model_key)
+        self.batches.get(model_key)
             .map(|transforms| {
-                transforms
-                    .iter()
+                transforms.iter()
                     .filter_map(|t| {
                         let pos = cgmath::Point3::new(
                             t.model_matrix.w.x,
                             t.model_matrix.w.y,
                             t.model_matrix.w.z,
                         );
-                        if frustum.map_or(false, |f| f.contains_sphere(pos, 0.1)) {
+                        if frustum.map_or(true, |f| f.contains_sphere(pos, 0.1)) {
                             Some(t.to_vertex_instance())
                         } else {
                             None
@@ -80,6 +118,7 @@ impl InstanceBatcher {
             .unwrap_or_default()
     }
 }
+
 #[derive(Debug)]
 pub struct World {
     pub positions: Vec<Option<super::Position>>,
@@ -127,8 +166,8 @@ impl World {
         &self.projection
     }
 
-    pub fn batch_instance(&mut self, model_key: crate::CacheKey, transform: super::Transform) {
-        self.instance.add_instance(model_key, transform);
+    pub fn batch_instance(&mut self, entity: super::Entity,model_key: crate::CacheKey, transform: super::Transform) {
+        self.instance.batch_instance(entity, model_key, transform);
     }
 
     pub fn spawn_model(

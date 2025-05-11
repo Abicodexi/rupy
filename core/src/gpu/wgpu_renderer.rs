@@ -162,7 +162,6 @@ impl crate::Renderer for WgpuRenderer {
                     0,
                     0..instance_data.len() as u32,
                 );
-                log_debug!("Drawing instances: {}", instance_data.len());
             }
         }
     }
