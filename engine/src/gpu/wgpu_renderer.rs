@@ -1,3 +1,5 @@
+use crate::UnifiedVertexInstance;
+
 #[warn(dead_code)]
 pub struct WgpuRenderer {
     depth_stencil_state: Option<wgpu::DepthStencilState>,
@@ -100,14 +102,14 @@ impl crate::Renderer for WgpuRenderer {
             rpass.draw(0..3, 0..1);
         }
 
-        for (model_key, instances) in world.render_batch(camera) {
+        for (model_key, instances) in world.instance_batch(camera) {
             if instances.is_empty() {
                 continue;
             }
-
-            let instance_buffer = crate::WgpuBuffer::from_data(
+            let (count, data) = UnifiedVertexInstance::to_data(instances);
+            let instance_buffer = super::WgpuBuffer::from_data(
                 &managers.device,
-                &instances,
+                &data, // &[u8]
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some(&format!("{} instance buffer", model_key.id())),
             );
@@ -143,11 +145,10 @@ impl crate::Renderer for WgpuRenderer {
                     &mesh_instance.index_buffer_key,
                 )
                 .unwrap();
-
                 rpass.set_vertex_buffer(0, vertex_buffer.get().slice(..));
                 rpass.set_vertex_buffer(1, instance_buffer.get().slice(..));
                 rpass.set_index_buffer(index_buffer.get().slice(..), wgpu::IndexFormat::Uint32);
-                rpass.draw_indexed(0..mesh_instance.index_count, 0, 0..instances.len() as u32);
+                rpass.draw_indexed(0..mesh_instance.index_count, 0, 0..count);
             }
         }
     }

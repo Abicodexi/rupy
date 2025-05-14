@@ -1,5 +1,7 @@
 use cgmath::SquareMatrix;
 
+use crate::UnifiedVertexInstance;
+
 #[derive(Debug, Copy, Clone)]
 pub struct Position {
     x: f32,
@@ -148,7 +150,7 @@ impl Transform {
             normal_matrix,
         }
     }
-    pub fn to_vertex_instance(&self) -> crate::VertexNormalInstance {
+    pub fn to_vertex_instance(&self) -> UnifiedVertexInstance {
         let model = &self.model_matrix;
         let normal = &self.normal_matrix;
 
@@ -160,19 +162,34 @@ impl Transform {
             )
         };
         let (nrm, tan, bit) = extract(normal);
+        let translation = {
+            let w = model.w; // cgmath::Vector4
+            [w.x, w.y, w.z]
+        };
 
-        crate::VertexNormalInstance {
-            row0: model.x.into(),
-            row1: model.y.into(),
-            row2: model.z.into(),
-            row3: model.w.into(),
-            normal: nrm,
+        UnifiedVertexInstance {
+            // 4×4 model matrix
+            model: (*model).into(),
+
+            // per-instance color override
+            color: [1.0, 1.0, 1.0],
             _pad0: 0.0,
-            tangent: tan,
+
+            // per-instance translation
+            translation,
             _pad1: 0.0,
+
+            // per-instance UV offset
+            uv_offset: [0.0, 0.0],
+            _pad2: [0.0; 2],
+
+            // per-instance normals/tangents
+            normal: nrm,
+            _pad3: 0.0,
+            tangent: tan,
+            _pad4: 0.0,
             bitangent: bit,
-            _pad2: 0.0,
-            color: [1.0, 1.0, 1.0, 0.0].into(),
+            _pad5: 0.0,
         }
     }
 }

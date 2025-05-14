@@ -1,9 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
-
-use cgmath::InnerSpace;
-
-use crate::log_debug;
-
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
     std::sync::OnceLock::new();
 
@@ -108,7 +102,7 @@ impl World {
         self.insert_rotation(entity, rotation);
         self.insert_scale(entity, scale);
         self.insert_renderable(entity, renderable);
-        log_debug!("Spawned model entity: {} {}", entity.0, model);
+        crate::log_debug!("Spawned model entity: {} {}", entity.0, model);
     }
     pub fn load_object(
         obj: &str,
@@ -191,8 +185,8 @@ impl World {
     }
 
     pub fn update(&mut self, dt: f32) {
-        // self.update_physics();
-        // self.update_transforms(dt as f64);
+        self.update_physics();
+        self.update_transforms(dt as f64);
     }
     pub fn update_physics(&mut self) {
         for i in 0..self.entity_count {
@@ -219,50 +213,10 @@ impl World {
         }
     }
 
-    // pub fn render_batch(
-    //     &self,
-    //     frustum: Option<&crate::camera::Frustum>,
-    // ) -> std::collections::HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> {
-    //     let mut batch: std::collections::HashMap<
-    //         crate::CacheKey,
-    //         Vec<crate::VertexNormalInstance>,
-    //     > = HashMap::new();
-    //     let highlight: [f32; 4] = [1.0, 10.0, 1.0, 0.0];
-    //     for idx in 0..self.entity_count {
-    //         let renderable = match &self.renderables[idx] {
-    //             Some(r) if r.visible => r,
-    //             _ => continue,
-    //         };
-
-    //         let transform = match &self.transforms[idx] {
-    //             Some(t) => t,
-    //             None => continue,
-    //         };
-    //         let magnitude = match &self.scales[idx] {
-    //             Some(s) => cgmath::InnerSpace::magnitude(s.value),
-    //             None => crate::Scale::one().value.magnitude(),
-    //         };
-    //         let center = cgmath::Point3::new(
-    //             transform.model_matrix.w.x,
-    //             transform.model_matrix.w.y,
-    //             transform.model_matrix.w.z,
-    //         );
-    //         if let Some(f) = frustum {
-    //             if !f.contains_sphere(center, magnitude) {
-    //                 continue;
-    //             }
-    //         }
-    //         let mut data: crate::VertexNormalInstance = transform.to_vertex_instance();
-    //         data.color = highlight;
-    //         batch.entry(renderable.model_key).or_default().push(data);
-    //     }
-    //     batch
-    // }
-
-    pub fn render_batch(
+    pub fn instance_batch(
         &self,
         camera: &crate::camera::Camera,
-    ) -> HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> {
+    ) -> std::collections::HashMap<crate::CacheKey, Vec<crate::UnifiedVertexInstance>> {
         let mut best_hit: Option<(usize, f32)> = None;
         for idx in 0..self.entity_count {
             let (_, t, s) = match (
@@ -288,10 +242,13 @@ impl World {
         }
         let picked_idx = best_hit.map(|(i, _)| i);
 
-        let default_color: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-        let highlight: [f32; 4] = [1.0, 25.0, 1.0, 1.0];
+        let default_color: [f32; 3] = [1.0, 1.0, 1.0];
+        let highlight: [f32; 3] = [1.0, 25.0, 1.0];
 
-        let mut batch: HashMap<crate::CacheKey, Vec<crate::VertexNormalInstance>> = HashMap::new();
+        let mut batch: std::collections::HashMap<
+            crate::CacheKey,
+            Vec<crate::UnifiedVertexInstance>,
+        > = std::collections::HashMap::new();
         let frustum = camera.frustum();
         for idx in 0..self.entity_count {
             let renderable = match &self.renderables[idx] {
@@ -316,7 +273,8 @@ impl World {
                 continue;
             }
 
-            let mut data: crate::VertexNormalInstance = transform.to_vertex_instance();
+            let mut data = transform.to_vertex_instance();
+
             data.color = if Some(idx) == picked_idx {
                 highlight
             } else {

@@ -5,10 +5,9 @@ use crate::CacheStorage;
 static BASE_PATH: once_cell::sync::Lazy<std::path::PathBuf> =
     once_cell::sync::Lazy::new(|| super::asset_dir().expect("couldn’t find asset dir"));
 
-fn compute_vertex_space(m: &tobj::Model) -> Vec<crate::VertexNormal> {
+fn compute_vertex_space(m: &tobj::Model) -> Vec<crate::UnifiedVertex> {
     let mesh = &m.mesh;
-    // build base vertices with zeros
-    let mut vertices: Vec<crate::VertexNormal> = mesh
+    let mut vertices: Vec<crate::UnifiedVertex> = mesh
         .positions
         .chunks(3)
         .zip(
@@ -16,12 +15,13 @@ fn compute_vertex_space(m: &tobj::Model) -> Vec<crate::VertexNormal> {
                 .chunks(2)
                 .chain(std::iter::repeat(&[0.0, 0.0][..])),
         )
-        .map(|(pos, uv)| crate::VertexNormal {
+        .map(|(pos, uv)| crate::UnifiedVertex {
             position: [pos[0], pos[1], pos[2]],
             tex_coords: [uv[0], uv[1]],
             normal: [0.0; 3],
             tangent: [0.0; 3],
             bitangent: [0.0; 3],
+            color: [0.0; 3],
         })
         .collect();
 
@@ -123,6 +123,7 @@ fn compute_vertex_space(m: &tobj::Model) -> Vec<crate::VertexNormal> {
     }
     vertices
 }
+
 pub struct Asset;
 impl Asset {
     pub fn base_path() -> &'static std::path::PathBuf {
@@ -216,8 +217,8 @@ impl Asset {
                 &vec_m,
                 "v_normal.wgsl",
                 &[
-                    crate::VertexNormal::LAYOUT,
-                    crate::VertexNormalInstance::LAYOUT,
+                    crate::UnifiedVertex::LAYOUT,
+                    crate::UnifiedVertexInstance::LAYOUT,
                 ],
             );
 
@@ -279,7 +280,7 @@ impl Asset {
                 managers,
                 surface_config,
                 depth_stencil_state,
-                &crate::MaterialDescriptor {
+                &mut crate::MaterialDescriptor {
                     name: material_name,
                     key: mat_key,
                     shader_path: shader_rel_path,
@@ -293,8 +294,8 @@ impl Asset {
                     cull_mode,
                 },
                 &[
-                    crate::VertexNormal::LAYOUT,
-                    crate::VertexNormalInstance::LAYOUT,
+                    crate::UnifiedVertex::LAYOUT,
+                    crate::UnifiedVertexInstance::LAYOUT,
                 ],
             );
         }

@@ -29,8 +29,8 @@ impl<'a> Default for MaterialDescriptor<'a> {
             front_face: wgpu::FrontFace::Ccw,
             topology: wgpu::PrimitiveTopology::TriangleList,
             polygon_mode: wgpu::PolygonMode::Fill,
-            blend_state: None,
-            cull_mode: None,
+            blend_state: Some(wgpu::BlendState::REPLACE),
+            cull_mode: Some(wgpu::Face::Back),
         }
     }
 }
@@ -56,13 +56,12 @@ impl MaterialManager {
         managers: &mut Managers,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &Option<wgpu::DepthStencilState>,
-        desc: &MaterialDescriptor<'a>,
+        desc: &mut MaterialDescriptor<'a>,
         vertex_buffers: &[wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
         if let Some(mat) = managers.material_manager.get(&desc.key) {
             return Ok(mat.clone());
         }
-
         let shader = managers
             .shader_manager
             .load(&managers.device, desc.shader_path)?;
@@ -72,8 +71,9 @@ impl MaterialManager {
         for bgl in &desc.bind_group_layouts {
             bgl_refs.push(bgl);
         }
+        bgl_refs.push(&crate::BindGroupLayouts::normal());
 
-        if let Some(diffuse_path) = desc.diffuse_texture {
+        let diffuse_texture = if let Some(diffuse_path) = desc.diffuse_texture {
             let (dt, ..) = managers.texture_manager.get_or_load_texture(
                 &managers.queue,
                 &managers.device,
@@ -81,26 +81,128 @@ impl MaterialManager {
                 surface_config,
                 &crate::asset_dir()?.join("textures"),
             )?;
-            if let Some(norm) = desc.normal_texture {
-                let (nt, ..) = managers.texture_manager.get_or_load_texture(
-                    &managers.queue,
+            dt
+        } else {
+            let diffuse_fallback = "diffuse_fallback";
+            let fallback_key: crate::CacheKey = diffuse_fallback.into();
+            desc.diffuse_texture = Some("diffuse_fallback");
+            if !managers.texture_manager.contains(&fallback_key) {
+                let white_pixel = [255u8, 255, 255, 255];
+                let diffuse = crate::Texture::from_desc(
                     &managers.device,
-                    norm,
-                    surface_config,
-                    &crate::asset_dir()?.join("textures"),
-                )?;
-                bgl_refs.push(&crate::BindGroupLayouts::normal());
-                bind_groups.push(
-                    crate::BindGroup::normal(
-                        &managers.device,
-                        &dt,
-                        &nt,
-                        &format!("{} normal map", desc.name),
-                    )
-                    .into(),
+                    &wgpu::TextureDescriptor {
+                        label: Some("diffuse_fallback"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    },
                 );
-            };
-        }
+                managers.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &diffuse.texture,
+                        mip_level: 0,
+                        origin: Default::default(),
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &white_pixel,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4),
+                        rows_per_image: None,
+                    },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                );
+
+                let dt_arc = std::sync::Arc::new(diffuse);
+                managers
+                    .texture_manager
+                    .insert(fallback_key, dt_arc.clone());
+                dt_arc
+            } else {
+                managers.texture_manager.get(fallback_key).unwrap()
+            }
+        };
+
+        let normal_texture = if let Some(norm) = desc.normal_texture {
+            let (nt, ..) = managers.texture_manager.get_or_load_texture(
+                &managers.queue,
+                &managers.device,
+                norm,
+                surface_config,
+                &crate::asset_dir()?.join("textures"),
+            )?;
+            nt
+        } else {
+            let normal_fallback = "normal_fallback";
+            let fallback_key: crate::CacheKey = normal_fallback.into();
+            desc.normal_texture = Some(normal_fallback);
+            if !managers.texture_manager.contains(&fallback_key) {
+                let flat_normal = [128u8, 128, 255, 255];
+                let normal = crate::Texture::from_desc(
+                    &managers.device,
+                    &wgpu::TextureDescriptor {
+                        label: Some(normal_fallback),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    },
+                );
+                managers.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &normal.texture,
+                        mip_level: 0,
+                        origin: Default::default(),
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &flat_normal,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(4),
+                        rows_per_image: None,
+                    },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                let n_arc = std::sync::Arc::new(normal);
+                managers.texture_manager.insert(fallback_key, n_arc.clone());
+                n_arc
+            } else {
+                managers.texture_manager.get(fallback_key).unwrap()
+            }
+        };
+
+        bind_groups.push(
+            crate::BindGroup::normal(
+                &managers.device,
+                &diffuse_texture,
+                &normal_texture,
+                &format!("{} normal map", desc.name),
+            )
+            .into(),
+        );
 
         let pipeline_layout =
             managers
@@ -197,7 +299,7 @@ impl MaterialManager {
             managers,
             surface_config,
             depth_stencil,
-            &desc,
+            &mut desc,
             vertex_buffers,
         )?;
 

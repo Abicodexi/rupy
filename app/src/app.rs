@@ -72,7 +72,7 @@ impl Rupy {
 
         let light = Light::new(&managers.device)?;
 
-        let controller = CameraController::new(5.0, 0.5);
+        let controller = CameraController::new(2.0, 0.5);
 
         let equirect_projection = EquirectProjection::new(
             &managers.queue,
@@ -83,11 +83,13 @@ impl Rupy {
             "pure-sky.hdr",
             wgpu_renderer.depth_stencil_state(),
         )?;
-
+        let size = 10;
+        let wall_height = 15;
+        let wall_y_offset = 0.0;
         if let Some(world) = World::get() {
             match world.write().as_mut() {
                 Ok(w) => {
-                    let cube_obj = "cube.obj";
+                    let mut cube_obj = "goblin.obj";
                     w.set_projection(equirect_projection);
 
                     if let Some(model_key) = World::load_object(
@@ -96,11 +98,22 @@ impl Rupy {
                         &surface_config,
                         wgpu_renderer.depth_stencil_state(),
                     ) {
-                        let size = 10;
-                        let wall_height = 15;
-                        let wall_y_offset = 0.0; // if your floor is at y=0
-
-                        // Floor
+                        let entity = w.spawn();
+                        w.insert_rotation(
+                            entity,
+                            cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        );
+                        w.insert_scale(entity, Scale::new(10.0, 10.0, 10.0));
+                        w.insert_position(entity, (5.0 as f32, 5.5, 3.0 as f32).into());
+                        w.insert_renderable(entity, model_key.into());
+                    }
+                    cube_obj = "cube.obj";
+                    if let Some(model_key) = World::load_object(
+                        cube_obj,
+                        &mut managers,
+                        &surface_config,
+                        wgpu_renderer.depth_stencil_state(),
+                    ) {
                         for x in 0..size {
                             for z in 0..size {
                                 let entity = w.spawn();
@@ -115,84 +128,84 @@ impl Rupy {
                         }
 
                         // Ceiling at y = wall_height – 1
-                        for x in 0..size {
-                            for z in 0..size {
-                                let entity = w.spawn();
-                                w.insert_rotation(
-                                    entity,
-                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                                );
-                                w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                                w.insert_position(
-                                    entity,
-                                    (x as f32, (wall_height - 1) as f32, z as f32).into(),
-                                );
-                                w.insert_renderable(entity, model_key.into());
-                            }
-                        }
+                        // for x in 0..size {
+                        //     for z in 0..size {
+                        //         let entity = w.spawn();
+                        //         w.insert_rotation(
+                        //             entity,
+                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        //         );
+                        //         w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
+                        //         w.insert_position(
+                        //             entity,
+                        //             (x as f32, (wall_height - 1) as f32, z as f32).into(),
+                        //         );
+                        //         w.insert_renderable(entity, model_key.into());
+                        //     }
+                        // }
 
                         // Front & Back walls (vary x & y, fix z)
 
-                        for x in 0..size {
-                            for y in 0..wall_height {
-                                // front wall at z = 0
-                                // let e1 = w.spawn();
-                                // w.insert_rotation(
-                                //     e1,
-                                //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                                // );
-                                // w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                                // w.insert_position(
-                                //     e1,
-                                //     (x as f32, y as f32 + wall_y_offset, 0.0).into(),
-                                // );
-                                // w.insert_renderable(e1, model_key.into());
+                        // for x in 0..size {
+                        //     for y in 0..wall_height {
+                        // front wall at z = 0
+                        // let e1 = w.spawn();
+                        // w.insert_rotation(
+                        //     e1,
+                        //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        // );
+                        // w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+                        // w.insert_position(
+                        //     e1,
+                        //     (x as f32, y as f32 + wall_y_offset, 0.0).into(),
+                        // );
+                        // w.insert_renderable(e1, model_key.into());
 
-                                // back wall at z = size - 1
-                                let e2 = w.spawn();
-                                w.insert_rotation(
-                                    e2,
-                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                                );
-                                w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                                w.insert_position(
-                                    e2,
-                                    (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
-                                );
-                                w.insert_renderable(e2, model_key.into());
-                            }
-                        }
+                        // back wall at z = size - 1
+                        // let e2 = w.spawn();
+                        // w.insert_rotation(
+                        //     e2,
+                        //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        // );
+                        // w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
+                        // w.insert_position(
+                        //     e2,
+                        //     (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
+                        // );
+                        // w.insert_renderable(e2, model_key.into());
+                        //     }
+                        // }
 
                         // Left & Right walls (vary z & y, fix x)
-                        for z in 0..size {
-                            for y in 0..wall_height {
-                                // left wall at x = 0
-                                let e1 = w.spawn();
-                                w.insert_rotation(
-                                    e1,
-                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                                );
-                                w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                                w.insert_position(
-                                    e1,
-                                    (0.0, y as f32 + wall_y_offset, z as f32).into(),
-                                );
-                                w.insert_renderable(e1, model_key.into());
+                        // for z in 0..size {
+                        //     for y in 0..wall_height {
+                        //         // left wall at x = 0
+                        //         let e1 = w.spawn();
+                        //         w.insert_rotation(
+                        //             e1,
+                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        //         );
+                        //         w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+                        //         w.insert_position(
+                        //             e1,
+                        //             (0.0, y as f32 + wall_y_offset, z as f32).into(),
+                        //         );
+                        //         w.insert_renderable(e1, model_key.into());
 
-                                // right wall at x = size - 1
-                                let e2 = w.spawn();
-                                w.insert_rotation(
-                                    e2,
-                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                                );
-                                w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                                w.insert_position(
-                                    e2,
-                                    ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
-                                );
-                                w.insert_renderable(e2, model_key.into());
-                            }
-                        }
+                        //         // right wall at x = size - 1
+                        //         let e2 = w.spawn();
+                        //         w.insert_rotation(
+                        //             e2,
+                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                        //         );
+                        //         w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
+                        //         w.insert_position(
+                        //             e2,
+                        //             ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
+                        //         );
+                        //         w.insert_renderable(e2, model_key.into());
+                        //     }
+                        // }
                         w.update_transforms(time.delta_time as f64);
                     }
                 }

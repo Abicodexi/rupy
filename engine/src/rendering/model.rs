@@ -32,7 +32,7 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn compute_aabb(vertices: &[crate::VertexNormal]) -> AABB {
+    pub fn compute_aabb(vertices: &[crate::UnifiedVertex]) -> AABB {
         let mut min = cgmath::Vector3::new(f32::MAX, f32::MAX, f32::MAX);
         let mut max = cgmath::Vector3::new(f32::MIN, f32::MIN, f32::MIN);
         for v in vertices {

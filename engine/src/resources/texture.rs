@@ -309,55 +309,6 @@ impl Texture {
             bias: wgpu::DepthBiasState::default(),
         }
     }
-
-    pub fn equirect_projection_src_texture(
-        device: &wgpu::Device,
-        texture: &str,
-        format: &wgpu::TextureFormat,
-        width: u32,
-        height: u32,
-    ) -> Texture {
-        crate::Texture::new(
-            device,
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            *format,
-            1,
-            wgpu::TextureViewDimension::D2,
-            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            None,
-            wgpu::FilterMode::Linear,
-            None,
-            Some(&format!("{} source texture", texture)),
-        )
-    }
-    pub fn equirect_projection_dst_texture(
-        device: &wgpu::Device,
-        texture: &str,
-        format: &wgpu::TextureFormat,
-        width: u32,
-        height: u32,
-    ) -> Texture {
-        crate::Texture::new(
-            device,
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 6,
-            },
-            *format,
-            1,
-            wgpu::TextureViewDimension::Cube,
-            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            Some(wgpu::AddressMode::ClampToEdge),
-            wgpu::FilterMode::Nearest,
-            None,
-            Some(&format!("{} destination texture", texture)),
-        )
-    }
 }
 
 impl Into<CacheKey> for Texture {
