@@ -42,6 +42,7 @@ pub struct BindGroupLayouts {
     pub equirect_dst: wgpu::BindGroupLayout,
     pub uniform: wgpu::BindGroupLayout,
     pub normal: wgpu::BindGroupLayout,
+    pub material_storage: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
@@ -55,8 +56,9 @@ impl BindGroupLayouts {
             BindGroupLayouts::new(gpu.device().clone())
         })
     }
-
-    /// Accessors for each layout.
+    pub fn material_storage() -> &'static wgpu::BindGroupLayout {
+        &Self::get().material_storage
+    }
     pub fn texture() -> &'static wgpu::BindGroupLayout {
         &Self::get().diffuse
     }
@@ -199,6 +201,22 @@ impl BindGroupLayouts {
         ];
         let normal = create_layout(&device, Some("normal bind group layout"), normal_defs);
 
+        let material_storage_defs = &[BindingDef {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(
+                    std::mem::size_of::<crate::MaterialData>() as u64,
+                ),
+            },
+        }];
+        let material_storage = create_layout(
+            &device,
+            Some("material storage bind group layout"),
+            material_storage_defs,
+        );
         BindGroupLayouts {
             device: device.clone(),
             diffuse,
@@ -208,6 +226,7 @@ impl BindGroupLayouts {
             equirect_dst,
             uniform,
             normal,
+            material_storage,
         }
     }
 }
@@ -358,6 +377,20 @@ impl BindGroup {
                     resource: wgpu::BindingResource::Sampler(&hdr.sampler),
                 },
             ],
+        })
+    }
+    pub fn material_storage(
+        device: &wgpu::Device,
+        material_buffer: &crate::WgpuBuffer,
+        label: Option<&str>,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: crate::BindGroupLayouts::material_storage(),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: material_buffer.get().as_entire_binding(),
+            }],
         })
     }
 }

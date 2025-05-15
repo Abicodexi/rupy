@@ -1,8 +1,23 @@
+use std::collections::HashMap;
+
+use pollster::FutureExt;
+
+use crate::{
+    log_error, BindGroup, CacheKey, CacheStorage, EngineError, EquirectProjection, MaterialData,
+    MaterialManager, ModelManager, VertexInstance,
+};
+
 static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
     std::sync::OnceLock::new();
 
-fn init_world() {
-    let world = World::new();
+fn init_world(
+    queue: &wgpu::Queue,
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    depth_stencil_state: Option<wgpu::DepthStencilState>,
+) {
+    let world = World::new(queue, device, config, depth_stencil_state.clone())
+        .expect("World failed to initialize");
     let arc_world = std::sync::Arc::new(std::sync::RwLock::new(world));
     WORLD
         .set(arc_world)
@@ -38,7 +53,7 @@ pub struct World {
     pub rotations: Vec<Option<super::Rotation>>,
     pub scales: Vec<Option<super::Scale>>,
     pub transforms: Vec<Option<super::Transform>>,
-    projection: Option<crate::EquirectProjection>,
+    projection: crate::EquirectProjection,
     entity_count: usize,
 }
 
@@ -46,8 +61,13 @@ impl World {
     pub fn get() -> Option<std::sync::Arc<std::sync::RwLock<World>>> {
         world()
     }
-    pub fn init() {
-        init_world();
+    pub fn init(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: Option<wgpu::DepthStencilState>,
+    ) {
+        init_world(queue, device, config, depth_stencil_state);
     }
     pub fn running() -> bool {
         _still_running()
@@ -56,23 +76,36 @@ impl World {
         _stop_running();
     }
 
-    pub fn new() -> Self {
-        Self {
+    pub fn new(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        depth_stencil_state: Option<wgpu::DepthStencilState>,
+    ) -> Result<Self, EngineError> {
+        let projection = EquirectProjection::new(
+            &queue,
+            &device,
+            &config,
+            "equirect_src.wgsl",
+            "equirect_dst.wgsl",
+            "pure-sky.hdr",
+            depth_stencil_state,
+        )?;
+        Ok(Self {
             positions: Vec::new(),
             velocities: Vec::new(),
             renderables: Vec::new(),
             rotations: Vec::new(),
             scales: Vec::new(),
             transforms: Vec::new(),
-            projection: None,
+            projection,
             entity_count: 0,
-        }
+        })
     }
-    pub fn set_projection(&mut self, projection: crate::EquirectProjection) -> bool {
-        self.projection = Some(projection);
-        self.projection.is_some()
+    pub fn set_projection(&mut self, projection: crate::EquirectProjection) {
+        self.projection = projection;
     }
-    pub fn projection(&self) -> &Option<crate::EquirectProjection> {
+    pub fn projection(&self) -> &crate::EquirectProjection {
         &self.projection
     }
 
@@ -105,25 +138,34 @@ impl World {
         crate::log_debug!("Spawned model entity: {} {}", entity.0, model);
     }
     pub fn load_object(
-        obj: &str,
-        managers: &mut crate::Managers,
-        surface_config: &wgpu::SurfaceConfiguration,
-        depth_stencil_state: &Option<wgpu::DepthStencilState>,
+        model_manager: &mut ModelManager,
+        file: &str,
+        shader: &str,
+        buffers: &[wgpu::VertexBufferLayout<'_>],
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        surface_configuration: &wgpu::SurfaceConfiguration,
+        primitive: wgpu::PrimitiveState,
+        color_target: wgpu::ColorTargetState,
+        depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<crate::CacheKey> {
-        match crate::Asset::tobj(obj, managers, &surface_config, depth_stencil_state) {
-            Ok(model) => {
-                let key: crate::CacheKey = obj.into();
-                managers.model_manager.models.insert(key, model.into());
-                Some(key)
-            }
+        match model_manager
+            .load_object_file(
+                file,
+                shader,
+                buffers,
+                bind_group_layouts,
+                surface_configuration,
+                primitive,
+                color_target,
+                depth_stencil,
+            )
+            .block_on()
+        {
             Err(e) => {
-                crate::log_error!("{}", e.to_string());
+                log_error!("{}: {}", file, e.to_string());
                 None
             }
-            _ => {
-                crate::log_error!("Error loading tobj: model returned as None");
-                None
-            }
+            _ => Some(CacheKey::from(file)),
         }
     }
     pub fn spawn(&mut self) -> super::Entity {
@@ -216,7 +258,8 @@ impl World {
     pub fn instance_batch(
         &self,
         camera: &crate::camera::Camera,
-    ) -> std::collections::HashMap<crate::CacheKey, Vec<crate::UnifiedVertexInstance>> {
+        model_manager: &mut ModelManager,
+    ) -> std::collections::HashMap<crate::CacheKey, Vec<VertexInstance>> {
         let mut best_hit: Option<(usize, f32)> = None;
         for idx in 0..self.entity_count {
             let (_, t, s) = match (
@@ -242,13 +285,9 @@ impl World {
         }
         let picked_idx = best_hit.map(|(i, _)| i);
 
-        let default_color: [f32; 3] = [1.0, 1.0, 1.0];
         let highlight: [f32; 3] = [1.0, 25.0, 1.0];
-
-        let mut batch: std::collections::HashMap<
-            crate::CacheKey,
-            Vec<crate::UnifiedVertexInstance>,
-        > = std::collections::HashMap::new();
+        let mut batch: std::collections::HashMap<crate::CacheKey, Vec<VertexInstance>> =
+            std::collections::HashMap::new();
         let frustum = camera.frustum();
         for idx in 0..self.entity_count {
             let renderable = match &self.renderables[idx] {
@@ -259,7 +298,6 @@ impl World {
                 Some(t) => t,
                 _ => continue,
             };
-
             let center = cgmath::Point3::new(
                 transform.model_matrix.w.x,
                 transform.model_matrix.w.y,
@@ -273,18 +311,45 @@ impl World {
                 continue;
             }
 
-            let mut data = transform.to_vertex_instance();
-
-            data.color = if Some(idx) == picked_idx {
-                highlight
+            let model = if let Some(m) = model_manager.get(&renderable.model_key) {
+                m.clone()
             } else {
-                default_color
+                continue;
             };
+            if let Some(m) = &model.instance.material {
+                let data = transform.to_vertex_instance(m.idx);
+                model_manager
+                    .materials
+                    .update_storage(&mut model_manager.device, m);
 
-            batch.entry(renderable.model_key).or_default().push(data);
+                // if Some(idx) == picked_idx {
+                //     data.color = highlight
+                // };
+                batch.entry(renderable.model_key).or_default().push(data);
+            } else {
+                continue;
+            };
         }
-
         batch
+    }
+    pub fn material_data(
+        &self,
+        models: &ModelManager,
+        batch: &HashMap<CacheKey, Vec<VertexInstance>>,
+    ) -> Vec<MaterialData> {
+        let mut data = Vec::new();
+        for (model_key, instances) in batch {
+            if instances.is_empty() {
+                continue;
+            }
+            if let Some(model) = models.get(&model_key) {
+                if let Some(mat) = &model.instance.material {
+                    let asset_data = mat.asset.data();
+                    data.push(asset_data);
+                }
+            }
+        }
+        data
     }
 }
 

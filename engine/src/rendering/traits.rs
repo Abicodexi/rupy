@@ -1,7 +1,7 @@
 pub trait Renderer {
     fn render(
         &self,
-        managers: &mut crate::Managers,
+        models: &mut crate::ModelManager,
         rpass: &mut wgpu::RenderPass,
         world: &crate::World,
         camera: &crate::camera::Camera,

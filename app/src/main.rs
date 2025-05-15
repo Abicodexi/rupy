@@ -28,9 +28,7 @@ async fn main() -> Result<(), EngineError> {
         Arc::new(EventProxy::new(Arc::new(event_loop.create_proxy())));
 
     GPU::init();
-    World::init();
 
-    WorldTick::run_tokio();
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
 
     let _ = BindGroupLayouts::get();

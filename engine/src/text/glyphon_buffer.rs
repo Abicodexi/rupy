@@ -7,8 +7,10 @@ pub struct GlyphonBuffer {
 impl GlyphonBuffer {
     /// Create a new Glyphon buffer (atlas) with the given `FontSystem`
     pub fn new(font_system: &mut glyphon::FontSystem, metrics: Option<glyphon::Metrics>) -> Self {
-        let buffer =
-            glyphon::Buffer::new(font_system, metrics.unwrap_or(glyphon::Metrics::default()));
+        let buffer = glyphon::Buffer::new(
+            font_system,
+            metrics.unwrap_or(glyphon::Metrics::new(20.0, 20.0)),
+        );
         GlyphonBuffer { buffer }
     }
     /// Create a Glyphon buffer from explicit metrics and pre-populated lines

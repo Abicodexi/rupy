@@ -1,3 +1,5 @@
+use crate::log_info;
+
 /// Wrapper around WGPU buffers
 #[derive(Debug)]
 pub struct WgpuBuffer {

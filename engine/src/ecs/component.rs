@@ -1,6 +1,6 @@
 use cgmath::SquareMatrix;
 
-use crate::UnifiedVertexInstance;
+use crate::VertexInstance;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Position {
@@ -150,24 +150,20 @@ impl Transform {
             normal_matrix,
         }
     }
-    pub fn to_vertex_instance(&self) -> UnifiedVertexInstance {
+    pub fn to_vertex_instance(&self, mat_id: u32) -> VertexInstance {
         let model = &self.model_matrix;
         let normal = &self.normal_matrix;
 
-        let extract = |m: &cgmath::Matrix4<f32>| -> ([f32; 3], [f32; 3], [f32; 3]) {
-            (
-                [m.x.x, m.x.y, m.x.z],
-                [m.y.x, m.y.y, m.y.z],
-                [m.z.x, m.z.y, m.z.z],
-            )
+        let extract = |m: &cgmath::Matrix4<f32>| -> ([f32; 3], [f32; 3]) {
+            ([m.x.x, m.x.y, m.x.z], [m.y.x, m.y.y, m.y.z])
         };
-        let (nrm, tan, bit) = extract(normal);
+        let (nrm, tan) = extract(normal);
         let translation = {
             let w = model.w; // cgmath::Vector4
             [w.x, w.y, w.z]
         };
 
-        UnifiedVertexInstance {
+        VertexInstance {
             // 4×4 model matrix
             model: (*model).into(),
 
@@ -188,8 +184,8 @@ impl Transform {
             _pad3: 0.0,
             tangent: tan,
             _pad4: 0.0,
-            bitangent: bit,
-            _pad5: 0.0,
+            material_id: mat_id,
+            _pad5: [0.0; 3],
         }
     }
 }

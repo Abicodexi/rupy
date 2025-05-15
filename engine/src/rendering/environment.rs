@@ -1,3 +1,5 @@
+use crate::ModelManager;
+
 #[derive(Debug)]
 pub struct EquirectProjection {
     pub src_shader: wgpu::ShaderModule,
@@ -21,7 +23,7 @@ impl EquirectProjection {
         src_shader: &str,
         dst_shader: &str,
         hdr_texture: &str,
-        depth_stencil_state: &Option<wgpu::DepthStencilState>,
+        depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Result<Self, crate::EngineError> {
         let path = &crate::Asset::resolve(&format!("hdr/{}", hdr_texture));
         let bytes = crate::Asset::read_bytes(&path)?;
@@ -159,12 +161,15 @@ impl EquirectProjection {
         })
     }
 
-    pub fn compute_projection(&self, managers: &mut crate::Managers, label: Option<&str>) {
-        let mut encoder = managers
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("compute encoder"),
-            });
+    pub fn compute_projection(
+        &self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        label: Option<&str>,
+    ) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("compute encoder"),
+        });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label,
             timestamp_writes: None,
@@ -175,7 +180,7 @@ impl EquirectProjection {
         pass.dispatch_workgroups(Self::NUM_WORKGROUPS, Self::NUM_WORKGROUPS, 6);
 
         drop(pass);
-        managers.queue.submit([encoder.finish()]);
+        queue.submit([encoder.finish()]);
     }
     pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
         rpass.set_bind_group(0, uniform_bind_group, &[]);

@@ -46,4 +46,7 @@ pub enum EngineError {
 
     #[error("EventLoopError: {0}")]
     EventLoopError(#[from] winit::error::EventLoopError),
+
+    #[error("TobjLoadError: {0}")]
+    TobjLoadError(#[from] tobj::LoadError),
 }

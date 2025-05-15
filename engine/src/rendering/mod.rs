@@ -1,15 +1,6 @@
 pub mod environment;
 pub use environment::*;
 
-pub mod material;
-pub use material::*;
-
-pub mod mesh;
-pub use mesh::*;
-
-pub mod model;
-pub use model::*;
-
 pub mod pipeline;
 pub use pipeline::*;
 
@@ -30,3 +21,6 @@ pub use render_target::*;
 
 pub mod traits;
 pub use traits::*;
+
+pub mod aabb;
+pub use aabb::*;

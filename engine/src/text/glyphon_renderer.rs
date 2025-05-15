@@ -87,7 +87,7 @@ impl GlyphonRenderer {
 impl crate::Renderer for GlyphonRenderer {
     fn render(
         &self,
-        _managers: &mut crate::Managers,
+        _managers: &mut crate::ModelManager,
         rpass: &mut wgpu::RenderPass,
         _world: &crate::World,
         _camera: &crate::camera::Camera,

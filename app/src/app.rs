@@ -1,8 +1,9 @@
 use engine::{
     camera::{Camera, CameraController},
-    log_error, BindGroup, CacheStorage, EngineError, EquirectProjection, FrameBuffer,
-    GlyphonBuffer, GlyphonRenderer, Light, Managers, RenderTargetKind, RenderTargetManager,
-    Renderer, Scale, SurfaceExt, Texture, Time, WgpuRenderer, World,
+    log_error, BindGroup, BindGroupLayouts, CacheStorage, EngineError, EquirectProjection,
+    FrameBuffer, GlyphonBuffer, GlyphonRenderer, Light, Managers, MaterialData, RenderTargetKind,
+    RenderTargetManager, Renderer, Scale, SurfaceExt, Texture, Time, Vertex, VertexInstance,
+    WgpuRenderer, World, WorldTick,
 };
 use std::sync::Arc;
 use winit::{
@@ -13,7 +14,6 @@ use winit::{
 
 #[allow(dead_code)]
 pub struct Rupy {
-    pub managers: Managers,
     pub time: Time,
     pub window: Arc<Window>,
     pub surface: wgpu::Surface<'static>,
@@ -26,6 +26,8 @@ pub struct Rupy {
     pub controller: CameraController,
     pub last_shape_time: std::time::Instant,
     pub uniform_bind_group: wgpu::BindGroup,
+    pub model_manager: engine::ModelManager,
+    pub text_buffer: engine::GlyphonBuffer,
 }
 
 impl Rupy {
@@ -37,9 +39,8 @@ impl Rupy {
             let inenr_size = window.inner_size();
             (inenr_size.width, inenr_size.height)
         };
-
-        let (surface, surface_config, mut managers) = {
-            let binding = crate::GPU::get();
+        let binding = crate::GPU::get();
+        let (surface, surface_config, gpu) = {
             let gpu = binding.read().map_err(|e| {
                 crate::EngineError::GpuError(format!(
                     "Failed to acquire read lock: {}",
@@ -54,49 +55,77 @@ impl Rupy {
                     "surface isn't supported by this adapter".into(),
                 ))?;
             surface_config.present_mode = wgpu::PresentMode::AutoVsync;
-            let managers: Managers = gpu.into();
-            (surface, surface_config, managers)
+            (surface, surface_config, gpu)
         };
 
-        surface.configure(&managers.device, &surface_config);
+        let device = gpu.device();
+        let queue = gpu.queue();
+        let mut model_manager = engine::ModelManager::new(queue.clone(), device.clone());
+
+        surface.configure(&device, &surface_config);
 
         let time = Time::new();
-        let wgpu_renderer = WgpuRenderer::new(&managers.device, &surface_config)?;
-        let glyphon_renderer = GlyphonRenderer::new(
-            &managers.device,
-            &managers.queue,
+        let wgpu_renderer = WgpuRenderer::new(&device, &surface_config)?;
+        let depth_stencil = wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+        let mut glyphon_renderer = GlyphonRenderer::new(
+            &device,
+            &queue,
             surface_config.format,
-            wgpu_renderer.depth_stencil_state(),
+            &Some(depth_stencil.clone()),
         );
-        let camera = Camera::new(&managers.device, width as f32 / height as f32);
+        let camera = Camera::new(&device, width as f32 / height as f32);
+        let light = Light::new(&device)?;
+        let controller = CameraController::new(4.0, 0.5);
 
-        let light = Light::new(&managers.device)?;
-
-        let controller = CameraController::new(2.0, 0.5);
-
-        let equirect_projection = EquirectProjection::new(
-            &managers.queue,
-            &managers.device,
+        World::init(
+            &queue,
+            &device,
             &surface_config,
-            "equirect_src.wgsl",
-            "equirect_dst.wgsl",
-            "pure-sky.hdr",
-            wgpu_renderer.depth_stencil_state(),
-        )?;
+            Some(depth_stencil.clone()),
+        );
+        WorldTick::run_tokio();
+
         let size = 10;
         let wall_height = 15;
         let wall_y_offset = 0.0;
         if let Some(world) = World::get() {
             match world.write().as_mut() {
                 Ok(w) => {
-                    let mut cube_obj = "goblin.obj";
-                    w.set_projection(equirect_projection);
+                    let cube_obj = "goblin.obj";
 
                     if let Some(model_key) = World::load_object(
+                        &mut model_manager,
                         cube_obj,
-                        &mut managers,
+                        "v_normal.wgsl",
+                        &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                        vec![
+                            BindGroupLayouts::uniform().clone(),
+                            BindGroupLayouts::equirect_dst().clone(),
+                            BindGroupLayouts::material_storage().clone(),
+                            BindGroupLayouts::normal().clone(),
+                        ],
                         &surface_config,
-                        wgpu_renderer.depth_stencil_state(),
+                        wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleList,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: Some(wgpu::Face::Back),
+                            unclipped_depth: false,
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            conservative: false,
+                        },
+                        wgpu::ColorTargetState {
+                            format: surface_config.format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::all(),
+                        },
+                        Some(depth_stencil.clone()),
                     ) {
                         let entity = w.spawn();
                         w.insert_rotation(
@@ -107,13 +136,51 @@ impl Rupy {
                         w.insert_position(entity, (5.0 as f32, 5.5, 3.0 as f32).into());
                         w.insert_renderable(entity, model_key.into());
                     }
-                    cube_obj = "cube.obj";
                     if let Some(model_key) = World::load_object(
-                        cube_obj,
-                        &mut managers,
+                        &mut model_manager,
+                        "cube.obj",
+                        "v_normal.wgsl",
+                        &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                        vec![
+                            BindGroupLayouts::uniform().clone(),
+                            BindGroupLayouts::equirect_dst().clone(),
+                            BindGroupLayouts::material_storage().clone(),
+                            BindGroupLayouts::normal().clone(),
+                        ],
                         &surface_config,
-                        wgpu_renderer.depth_stencil_state(),
+                        wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleList,
+                            strip_index_format: None,
+                            front_face: wgpu::FrontFace::Ccw,
+                            cull_mode: Some(wgpu::Face::Back),
+                            unclipped_depth: false,
+                            polygon_mode: wgpu::PolygonMode::Fill,
+                            conservative: false,
+                        },
+                        wgpu::ColorTargetState {
+                            format: surface_config.format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::all(),
+                        },
+                        Some(depth_stencil),
                     ) {
+                        for x in 0..(size + 10) {
+                            for z in 0..(size + 10) {
+                                let entity = w.spawn();
+                                w.insert_rotation(
+                                    entity,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    entity,
+                                    ((14.0 - x as f32), 0.0, z as f32).into(),
+                                );
+                                w.insert_renderable(entity, model_key.into());
+                            }
+                        }
+
+                        //  Ceiling at y = wall_height – 1
                         for x in 0..size {
                             for z in 0..size {
                                 let entity = w.spawn();
@@ -122,91 +189,79 @@ impl Rupy {
                                     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
                                 );
                                 w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                                w.insert_position(entity, (x as f32, 0.0, z as f32).into());
+                                w.insert_position(
+                                    entity,
+                                    (x as f32, (wall_height - 1) as f32, z as f32).into(),
+                                );
                                 w.insert_renderable(entity, model_key.into());
                             }
                         }
 
-                        // Ceiling at y = wall_height – 1
-                        // for x in 0..size {
-                        //     for z in 0..size {
-                        //         let entity = w.spawn();
-                        //         w.insert_rotation(
-                        //             entity,
-                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        //         );
-                        //         w.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                        //         w.insert_position(
-                        //             entity,
-                        //             (x as f32, (wall_height - 1) as f32, z as f32).into(),
-                        //         );
-                        //         w.insert_renderable(entity, model_key.into());
-                        //     }
-                        // }
-
                         // Front & Back walls (vary x & y, fix z)
 
-                        // for x in 0..size {
-                        //     for y in 0..wall_height {
-                        // front wall at z = 0
-                        // let e1 = w.spawn();
-                        // w.insert_rotation(
-                        //     e1,
-                        //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        // );
-                        // w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                        // w.insert_position(
-                        //     e1,
-                        //     (x as f32, y as f32 + wall_y_offset, 0.0).into(),
-                        // );
-                        // w.insert_renderable(e1, model_key.into());
+                        for x in 0..size {
+                            for y in 0..wall_height {
+                                // front wall at z = 0
+                                let e1 = w.spawn();
+                                w.insert_rotation(
+                                    e1,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e1,
+                                    (x as f32, y as f32 + wall_y_offset, 0.0).into(),
+                                );
+                                w.insert_renderable(e1, model_key.into());
 
-                        // back wall at z = size - 1
-                        // let e2 = w.spawn();
-                        // w.insert_rotation(
-                        //     e2,
-                        //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        // );
-                        // w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                        // w.insert_position(
-                        //     e2,
-                        //     (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
-                        // );
-                        // w.insert_renderable(e2, model_key.into());
-                        //     }
-                        // }
+                                // back wall at z = size - 1
 
-                        // Left & Right walls (vary z & y, fix x)
-                        // for z in 0..size {
-                        //     for y in 0..wall_height {
-                        //         // left wall at x = 0
-                        //         let e1 = w.spawn();
-                        //         w.insert_rotation(
-                        //             e1,
-                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        //         );
-                        //         w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                        //         w.insert_position(
-                        //             e1,
-                        //             (0.0, y as f32 + wall_y_offset, z as f32).into(),
-                        //         );
-                        //         w.insert_renderable(e1, model_key.into());
+                                // let e2 = w.spawn();
+                                // w.insert_rotation(
+                                //     e2,
+                                //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                // );
+                                // w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
+                                // w.insert_position(
+                                //     e2,
+                                //     (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
+                                // );
+                                // w.insert_renderable(e2, model_key.into());
+                            }
+                        }
 
-                        //         // right wall at x = size - 1
-                        //         let e2 = w.spawn();
-                        //         w.insert_rotation(
-                        //             e2,
-                        //             cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                        //         );
-                        //         w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                        //         w.insert_position(
-                        //             e2,
-                        //             ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
-                        //         );
-                        //         w.insert_renderable(e2, model_key.into());
-                        //     }
-                        // }
+                        //  Left & Right walls (vary z & y, fix x)
+                        for z in 0..size {
+                            for y in 0..wall_height {
+                                // left wall at x = 0
+                                let e1 = w.spawn();
+                                w.insert_rotation(
+                                    e1,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e1,
+                                    (0.0, y as f32 + wall_y_offset, z as f32).into(),
+                                );
+                                w.insert_renderable(e1, model_key.into());
+
+                                // right wall at x = size - 1
+                                let e2 = w.spawn();
+                                w.insert_rotation(
+                                    e2,
+                                    cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
+                                );
+                                w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
+                                w.insert_position(
+                                    e2,
+                                    ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
+                                );
+                                w.insert_renderable(e2, model_key.into());
+                            }
+                        }
                         w.update_transforms(time.delta_time as f64);
+                        w.instance_batch(&camera, &mut model_manager);
                     }
                 }
                 _ => (),
@@ -215,7 +270,7 @@ impl Rupy {
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
             FrameBuffer::new_with_depth(
-                &managers.device,
+                &device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
                 Texture::DEPTH_FORMAT,
@@ -225,18 +280,18 @@ impl Rupy {
         );
         render_targets.insert(
             FrameBuffer::new_color_only(
-                &managers.device,
+                &device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
                 "hdr buffer",
             ),
             RenderTargetKind::Hdr,
         );
-        let uniform_bind_group =
-            BindGroup::uniform(&managers.device, camera.buffer(), light.buffer());
+        let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), light.buffer());
+
+        let text_buffer = engine::GlyphonBuffer::new(&mut glyphon_renderer.font_system, None);
 
         Ok(Rupy {
-            managers,
             time,
             window,
             surface,
@@ -249,15 +304,21 @@ impl Rupy {
             render_targets,
             last_shape_time: std::time::Instant::now(),
             uniform_bind_group,
+            model_manager,
+            text_buffer,
         })
     }
 
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
-        self.surface
-            .resize(&self.managers.device, &mut self.surface_config, *new_size);
+        self.surface.resize(
+            &self.model_manager.device,
+            &mut self.surface_config,
+            *new_size,
+        );
         self.glyphon_renderer
-            .resize(&self.managers.queue, *new_size);
-        self.render_targets.resize(&self.managers.device, *new_size);
+            .resize(&self.model_manager.queue, *new_size);
+        self.render_targets
+            .resize(&self.model_manager.device, *new_size);
     }
 
     pub fn draw(&mut self) {
@@ -268,19 +329,20 @@ impl Rupy {
                         let surface_view = frame.texture.create_view(&Default::default());
 
                         // === 1. Render scene to scene framebuffer ===
-                        let mut encoder = self.managers.device.create_command_encoder(
+                        let mut encoder = self.model_manager.device.create_command_encoder(
                             &wgpu::CommandEncoderDescriptor {
                                 label: Some("Scene Encoder"),
                             },
                         );
 
                         if let Some(frame) = self.render_targets.get(&RenderTargetKind::Scene) {
-                            if let Some(projection) = w.projection() {
-                                projection.compute_projection(
-                                    &mut self.managers,
-                                    Some("Equirect Projection Pass"),
-                                );
-                            }
+                            let projection = w.projection();
+                            projection.compute_projection(
+                                &self.model_manager.queue,
+                                &self.model_manager.device,
+                                Some("Equirect Projection Pass"),
+                            );
+
                             let mut rpass: wgpu::RenderPass<'_> =
                                 encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                                     label: Some("Scene Pass"),
@@ -291,7 +353,7 @@ impl Rupy {
                                 });
 
                             self.wgpu_renderer.render(
-                                &mut self.managers,
+                                &mut self.model_manager,
                                 &mut rpass,
                                 &w,
                                 &self.camera,
@@ -300,7 +362,7 @@ impl Rupy {
                             );
 
                             self.glyphon_renderer.render(
-                                &mut self.managers,
+                                &mut self.model_manager,
                                 &mut rpass,
                                 &w,
                                 &self.camera,
@@ -314,7 +376,7 @@ impl Rupy {
                             if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
                                 self.wgpu_renderer.hdr(
                                     &mut encoder,
-                                    &self.managers,
+                                    &self.model_manager,
                                     &scene_fb.color(),
                                     hdr_fb,
                                 );
@@ -324,13 +386,13 @@ impl Rupy {
                         // === 3. Final HDR -> swapchain ===
                         if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
                             self.wgpu_renderer.final_blit_to_surface(
+                                &self.model_manager.device,
                                 &mut encoder,
                                 hdr_fb.color(),
                                 &surface_view,
-                                &self.managers,
                             );
                         }
-                        self.managers.queue.submit(Some(encoder.finish()));
+                        self.model_manager.queue.submit(Some(encoder.finish()));
                         frame.present();
                     }
                 }
@@ -367,39 +429,27 @@ impl Rupy {
     }
 
     pub fn upload(&mut self) {
-        self.light.upload(&self.managers.queue);
-        self.camera.upload(&self.managers.queue);
+        self.light.upload(&self.model_manager.queue);
+        self.camera.upload(&self.model_manager.queue);
     }
 
     pub fn update(&mut self) {
         self.time.update();
         self.camera.update(&mut self.controller);
         self.light
-            .orbit(self.time.elapsed * std::f32::consts::TAU / 50.0);
+            .orbit(self.time.elapsed * std::f32::consts::TAU / 15.0);
 
         if self.last_shape_time.elapsed().as_millis() > 1500 {
             self.last_shape_time = std::time::Instant::now();
             let lines = self.buffer_lines();
-            let gb = CacheStorage::get_or_create(
-                &mut self.managers.buffer_manager.g_buffer,
-                "text buffer".into(),
-                || {
-                    GlyphonBuffer::new(
-                        &mut self.glyphon_renderer.font_system,
-                        Some(glyphon::Metrics {
-                            font_size: 20.0,
-                            line_height: 20.0,
-                        }),
-                    )
-                    .into()
-                },
-            );
-            gb.set_lines(lines);
-            gb.shape(&mut self.glyphon_renderer.font_system);
+
+            self.text_buffer.set_lines(lines);
+            self.text_buffer
+                .shape(&mut self.glyphon_renderer.font_system);
             self.glyphon_renderer.prepare(
-                &self.managers.device,
-                &self.managers.queue,
-                gb,
+                &self.model_manager.device,
+                &self.model_manager.queue,
+                &mut self.text_buffer,
                 &self.surface_config,
             );
         }

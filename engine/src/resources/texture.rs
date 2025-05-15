@@ -13,6 +13,7 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub const DEFAULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
     pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
@@ -300,15 +301,6 @@ impl Texture {
             label: label.unwrap_or("").to_string(),
         }
     }
-    pub fn depth_stencil_state() -> wgpu::DepthStencilState {
-        wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }
-    }
 }
 
 impl Into<CacheKey> for Texture {
@@ -325,18 +317,18 @@ impl TextureManager {
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        key: &str,
+        texture: &str,
         surface_config: &wgpu::SurfaceConfiguration,
-        base_dir: &std::path::Path,
     ) -> Result<(Arc<Texture>, CacheKey), EngineError> {
-        let cache_key = CacheKey::from(key.to_string());
+        let base_dir = crate::asset_dir()?.join("textures");
+        let cache_key = CacheKey::from(texture.to_string());
         if let Some(tex) = self.get(cache_key.clone()) {
             Ok((tex.clone(), cache_key))
         } else {
-            let img = image::open(base_dir.join(key))
+            let img = image::open(base_dir.join(texture))
                 .map_err(|e| EngineError::AssetLoadError(e.to_string()))?
                 .to_rgba8();
-            let tex = Texture::from_image(device, queue, surface_config, &img, key);
+            let tex = Texture::from_image(device, queue, surface_config, &img, texture);
             let arc = Arc::new(tex);
             self.insert(cache_key.clone(), arc.clone());
             Ok((arc, cache_key))
