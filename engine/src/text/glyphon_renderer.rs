@@ -2,7 +2,7 @@ use glyphon::Attrs;
 
 use super::{GlyphonBuffer, TextRegion};
 
-pub struct GlyphonRenderer {
+pub struct RenderText {
     buffer: GlyphonBuffer,
     font_system: glyphon::FontSystem,
     atlas: glyphon::TextAtlas,
@@ -12,7 +12,7 @@ pub struct GlyphonRenderer {
     font_size: f32,
 }
 
-impl GlyphonRenderer {
+impl RenderText {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -45,7 +45,7 @@ impl GlyphonRenderer {
             None,
         );
 
-        GlyphonRenderer {
+        RenderText {
             buffer,
             font_system,
             atlas,
@@ -191,7 +191,7 @@ impl GlyphonRenderer {
     }
 }
 
-impl crate::RenderPass for GlyphonRenderer {
+impl crate::RenderPass for RenderText {
     fn render(
         &self,
         _managers: &mut crate::ModelManager,

@@ -1,8 +1,8 @@
 use engine::{
     camera::{Action, Camera, CameraController, MovementMode, Projection},
-    log_error, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, GlyphonRenderer, Light,
-    RenderPass, RenderTargetKind, RenderTargetManager, Scale, ScreenCorner, SurfaceExt, TextRegion,
-    Texture, Time, Vertex, VertexInstance, WgpuRenderer, World,
+    log_error, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, Light, RenderPass,
+    RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, Scale, ScreenCorner, SurfaceExt,
+    TextRegion, Texture, Time, Vertex, VertexInstance, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -18,9 +18,9 @@ pub struct Rupy {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     world: World,
-    w_renderer: WgpuRenderer,
+    render3d: Renderer3d,
     render_targets: RenderTargetManager,
-    g_renderer: GlyphonRenderer,
+    rendertxt: RenderText,
     camera: Camera,
     projection: Projection,
     light: Light,
@@ -65,7 +65,7 @@ impl Rupy {
         surface.configure(&device, &surface_config);
 
         let time = Time::new();
-        let w_renderer = WgpuRenderer::new(&device, &surface_config)?;
+        let render3d = Renderer3d::new(&device, &surface_config)?;
         let depth_stencil = wgpu::DepthStencilState {
             format: Texture::DEPTH_FORMAT,
             depth_write_enabled: true,
@@ -73,7 +73,7 @@ impl Rupy {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-        let g_renderer = GlyphonRenderer::new(
+        let rendertxt = RenderText::new(
             &device,
             &queue,
             surface_config.format,
@@ -254,8 +254,8 @@ impl Rupy {
             surface,
             surface_config,
             world,
-            w_renderer,
-            g_renderer,
+            render3d,
+            rendertxt,
             camera,
             projection,
             light,
@@ -292,7 +292,7 @@ impl Rupy {
             &mut self.surface_config,
             *new_size,
         );
-        self.g_renderer.resize(&self.model_manager.queue, *new_size);
+        self.rendertxt.resize(&self.model_manager.queue, *new_size);
         self.render_targets
             .resize(&self.model_manager.device, *new_size);
     }
@@ -326,14 +326,14 @@ impl Rupy {
                             occlusion_query_set: None,
                         });
 
-                    self.w_renderer.render(
+                    self.render3d.render(
                         &mut self.model_manager,
                         &mut rpass,
                         &self.world,
                         &self.uniform_bind_group,
                     );
 
-                    self.g_renderer.render(
+                    self.rendertxt.render(
                         &mut self.model_manager,
                         &mut rpass,
                         &self.world,
@@ -344,7 +344,7 @@ impl Rupy {
                 // === 2. Postprocess Scene -> HDR ===
                 if let Some(scene_fb) = self.render_targets.get(&RenderTargetKind::Scene) {
                     if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-                        self.w_renderer.hdr(
+                        self.render3d.hdr(
                             &mut encoder,
                             &self.model_manager,
                             &scene_fb.color(),
@@ -355,7 +355,7 @@ impl Rupy {
 
                 // === 3. Final HDR -> swapchain ===
                 if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-                    self.w_renderer.final_blit_to_surface(
+                    self.render3d.final_blit_to_surface(
                         &self.model_manager.device,
                         &mut encoder,
                         hdr_fb.color(),
@@ -384,13 +384,11 @@ impl Rupy {
     }
 
     pub fn upload(&mut self) {
-        self.light
-            .upload(&self.model_manager.queue, &self.model_manager.device);
-        self.camera
-            .upload(&self.model_manager.queue, &self.model_manager.device);
-        self.w_renderer
-            .instance_buffers
-            .upload(&self.model_manager.queue, &self.model_manager.device);
+        let queue = &self.model_manager.queue;
+        let device = &self.model_manager.device;
+        self.light.upload(queue, device);
+        self.camera.upload(queue, device);
+        self.render3d.instances.upload(queue, device);
     }
 
     pub fn update(&mut self) {
@@ -408,16 +406,15 @@ impl Rupy {
         self.world.update(dt);
         self.camera.update(&self.world, self.projection);
 
-        self.light
-            .orbit(self.time.elapsed * std::f64::consts::TAU / 15.0);
-        self.w_renderer
-            .instance_buffers
+        self.light.orbit(self.time.elapsed);
+        self.render3d
+            .instances
             .update(&self.world, &self.camera, &mut self.model_manager);
 
         if self.last_shape_time.elapsed().as_millis() > 5000 {
             self.last_shape_time = std::time::Instant::now();
             let regions = self.text_regions();
-            self.g_renderer.prepare_regions(
+            self.rendertxt.prepare_regions(
                 &self.model_manager.device,
                 &self.model_manager.queue,
                 &regions,

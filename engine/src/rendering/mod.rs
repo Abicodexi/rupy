@@ -24,3 +24,6 @@ pub use traits::*;
 
 pub mod aabb;
 pub use aabb::*;
+
+pub mod render3d;
+pub use render3d::*;

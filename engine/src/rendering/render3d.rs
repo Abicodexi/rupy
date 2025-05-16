@@ -1,26 +1,30 @@
-use crate::{ModelManager, Transform};
+use {
+    super::{PipelineManager, RenderPass, VertexInstance, HDR},
+    crate::{
+        camera, BindGroup, CacheKey, CacheStorage, EngineError, FrameBuffer, ModelManager,
+        Rotation, Scale, Texture, Transform, WgpuBuffer, World,
+    },
+    wgpu::IndexFormat,
+};
 
 #[warn(dead_code)]
-pub struct WgpuRenderer {
-    hdr: crate::HDR,
-    pub instance_buffers: InstanceBuffers,
+pub struct Renderer3d {
+    hdr: HDR,
+    pub instances: InstanceBuffers,
 }
 
-impl WgpuRenderer {
+impl Renderer3d {
     pub fn new(
         device: &wgpu::Device,
         surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<Self, crate::EngineError> {
-        let hdr = crate::PipelineManager::hdr(device, surface_config)?;
-        let instance_buffers = InstanceBuffers::new();
+    ) -> Result<Self, EngineError> {
+        let hdr = PipelineManager::hdr(device, surface_config)?;
+        let instances = InstanceBuffers::new();
 
-        Ok(WgpuRenderer {
-            hdr,
-            instance_buffers,
-        })
+        Ok(Renderer3d { hdr, instances })
     }
 
-    pub fn compute_pass(&self, world: &crate::World, queue: &wgpu::Queue, device: &wgpu::Device) {
+    pub fn compute_pass(&self, world: &World, queue: &wgpu::Queue, device: &wgpu::Device) {
         let projection = world.projection();
         projection.compute_projection(queue, device, Some("equirect projection compute pass"));
     }
@@ -28,10 +32,10 @@ impl WgpuRenderer {
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        hdr_texture: &crate::Texture,
+        hdr_texture: &Texture,
         surface_view: &wgpu::TextureView,
     ) {
-        let bind_group = crate::BindGroup::hdr(&device, hdr_texture, "final blit");
+        let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Final Blit to Surface"),
@@ -57,10 +61,10 @@ impl WgpuRenderer {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         model_manager: &ModelManager,
-        scene_texture: &crate::Texture,
-        hdr_fb: &super::FrameBuffer,
+        scene_texture: &Texture,
+        hdr_fb: &FrameBuffer,
     ) {
-        let bind_group = crate::BindGroup::hdr(&model_manager.device, scene_texture, "hdr input");
+        let bind_group = BindGroup::hdr(&model_manager.device, scene_texture, "hdr input");
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("HDR Pass"),
@@ -76,12 +80,12 @@ impl WgpuRenderer {
     }
 }
 
-impl crate::RenderPass for WgpuRenderer {
+impl RenderPass for Renderer3d {
     fn render(
         &self,
         models: &mut ModelManager,
         rpass: &mut wgpu::RenderPass,
-        world: &crate::World,
+        world: &World,
         uniform_bind_group: &wgpu::BindGroup,
     ) {
         let projection = world.projection();
@@ -91,13 +95,13 @@ impl crate::RenderPass for WgpuRenderer {
         rpass.draw(0..3, 0..1);
         rpass.set_bind_group(2, &models.materials.storage_bind_group, &[]);
 
-        self.instance_buffers.draw(rpass, models);
+        self.instances.draw(rpass, models);
     }
 }
 
 #[derive(Debug)]
 pub struct InstanceBufferData {
-    pub buffer: crate::WgpuBuffer,
+    pub buffer: WgpuBuffer,
     pub count: usize,
     pub capacity: usize,
     pub dirty: bool,
@@ -105,8 +109,8 @@ pub struct InstanceBufferData {
 
 #[derive(Debug)]
 pub struct InstanceBuffers {
-    pub batch: std::collections::HashMap<crate::CacheKey, Vec<crate::VertexInstance>>,
-    pub buffers: std::collections::HashMap<crate::CacheKey, InstanceBufferData>,
+    pub batch: std::collections::HashMap<CacheKey, Vec<VertexInstance>>,
+    pub buffers: std::collections::HashMap<CacheKey, InstanceBufferData>,
 }
 
 impl InstanceBuffers {
@@ -119,14 +123,14 @@ impl InstanceBuffers {
 
     pub fn update(
         &mut self,
-        world: &crate::World,
-        camera: &crate::camera::Camera,
-        model_manager: &mut crate::ModelManager,
+        world: &World,
+        camera: &camera::Camera,
+        model_manager: &mut ModelManager,
     ) {
         let frustum = camera.frustum();
         self.batch.clear();
-        let rotation_zero = crate::Rotation::zero();
-        let scale_one = crate::Scale::one();
+        let rotation_zero = Rotation::zero();
+        let scale_one = Scale::one();
         for idx in 0..world.entity_count() {
             let Some(rend) = &world.renderables[idx] else {
                 continue;
@@ -170,13 +174,13 @@ impl InstanceBuffers {
         for (key, data) in &self.batch {
             let instances = data;
 
-            let byte_data = crate::VertexInstance::bytes(instances);
+            let byte_data = VertexInstance::bytes(instances);
             let byte_size = data.len();
             let buffer_data = self
                 .buffers
                 .entry(*key)
                 .or_insert_with(|| InstanceBufferData {
-                    buffer: crate::WgpuBuffer::from_data(
+                    buffer: WgpuBuffer::from_data(
                         &model_manager.device,
                         &byte_data,
                         wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -196,7 +200,7 @@ impl InstanceBuffers {
         for (key, data) in &mut self.buffers {
             if let Some(instances) = self.batch.get(key) {
                 if data.dirty {
-                    let byte_data = crate::VertexInstance::bytes(instances);
+                    let byte_data = VertexInstance::bytes(instances);
                     data.buffer.write_data(queue, device, &byte_data, Some(0));
                     data.dirty = false;
                 }
@@ -204,26 +208,27 @@ impl InstanceBuffers {
         }
     }
 
-    pub fn draw(&self, rpass: &mut wgpu::RenderPass, models: &crate::ModelManager) {
+    pub fn draw(&self, rpass: &mut wgpu::RenderPass, models: &ModelManager) {
         for (model_key, data) in &self.buffers {
             if data.count == 0 {
                 continue;
             }
 
-            let model = crate::CacheStorage::get(models, model_key).unwrap();
-            if let Some(mat) = &model.instance.material {
-                rpass.set_pipeline(&mat.pipeline);
-                rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
+            let Some(model) = models.get(model_key) else {
+                continue;
+            };
+            let Some(mat) = &model.instance.material else {
+                continue;
+            };
 
-                let vb = &model.instance.mesh.vertex_buffer;
-                let ib = &model.instance.mesh.index_buffer;
+            let mesh = &model.instance.mesh;
+            rpass.set_pipeline(&mat.pipeline);
+            rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
 
-                rpass.set_vertex_buffer(0, vb.get().slice(..));
-                rpass.set_vertex_buffer(1, data.buffer.get().slice(..));
-                rpass.set_index_buffer(ib.get().slice(..), wgpu::IndexFormat::Uint32);
-
-                rpass.draw_indexed(0..model.instance.mesh.index_count, 0, 0..data.count as u32);
-            }
+            rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
+            rpass.set_vertex_buffer(1, data.buffer.get().slice(..));
+            rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
+            rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
         }
     }
 }
