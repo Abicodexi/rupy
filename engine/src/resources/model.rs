@@ -241,7 +241,7 @@ impl crate::CacheStorage<std::sync::Arc<Model>> for ModelManager {
     fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Model>) {
         self.models.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.models.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Model>> {
+        self.models.remove(key)
     }
 }

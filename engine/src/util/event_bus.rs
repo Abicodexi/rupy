@@ -2,9 +2,12 @@ use crossbeam::channel::Receiver;
 use std::sync::Arc;
 use winit::event_loop::EventLoopProxy;
 
+use crate::camera::Projection;
+
 #[derive(Debug, Clone)]
 pub enum ApplicationEvent {
     Shutdown,
+    Projection(Projection),
 }
 
 pub trait EventProxyTrait<T: 'static + std::fmt::Debug> {

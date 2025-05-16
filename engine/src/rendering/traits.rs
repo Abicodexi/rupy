@@ -1,4 +1,4 @@
-pub trait Renderer {
+pub trait RenderPass {
     fn render(
         &self,
         models: &mut crate::ModelManager,

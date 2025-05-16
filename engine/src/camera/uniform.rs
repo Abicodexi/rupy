@@ -6,8 +6,8 @@ pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     inv_proj: [[f32; 4]; 4],
     inv_view: [[f32; 4]; 4],
-    view_pos: [f32; 3], // 12 bytes
-    _pad: f32,          // +4 bytes = 16-byte aligned
+    view_pos: [f32; 3],
+    _pad: f32,
 }
 
 impl CameraUniform {
@@ -21,7 +21,9 @@ impl CameraUniform {
             _pad: 0.0,
         }
     }
-
+    pub fn view_pos(&self) -> [f32; 3] {
+        self.view_pos
+    }
     pub fn update(
         &mut self,
         vp: (

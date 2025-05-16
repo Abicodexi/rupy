@@ -6,7 +6,7 @@ pub trait CacheStorage<R> {
     where
         F: FnOnce() -> R;
     fn insert(&mut self, key: crate::CacheKey, resource: R);
-    fn remove(&mut self, key: &crate::CacheKey);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<R>;
 }
 
 pub type HashCache<R> = std::collections::HashMap<crate::CacheKey, R>;
@@ -30,7 +30,7 @@ impl<R> CacheStorage<R> for HashCache<R> {
     fn insert(&mut self, key: crate::CacheKey, resource: R) {
         self.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<R> {
+        self.remove(key)
     }
 }

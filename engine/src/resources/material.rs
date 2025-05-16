@@ -463,7 +463,7 @@ impl MaterialManager {
         }
     }
 
-    fn build_storage(&mut self, device: &wgpu::Device) {
+    pub fn build_storage(&mut self, device: &wgpu::Device) {
         let label = "storage buffer";
         let usage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let data: Vec<MaterialData> = self.storage.values().map(|m| m.clone()).collect();
@@ -472,13 +472,12 @@ impl MaterialManager {
         self.storage_bind_group = binding;
         self.storage_buffer = storage;
     }
-    pub fn update_storage(&mut self, device: &wgpu::Device, material: &Material) {
+    pub fn update_storage(&mut self, material: &Material) {
         if self
             .storage
             .insert(material.asset.name.clone(), material.asset.data())
             .is_none()
         {
-            self.build_storage(device);
             log_debug!("Storage data: {}", material.asset.name);
         }
     }

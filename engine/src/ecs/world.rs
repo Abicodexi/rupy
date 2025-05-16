@@ -1,6 +1,9 @@
+use cgmath::Rotation3;
 use pollster::FutureExt;
 
 use crate::{log_error, CacheKey, EngineError, EquirectProjection, ModelManager};
+
+use super::{Position, Renderable, Rotation, Scale, Transform};
 
 pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
@@ -76,12 +79,12 @@ impl World {
         &self.projection
     }
 
-    pub fn spawn_model(
+    pub fn insert_object(
         &mut self,
-        model: &str,
-        position: Option<super::Position>,
-        rotation: Option<super::Rotation>,
-        scale: Option<super::Scale>,
+        renderable: Renderable,
+        position: Option<Position>,
+        rotation: Option<Rotation>,
+        scale: Option<Scale>,
     ) {
         let entity: super::Entity = self.spawn();
         let position = position.unwrap_or((1.0, 1.0, 1.0).into());
@@ -94,15 +97,11 @@ impl World {
             }
             .into(),
         );
-        let renderable = super::Renderable {
-            model_key: model.into(),
-            visible: true,
-        };
         self.insert_position(entity, position);
         self.insert_rotation(entity, rotation);
         self.insert_scale(entity, scale);
         self.insert_renderable(entity, renderable);
-        crate::log_debug!("Spawned model entity: {} {}", entity.0, model);
+        crate::log_debug!("Spawned model entity: {}", entity.0);
     }
     pub fn load_object(
         model_manager: &mut ModelManager,
@@ -193,9 +192,9 @@ impl World {
         self.transforms.get(entity.0)?.as_ref()
     }
 
-    pub fn update(&mut self, dt: f32) {
+    pub fn update(&mut self, dt: f64) {
         self.update_physics();
-        self.update_transforms(dt as f64);
+        self.update_transforms(dt);
     }
     pub fn update_physics(&mut self) {
         for i in 0..self.entity_count {
@@ -205,10 +204,7 @@ impl World {
         }
     }
     pub fn update_transforms(&mut self, dt: f64) {
-        let delta = <cgmath::Quaternion<f32> as cgmath::Rotation3>::from_angle_z(cgmath::Deg(
-            (dt * 90.0) as f32,
-        ));
-
+        let delta = cgmath::Quaternion::from_angle_z(cgmath::Deg((dt * 90.0) as f32));
         for i in 0..self.entity_count {
             if let (Some(pos), Some(rot), Some(scale)) = (
                 self.positions[i].as_ref(),
@@ -216,8 +212,7 @@ impl World {
                 self.scales[i].as_ref(),
             ) {
                 rot.update(delta);
-                let transform = super::Transform::from_components(pos, rot, scale);
-                self.transforms[i] = Some(transform);
+                self.transforms[i] = Some(Transform::from_components(pos, rot, scale));
             }
         }
     }

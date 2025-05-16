@@ -467,7 +467,7 @@ impl super::CacheStorage<std::sync::Arc<wgpu::BindGroup>> for BindGroupManager {
     fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::BindGroup>) {
         self.bind_groups.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.bind_groups.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::BindGroup>> {
+        self.bind_groups.remove(key)
     }
 }

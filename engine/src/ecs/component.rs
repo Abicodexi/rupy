@@ -1,6 +1,6 @@
-use cgmath::SquareMatrix;
+use cgmath::{Quaternion, SquareMatrix};
 
-use crate::VertexInstance;
+use crate::{CacheKey, VertexInstance};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Position {
@@ -9,10 +9,20 @@ pub struct Position {
     z: f32,
 }
 impl Position {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Position { x, y, z }
+    }
     pub fn update(&mut self, velocity: &crate::Velocity) {
         self.x += velocity.dx;
         self.y += velocity.dy;
         self.z += velocity.dz;
+    }
+    pub fn to_point3(&self) -> cgmath::Point3<f32> {
+        cgmath::Point3 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
     }
 }
 impl From<(f32, f32, f32)> for Position {
@@ -41,7 +51,15 @@ impl From<(f32, f32, f32)> for Velocity {
         }
     }
 }
-
+impl From<cgmath::Vector3<f32>> for Velocity {
+    fn from(value: cgmath::Vector3<f32>) -> Self {
+        Self {
+            dx: value.x,
+            dy: value.y,
+            dz: value.z,
+        }
+    }
+}
 #[derive(Debug, Copy, Clone)]
 pub struct Rotation {
     quat: cgmath::Quaternion<f32>,
@@ -75,10 +93,12 @@ impl Rotation {
                 * <cgmath::Quaternion<f32> as cgmath::Rotation3>::from_angle_z(roll),
         }
     }
-
-    pub fn identity() -> Self {
+    pub fn quat(&self) -> Quaternion<f32> {
+        self.quat
+    }
+    pub fn zero() -> Self {
         Self {
-            quat: <cgmath::Quaternion<f32> as cgmath::One>::one(),
+            quat: <cgmath::Quaternion<f32> as cgmath::Zero>::zero(),
         }
     }
 }
@@ -192,6 +212,15 @@ impl Transform {
 pub struct Renderable {
     pub model_key: crate::CacheKey,
     pub visible: bool,
+}
+
+impl Renderable {
+    pub fn new(key: CacheKey) -> Self {
+        Self {
+            model_key: key,
+            visible: true,
+        }
+    }
 }
 
 impl From<crate::Entity> for Renderable {

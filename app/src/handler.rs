@@ -26,7 +26,10 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
         }
 
         if let AppInnerState::Running(app) = &mut self.inner {
-            app.controller.process(&event);
+            match app.controller(&event) {
+                engine::camera::Action::Projection => app.next_projection(),
+                engine::camera::Action::Movement(..) => (),
+            };
 
             if let WindowEvent::Resized(new_size) = &event {
                 app.resize(new_size)
@@ -35,18 +38,30 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
             if let WindowEvent::RedrawRequested = &event {
                 app.update();
                 app.upload();
-                app.draw();
-                app.window.request_redraw()
+                app.render();
+                app.window().request_redraw()
+            }
+            match event {
+                WindowEvent::CursorEntered { .. } => {
+                    let _ = app.window().set_cursor_visible(false);
+                }
+                WindowEvent::CursorLeft { .. } => {
+                    let _ = app.window().set_cursor_visible(true);
+                }
+                _ => {}
             }
         }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
-        if let AppInnerState::Running(_app) = &mut self.inner {
+        if let AppInnerState::Running(app) = &mut self.inner {
             match event {
                 ApplicationEvent::Shutdown => {
                     World::stop();
                     event_loop.exit()
+                }
+                ApplicationEvent::Projection(projection) => {
+                    app.set_projection(projection);
                 }
             }
         }

@@ -75,19 +75,19 @@ impl Light {
         self.position = new_position;
     }
 
-    pub fn orbit(&mut self, time_s: f32) {
+    pub fn orbit(&mut self, time_s: f64) {
         let angle = time_s; // 1 rad/sec;
         let (sin, cos) = angle.sin_cos();
 
-        self.position.x = Light::CENTER.x + Light::RADIUS * cos;
-        self.position.z = Light::CENTER.z + Light::RADIUS * sin;
+        self.position.x = Light::CENTER.x + Light::RADIUS * cos as f32;
+        self.position.z = Light::CENTER.z + Light::RADIUS * sin as f32;
     }
     pub fn buffer(&self) -> &crate::WgpuBuffer {
         &self.uniform_buffer
     }
-    pub fn upload(&mut self, queue: &wgpu::Queue) {
+    pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
         self.uniform_buffer
-            .write_data(queue, &[self.uniform()], None);
+            .write_data(queue, device, &[self.uniform()], None);
     }
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group

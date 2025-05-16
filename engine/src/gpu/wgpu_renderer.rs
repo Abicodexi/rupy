@@ -1,8 +1,4 @@
-use wgpu::BufferUsages;
-
-use crate::ModelManager;
-
-use super::WgpuBuffer;
+use crate::{ModelManager, Transform};
 
 #[warn(dead_code)]
 pub struct WgpuRenderer {
@@ -80,7 +76,7 @@ impl WgpuRenderer {
     }
 }
 
-impl crate::Renderer for WgpuRenderer {
+impl crate::RenderPass for WgpuRenderer {
     fn render(
         &self,
         models: &mut ModelManager,
@@ -121,7 +117,7 @@ impl InstanceBuffers {
         }
     }
 
-    pub fn update_batches(
+    pub fn update(
         &mut self,
         world: &crate::World,
         camera: &crate::camera::Camera,
@@ -129,37 +125,44 @@ impl InstanceBuffers {
     ) {
         let frustum = camera.frustum();
         self.batch.clear();
-
+        let rotation_zero = crate::Rotation::zero();
+        let scale_one = crate::Scale::one();
         for idx in 0..world.entity_count() {
-            let (Some(rend), Some(trans), Some(scale)) = (
-                &world.renderables[idx],
-                &world.transforms[idx],
-                &world.scales[idx],
-            ) else {
+            let Some(rend) = &world.renderables[idx] else {
                 continue;
             };
+            let Some(pos) = &world.positions[idx] else {
+                continue;
+            };
+
+            let rot = world.rotations[idx].as_ref().unwrap_or(&rotation_zero);
+            let scale = world.scales[idx].as_ref().unwrap_or(&scale_one);
+
+            let transform = world.transforms[idx]
+                .as_ref()
+                .cloned()
+                .unwrap_or_else(|| Transform::from_components(pos, rot, scale));
 
             if !rend.visible {
                 continue;
             }
 
             let center = cgmath::Point3::new(
-                trans.model_matrix.w.x,
-                trans.model_matrix.w.y,
-                trans.model_matrix.w.z,
+                transform.model_matrix.w.x,
+                transform.model_matrix.w.y,
+                transform.model_matrix.w.z,
             );
             let radius = cgmath::InnerSpace::magnitude(scale.value);
+
             if !frustum.contains_sphere(center, radius) {
                 continue;
             }
 
             if let Some(model) = model_manager.models.get(&rend.model_key) {
                 if let Some(material) = &model.instance.material {
-                    let data = trans.to_vertex_instance(material.idx);
+                    let data = transform.to_vertex_instance(material.idx);
                     self.batch.entry(rend.model_key).or_default().push(data);
-                    model_manager
-                        .materials
-                        .update_storage(&mut model_manager.device, material);
+                    model_manager.materials.update_storage(material);
                 }
             }
         }
@@ -177,7 +180,7 @@ impl InstanceBuffers {
                         &model_manager.device,
                         &byte_data,
                         wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        Some(&format!("{} instance buffer", key.id())),
+                        Some(&format!(" instance buffer {}", key.id())),
                     ),
                     count: instances.len(),
                     capacity: byte_size,
@@ -187,32 +190,23 @@ impl InstanceBuffers {
             buffer_data.count = instances.len();
             buffer_data.dirty = true;
         }
+        model_manager.materials.build_storage(&model_manager.device);
     }
-
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
-        for (key, buffer_data) in &mut self.buffers {
+        for (key, data) in &mut self.buffers {
             if let Some(instances) = self.batch.get(key) {
-                if buffer_data.dirty {
+                if data.dirty {
                     let byte_data = crate::VertexInstance::bytes(instances);
-                    let byte_len = byte_data.len();
-                    if byte_len > buffer_data.buffer.size() {
-                        buffer_data.buffer = WgpuBuffer::from_data(
-                            device,
-                            &byte_data,
-                            BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                            Some("storage buffer"),
-                        );
-                    }
-                    queue.write_buffer(&buffer_data.buffer.get(), 0, &byte_data);
-                    buffer_data.dirty = false;
+                    data.buffer.write_data(queue, device, &byte_data, Some(0));
+                    data.dirty = false;
                 }
             }
         }
     }
 
     pub fn draw(&self, rpass: &mut wgpu::RenderPass, models: &crate::ModelManager) {
-        for (model_key, buffer_data) in &self.buffers {
-            if buffer_data.count == 0 {
+        for (model_key, data) in &self.buffers {
+            if data.count == 0 {
                 continue;
             }
 
@@ -225,14 +219,10 @@ impl InstanceBuffers {
                 let ib = &model.instance.mesh.index_buffer;
 
                 rpass.set_vertex_buffer(0, vb.get().slice(..));
-                rpass.set_vertex_buffer(1, buffer_data.buffer.get().slice(..));
+                rpass.set_vertex_buffer(1, data.buffer.get().slice(..));
                 rpass.set_index_buffer(ib.get().slice(..), wgpu::IndexFormat::Uint32);
 
-                rpass.draw_indexed(
-                    0..model.instance.mesh.index_count,
-                    0,
-                    0..buffer_data.count as u32,
-                );
+                rpass.draw_indexed(0..model.instance.mesh.index_count, 0, 0..data.count as u32);
             }
         }
     }

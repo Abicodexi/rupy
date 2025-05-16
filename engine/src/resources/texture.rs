@@ -355,8 +355,8 @@ impl CacheStorage<Arc<Texture>> for TextureManager {
     fn insert(&mut self, key: CacheKey, resource: Arc<Texture>) {
         self.textures.insert(key, resource);
     }
-    fn remove(&mut self, key: &CacheKey) {
-        self.textures.remove(key);
+    fn remove(&mut self, key: &CacheKey) -> Option<std::sync::Arc<Texture>> {
+        self.textures.remove(key)
     }
 }
 

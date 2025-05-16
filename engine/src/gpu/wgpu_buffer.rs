@@ -1,10 +1,12 @@
-use crate::log_info;
+use wgpu::util::DeviceExt;
 
 /// Wrapper around WGPU buffers
 #[derive(Debug)]
 pub struct WgpuBuffer {
     buffer: wgpu::Buffer,
     size: usize,
+    usage: wgpu::BufferUsages,
+    label: String,
 }
 
 impl WgpuBuffer {
@@ -26,6 +28,8 @@ impl WgpuBuffer {
         crate::WgpuBuffer {
             buffer,
             size: size as usize,
+            usage,
+            label: label.unwrap_or("unnamed").to_string(),
         }
     }
     pub fn get(&self) -> &wgpu::Buffer {
@@ -36,25 +40,42 @@ impl WgpuBuffer {
     }
 
     /// Create a new empty GPU buffer with given usage flags
-    pub fn new_empty(device: &wgpu::Device, usage: wgpu::BufferUsages) -> Self {
+    pub fn new_empty(
+        device: &wgpu::Device,
+        usage: wgpu::BufferUsages,
+        label: Option<&str>,
+    ) -> Self {
         use wgpu::util::DeviceExt;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
+            label,
             contents: &[],
             usage,
         });
-        WgpuBuffer { buffer, size: 0 }
+        WgpuBuffer {
+            buffer,
+            size: 0,
+            usage,
+            label: label.unwrap_or("unnamed").to_string(),
+        }
     }
 
     /// Update the buffer with new data via queue write
     pub fn write_data<T: bytemuck::Pod>(
         &mut self,
         queue: &wgpu::Queue,
+        device: &wgpu::Device,
         data: &[T],
         offset: Option<u64>,
     ) {
         let bytes = bytemuck::cast_slice(data);
         let size = (std::mem::size_of::<T>() * data.len()) as u64;
+        if size > self.buffer.size() {
+            self.buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&self.label),
+                contents: bytes,
+                usage: self.usage,
+            })
+        }
         self.size = size as usize;
         queue.write_buffer(&self.buffer, offset.unwrap_or(0), bytes);
     }
@@ -92,7 +113,7 @@ impl crate::CacheStorage<WgpuBuffer> for WgpuBufferManager {
     fn insert(&mut self, key: crate::CacheKey, resource: WgpuBuffer) {
         self.inner.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.inner.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<WgpuBuffer> {
+        self.inner.remove(key)
     }
 }

@@ -1,25 +1,61 @@
 use crate::{CacheKey, CacheStorage, HashCache};
 /// Wrapper around Glyphon buffers
 pub struct GlyphonBuffer {
-    pub buffer: glyphon::Buffer,
+    buffer: glyphon::Buffer,
+    shaping: glyphon::Shaping,
+    ending: glyphon::cosmic_text::LineEnding,
+    attrs_list: glyphon::AttrsList,
+    align: Option<glyphon::cosmic_text::Align>,
+    shape_opt: Option<glyphon::ShapeLine>,
 }
 
 impl GlyphonBuffer {
     /// Create a new Glyphon buffer (atlas) with the given `FontSystem`
-    pub fn new(font_system: &mut glyphon::FontSystem, metrics: Option<glyphon::Metrics>) -> Self {
+    pub fn new(
+        font_system: &mut glyphon::FontSystem,
+        metrics: Option<glyphon::Metrics>,
+        shaping: Option<glyphon::Shaping>,
+        ending: glyphon::cosmic_text::LineEnding,
+        attrs_list: glyphon::AttrsList,
+        align: Option<glyphon::cosmic_text::Align>,
+        shape_opt: Option<glyphon::ShapeLine>,
+    ) -> Self {
         let buffer = glyphon::Buffer::new(
             font_system,
             metrics.unwrap_or(glyphon::Metrics::new(20.0, 20.0)),
         );
-        GlyphonBuffer { buffer }
+        GlyphonBuffer {
+            buffer,
+            shaping: shaping.unwrap_or(glyphon::Shaping::Basic),
+            ending,
+            attrs_list,
+            align,
+            shape_opt,
+        }
+    }
+    pub fn get(&self) -> &glyphon::Buffer {
+        &self.buffer
     }
     /// Create a Glyphon buffer from explicit metrics and pre-populated lines
     pub fn from_data(
         font_system: &mut glyphon::FontSystem,
-        metrics: glyphon::Metrics,
         lines: &Vec<glyphon::BufferLine>,
+        metrics: Option<glyphon::Metrics>,
+        shaping: Option<glyphon::Shaping>,
+        ending: glyphon::cosmic_text::LineEnding,
+        attrs_list: glyphon::AttrsList,
+        align: Option<glyphon::cosmic_text::Align>,
+        shape_opt: Option<glyphon::ShapeLine>,
     ) -> Self {
-        let mut buffer = GlyphonBuffer::new(font_system, Some(metrics));
+        let mut buffer = GlyphonBuffer::new(
+            font_system,
+            metrics,
+            shaping,
+            ending,
+            attrs_list,
+            align,
+            shape_opt,
+        );
         buffer.push_lines(lines);
         buffer
     }
@@ -78,7 +114,7 @@ impl CacheStorage<GlyphonBuffer> for GlyphonBufferManager {
     fn insert(&mut self, key: CacheKey, resource: GlyphonBuffer) {
         self.inner.insert(key, resource);
     }
-    fn remove(&mut self, key: &CacheKey) {
-        self.inner.remove(key);
+    fn remove(&mut self, key: &CacheKey) -> Option<GlyphonBuffer> {
+        self.inner.remove(key)
     }
 }

@@ -1,8 +1,8 @@
 use engine::{
-    camera::{Camera, CameraController},
+    camera::{Action, Camera, CameraController, MovementMode, Projection},
     log_error, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, GlyphonRenderer, Light,
-    RenderTargetKind, RenderTargetManager, Renderer, Scale, SurfaceExt, Texture, Time, Vertex,
-    VertexInstance, WgpuRenderer, World,
+    RenderPass, RenderTargetKind, RenderTargetManager, Scale, ScreenCorner, SurfaceExt, TextRegion,
+    Texture, Time, Vertex, VertexInstance, WgpuRenderer, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -13,21 +13,21 @@ use winit::{
 
 #[allow(dead_code)]
 pub struct Rupy {
-    pub time: Time,
-    pub window: Arc<Window>,
-    pub surface: wgpu::Surface<'static>,
-    pub surface_config: wgpu::SurfaceConfiguration,
-    pub world: World,
-    pub wgpu_renderer: WgpuRenderer,
-    pub render_targets: RenderTargetManager,
-    pub glyphon_renderer: GlyphonRenderer,
-    pub camera: Camera,
-    pub light: Light,
-    pub controller: CameraController,
-    pub last_shape_time: std::time::Instant,
-    pub uniform_bind_group: wgpu::BindGroup,
-    pub model_manager: engine::ModelManager,
-    pub text_buffer: engine::GlyphonBuffer,
+    time: Time,
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    world: World,
+    w_renderer: WgpuRenderer,
+    render_targets: RenderTargetManager,
+    g_renderer: GlyphonRenderer,
+    camera: Camera,
+    projection: Projection,
+    light: Light,
+    controller: CameraController,
+    last_shape_time: std::time::Instant,
+    uniform_bind_group: wgpu::BindGroup,
+    model_manager: engine::ModelManager,
 }
 
 impl Rupy {
@@ -65,7 +65,7 @@ impl Rupy {
         surface.configure(&device, &surface_config);
 
         let time = Time::new();
-        let wgpu_renderer = WgpuRenderer::new(&device, &surface_config)?;
+        let w_renderer = WgpuRenderer::new(&device, &surface_config)?;
         let depth_stencil = wgpu::DepthStencilState {
             format: Texture::DEPTH_FORMAT,
             depth_write_enabled: true,
@@ -73,15 +73,15 @@ impl Rupy {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-        let mut glyphon_renderer = GlyphonRenderer::new(
+        let g_renderer = GlyphonRenderer::new(
             &device,
             &queue,
             surface_config.format,
             &Some(depth_stencil.clone()),
         );
-        let camera = Camera::new(&device, width as f32 / height as f32);
+        let mut camera = Camera::new(&device, MovementMode::Full3D, width as f32 / height as f32);
         let light = Light::new(&device)?;
-        let controller = CameraController::new(4.0, 0.5);
+        let controller = CameraController::new(0.1, 0.005);
 
         let mut world = World::new(queue, device, &surface_config, Some(depth_stencil.clone()))?;
 
@@ -90,6 +90,20 @@ impl Rupy {
         let wall_y_offset = 0.0;
 
         let cube_obj = "goblin.obj";
+
+        camera.add_model(
+            &mut model_manager,
+            &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+            vec![
+                BindGroupLayouts::uniform().clone(),
+                BindGroupLayouts::equirect_dst().clone(),
+                BindGroupLayouts::material_storage().clone(),
+                BindGroupLayouts::normal().clone(),
+            ],
+            &surface_config,
+        );
+
+        camera.spawn(&mut world, &mut model_manager, &surface_config);
 
         if let Some(model_key) = World::load_object(
             &mut model_manager,
@@ -120,11 +134,11 @@ impl Rupy {
             Some(depth_stencil.clone()),
         ) {
             let entity = world.spawn();
-            world.insert_rotation(entity, cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into());
             world.insert_scale(entity, Scale::new(10.0, 10.0, 10.0));
             world.insert_position(entity, (5.0 as f32, 5.5, 3.0 as f32).into());
             world.insert_renderable(entity, model_key.into());
         }
+
         if let Some(model_key) = World::load_object(
             &mut model_manager,
             "cube.obj",
@@ -156,10 +170,7 @@ impl Rupy {
             for x in 0..(size + 10) {
                 for z in 0..(size + 10) {
                     let entity = world.spawn();
-                    world.insert_rotation(
-                        entity,
-                        cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                    );
+
                     world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
                     world.insert_position(entity, ((14.0 - x as f32), 0.0, z as f32).into());
                     world.insert_renderable(entity, model_key.into());
@@ -170,10 +181,7 @@ impl Rupy {
             for x in 0..size {
                 for z in 0..size {
                     let entity = world.spawn();
-                    world.insert_rotation(
-                        entity,
-                        cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                    );
+
                     world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
                     world.insert_position(
                         entity,
@@ -189,24 +197,9 @@ impl Rupy {
                 for y in 0..wall_height {
                     // front wall at z = 0
                     let e1 = world.spawn();
-                    world.insert_rotation(e1, cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into());
                     world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
                     world.insert_position(e1, (x as f32, y as f32 + wall_y_offset, 0.0).into());
                     world.insert_renderable(e1, model_key.into());
-
-                    // back wall at z = size - 1
-
-                    // let e2 = w.spawn();
-                    // w.insert_rotation(
-                    //     e2,
-                    //     cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into(),
-                    // );
-                    // w.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                    // w.insert_position(
-                    //     e2,
-                    //     (x as f32, y as f32 + wall_y_offset, (size - 1) as f32).into(),
-                    // );
-                    // w.insert_renderable(e2, model_key.into());
                 }
             }
 
@@ -215,14 +208,12 @@ impl Rupy {
                 for y in 0..wall_height {
                     // left wall at x = 0
                     let e1 = world.spawn();
-                    world.insert_rotation(e1, cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into());
                     world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
                     world.insert_position(e1, (0.0, y as f32 + wall_y_offset, z as f32).into());
                     world.insert_renderable(e1, model_key.into());
 
                     // right wall at x = size - 1
                     let e2 = world.spawn();
-                    world.insert_rotation(e2, cgmath::Quaternion::new(0.0, 0.0, 0.0, 0.0).into());
                     world.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
                     world.insert_position(
                         e2,
@@ -233,6 +224,7 @@ impl Rupy {
             }
             world.update_transforms(time.delta_time as f64);
         }
+
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
             FrameBuffer::new_with_depth(
@@ -254,8 +246,7 @@ impl Rupy {
             RenderTargetKind::Hdr,
         );
         let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), light.buffer());
-
-        let text_buffer = engine::GlyphonBuffer::new(&mut glyphon_renderer.font_system, None);
+        let projection = Projection::FirstPerson;
 
         Ok(Rupy {
             time,
@@ -263,32 +254,50 @@ impl Rupy {
             surface,
             surface_config,
             world,
-            wgpu_renderer,
-            glyphon_renderer,
+            w_renderer,
+            g_renderer,
             camera,
+            projection,
             light,
             controller,
             render_targets,
             last_shape_time: std::time::Instant::now(),
             uniform_bind_group,
             model_manager,
-            text_buffer,
         })
     }
 
+    pub fn controller(&mut self, event: &winit::event::WindowEvent) -> Action {
+        self.controller.process(event)
+    }
+
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+    pub fn projection(&self) -> &Projection {
+        &self.projection
+    }
+    pub fn set_projection(&mut self, projection: Projection) {
+        self.projection = projection;
+    }
+    pub fn next_projection(&mut self) {
+        self.projection = match self.projection {
+            Projection::FirstPerson => Projection::ThirdPerson,
+            Projection::ThirdPerson => Projection::FirstPerson,
+        };
+    }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.surface.resize(
             &self.model_manager.device,
             &mut self.surface_config,
             *new_size,
         );
-        self.glyphon_renderer
-            .resize(&self.model_manager.queue, *new_size);
+        self.g_renderer.resize(&self.model_manager.queue, *new_size);
         self.render_targets
             .resize(&self.model_manager.device, *new_size);
     }
 
-    pub fn draw(&mut self) {
+    pub fn render(&mut self) {
         match self.surface.texture() {
             Ok(frame) => {
                 let surface_view = frame.texture.create_view(&Default::default());
@@ -317,14 +326,14 @@ impl Rupy {
                             occlusion_query_set: None,
                         });
 
-                    self.wgpu_renderer.render(
+                    self.w_renderer.render(
                         &mut self.model_manager,
                         &mut rpass,
                         &self.world,
                         &self.uniform_bind_group,
                     );
 
-                    self.glyphon_renderer.render(
+                    self.g_renderer.render(
                         &mut self.model_manager,
                         &mut rpass,
                         &self.world,
@@ -335,7 +344,7 @@ impl Rupy {
                 // === 2. Postprocess Scene -> HDR ===
                 if let Some(scene_fb) = self.render_targets.get(&RenderTargetKind::Scene) {
                     if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-                        self.wgpu_renderer.hdr(
+                        self.w_renderer.hdr(
                             &mut encoder,
                             &self.model_manager,
                             &scene_fb.color(),
@@ -346,7 +355,7 @@ impl Rupy {
 
                 // === 3. Final HDR -> swapchain ===
                 if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-                    self.wgpu_renderer.final_blit_to_surface(
+                    self.w_renderer.final_blit_to_surface(
                         &self.model_manager.device,
                         &mut encoder,
                         hdr_fb.color(),
@@ -364,58 +373,54 @@ impl Rupy {
             }
         };
     }
-    fn buffer_lines(&mut self) -> Vec<glyphon::BufferLine> {
-        let line_ending = glyphon::cosmic_text::LineEnding::LfCr;
-        let attrs_list = glyphon::AttrsList::new(glyphon::Attrs::new());
-        let shaping = glyphon::Shaping::Advanced;
-        let lines = (
-            self.camera.buffer_line(&line_ending, &attrs_list, &shaping),
-            self.controller
-                .buffer_line(&line_ending, &attrs_list, &shaping),
-        );
-
-        vec![
-            glyphon::BufferLine::new(
-                format!("fps: {:.1} dt: {:.4}", self.time.fps, self.time.delta_time),
-                line_ending,
-                attrs_list,
-                shaping,
-            ),
-            lines.0 .0,
-            lines.0 .1,
-            lines.1,
-        ]
+    fn text_regions(&mut self) -> Vec<TextRegion> {
+        let corner =
+            ScreenCorner::TopLeft.pos(self.surface_config.width, self.surface_config.height, 5.0);
+        // let camera = self.camera.text_region(corner);
+        // let controller = self.controller.text_region(corner);
+        let time = self.time.text_region(corner);
+        let regions = vec![time];
+        regions
     }
 
     pub fn upload(&mut self) {
-        self.light.upload(&self.model_manager.queue);
-        self.camera.upload(&self.model_manager.queue);
-        self.wgpu_renderer
+        self.light
+            .upload(&self.model_manager.queue, &self.model_manager.device);
+        self.camera
+            .upload(&self.model_manager.queue, &self.model_manager.device);
+        self.w_renderer
             .instance_buffers
             .upload(&self.model_manager.queue, &self.model_manager.device);
     }
 
     pub fn update(&mut self) {
         self.time.update();
-        self.camera.update(&mut self.controller);
-        self.light
-            .orbit(self.time.elapsed * std::f32::consts::TAU / 15.0);
-        self.wgpu_renderer.instance_buffers.update_batches(
-            &self.world,
-            &self.camera,
-            &mut self.model_manager,
-        );
-        if self.last_shape_time.elapsed().as_millis() > 1500 {
-            self.last_shape_time = std::time::Instant::now();
-            let lines = self.buffer_lines();
+        let dt = self.time.delta_time;
+        if let Some(entity) = self.camera.entity() {
+            self.controller.apply(
+                &mut self.world,
+                entity,
+                self.camera.movement(),
+                self.controller.speed(),
+            );
+        };
 
-            self.text_buffer.set_lines(lines);
-            self.text_buffer
-                .shape(&mut self.glyphon_renderer.font_system);
-            self.glyphon_renderer.prepare(
+        self.world.update(dt);
+        self.camera.update(&self.world, self.projection);
+
+        self.light
+            .orbit(self.time.elapsed * std::f64::consts::TAU / 15.0);
+        self.w_renderer
+            .instance_buffers
+            .update(&self.world, &self.camera, &mut self.model_manager);
+
+        if self.last_shape_time.elapsed().as_millis() > 5000 {
+            self.last_shape_time = std::time::Instant::now();
+            let regions = self.text_regions();
+            self.g_renderer.prepare_regions(
                 &self.model_manager.device,
                 &self.model_manager.queue,
-                &mut self.text_buffer,
+                &regions,
                 &self.surface_config,
             );
         }

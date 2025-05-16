@@ -125,8 +125,8 @@ impl crate::CacheStorage<std::sync::Arc<wgpu::ComputePipeline>> for ComputePipel
     fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::ComputePipeline>) {
         self.pipelines.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.pipelines.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::ComputePipeline>> {
+        self.pipelines.remove(key)
     }
 }
 pub struct RenderPipelineManager {
@@ -169,7 +169,7 @@ impl crate::CacheStorage<std::sync::Arc<wgpu::RenderPipeline>> for RenderPipelin
     fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::RenderPipeline>) {
         self.pipelines.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.pipelines.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::RenderPipeline>> {
+        self.pipelines.remove(key)
     }
 }

@@ -80,7 +80,7 @@ impl crate::CacheStorage<std::sync::Arc<wgpu::ShaderModule>> for ShaderManager {
     fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::ShaderModule>) {
         self.shaders.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) {
-        self.shaders.remove(key);
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::ShaderModule>> {
+        self.shaders.remove(key)
     }
 }
