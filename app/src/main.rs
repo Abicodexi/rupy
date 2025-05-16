@@ -5,7 +5,7 @@ use crossbeam::channel::{self, Receiver, Sender};
 use engine::{
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
     logger::LogFactory,
-    ApplicationEvent, BindGroupLayouts, EngineError, World, WorldTick, GPU,
+    ApplicationEvent, BindGroupLayouts, EngineError, GPU,
 };
 use state::ApplicationState;
 use std::sync::Arc;

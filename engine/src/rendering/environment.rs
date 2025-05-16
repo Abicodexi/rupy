@@ -1,5 +1,3 @@
-use crate::ModelManager;
-
 #[derive(Debug)]
 pub struct EquirectProjection {
     pub src_shader: wgpu::ShaderModule,

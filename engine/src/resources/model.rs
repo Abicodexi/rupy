@@ -1,11 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
-
-use crate::{log_info, log_warning, Asset, EngineError, PipelineManager, ShaderManager, AABB};
-
 use super::{
     CacheKey, HashCache, Material, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance,
-    TextureManager,
 };
+use crate::{log_info, log_warning, Asset, EngineError, AABB};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct ModelAsset {

@@ -3,9 +3,9 @@ use std::time::Instant;
 #[derive(Debug)]
 pub struct Time {
     last_update: Instant,
-    pub delta_time: f32, // in seconds
+    pub delta_time: f32,
     pub fps: f32,
-    pub elapsed: f32, // total time since start, in seconds
+    pub elapsed: f32,
     frame_count: u32,
 }
 

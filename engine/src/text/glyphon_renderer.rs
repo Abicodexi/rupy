@@ -90,9 +90,7 @@ impl crate::Renderer for GlyphonRenderer {
         _managers: &mut crate::ModelManager,
         rpass: &mut wgpu::RenderPass,
         _world: &crate::World,
-        _camera: &crate::camera::Camera,
-        _uniform_bind_group: &crate::Light,
-        uniform_bind_group: &wgpu::BindGroup,
+        _uniform_bind_group: &wgpu::BindGroup,
     ) {
         if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
             crate::log_error!("Error rendering text: {}", e);

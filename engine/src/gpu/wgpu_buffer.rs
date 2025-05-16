@@ -34,8 +34,8 @@ impl WgpuBuffer {
     pub fn size(&self) -> usize {
         self.size
     }
-    /// Create a new empty GPU buffer with given usage flags
 
+    /// Create a new empty GPU buffer with given usage flags
     pub fn new_empty(device: &wgpu::Device, usage: wgpu::BufferUsages) -> Self {
         use wgpu::util::DeviceExt;
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -45,6 +45,7 @@ impl WgpuBuffer {
         });
         WgpuBuffer { buffer, size: 0 }
     }
+
     /// Update the buffer with new data via queue write
     pub fn write_data<T: bytemuck::Pod>(
         &mut self,
@@ -70,15 +71,6 @@ impl WgpuBufferManager {
             inner: Default::default(),
         }
     }
-    // pub fn get(&self, key_source: &CacheKey) -> Option<&WgpuBuffer> {
-    //     self.inner.get(key_source)
-    // }
-    // pub fn get_or_create<F>(&mut self, key_source: &CacheKey, create_fn: F) -> &mut WgpuBuffer
-    // where
-    //     F: FnOnce() -> WgpuBuffer,
-    // {
-    //     self.inner.get_or_create(key_source.clone(), create_fn)
-    // }
 }
 
 impl crate::CacheStorage<WgpuBuffer> for WgpuBufferManager {

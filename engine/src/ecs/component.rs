@@ -139,10 +139,8 @@ impl Transform {
         let inv =
             cgmath::SquareMatrix::invert(&model_matrix).expect("model matrix was not invertible");
 
-        // 2) transpose it
         let inv_transpose = cgmath::Matrix::transpose(&inv);
 
-        // 3) extract the upper‐left 3×3 as your normal matrix
         let normal_matrix = cgmath::Transform::inverse_transform(&inv_transpose).unwrap();
 
         Self {
@@ -159,7 +157,7 @@ impl Transform {
         };
         let (nrm, tan) = extract(normal);
         let translation = {
-            let w = model.w; // cgmath::Vector4
+            let w = model.w;
             [w.x, w.y, w.z]
         };
 
@@ -190,10 +188,6 @@ impl Transform {
     }
 }
 
-// Renderable (per entity)
-//   ↳ Model (shared resource)
-//      ↳ Mesh(es) (vertex/index buffers)
-//      ↳ Material(s) (shader, textures, uniforms)
 #[derive(Debug, Clone)]
 pub struct Renderable {
     pub model_key: crate::CacheKey,

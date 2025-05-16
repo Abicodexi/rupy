@@ -1,13 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
-
-use wgpu::BufferUsages;
-
 use crate::{
     log_debug, log_info, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
-    ShaderManager, VertexInstance, WgpuBuffer,
+    ShaderManager, WgpuBuffer,
 };
+use std::{collections::HashMap, sync::Arc};
+use wgpu::BufferUsages;
 
-use super::{BindGroup, HashCache, Model, ModelManager, Texture, TextureManager};
+use super::{BindGroup, HashCache, Texture, TextureManager};
 
 #[derive(Clone, Debug)]
 pub struct MaterialAsset {

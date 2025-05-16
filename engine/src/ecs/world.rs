@@ -1,32 +1,7 @@
-use std::collections::HashMap;
-
 use pollster::FutureExt;
 
-use crate::{
-    log_error, BindGroup, CacheKey, CacheStorage, EngineError, EquirectProjection, MaterialData,
-    MaterialManager, ModelManager, VertexInstance,
-};
+use crate::{log_error, CacheKey, EngineError, EquirectProjection, ModelManager};
 
-static WORLD: std::sync::OnceLock<std::sync::Arc<std::sync::RwLock<crate::World>>> =
-    std::sync::OnceLock::new();
-
-fn init_world(
-    queue: &wgpu::Queue,
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-    depth_stencil_state: Option<wgpu::DepthStencilState>,
-) {
-    let world = World::new(queue, device, config, depth_stencil_state.clone())
-        .expect("World failed to initialize");
-    let arc_world = std::sync::Arc::new(std::sync::RwLock::new(world));
-    WORLD
-        .set(arc_world)
-        .expect("Global world was already initialized");
-}
-
-fn world() -> Option<std::sync::Arc<std::sync::RwLock<World>>> {
-    WORLD.get().cloned()
-}
 pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 fn _still_running() -> bool {
@@ -58,17 +33,6 @@ pub struct World {
 }
 
 impl World {
-    pub fn get() -> Option<std::sync::Arc<std::sync::RwLock<World>>> {
-        world()
-    }
-    pub fn init(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        depth_stencil_state: Option<wgpu::DepthStencilState>,
-    ) {
-        init_world(queue, device, config, depth_stencil_state);
-    }
     pub fn running() -> bool {
         _still_running()
     }
@@ -101,6 +65,9 @@ impl World {
             projection,
             entity_count: 0,
         })
+    }
+    pub fn entity_count(&self) -> usize {
+        self.entity_count
     }
     pub fn set_projection(&mut self, projection: crate::EquirectProjection) {
         self.projection = projection;
@@ -253,160 +220,5 @@ impl World {
                 self.transforms[i] = Some(transform);
             }
         }
-    }
-
-    pub fn instance_batch(
-        &self,
-        camera: &crate::camera::Camera,
-        model_manager: &mut ModelManager,
-    ) -> std::collections::HashMap<crate::CacheKey, Vec<VertexInstance>> {
-        let mut best_hit: Option<(usize, f32)> = None;
-        for idx in 0..self.entity_count {
-            let (_, t, s) = match (
-                &self.renderables[idx],
-                &self.transforms[idx],
-                &self.scales[idx],
-            ) {
-                (Some(r), Some(t), Some(s)) if r.visible => (r, t, s),
-                _ => continue,
-            };
-
-            let center =
-                cgmath::Point3::new(t.model_matrix.w.x, t.model_matrix.w.y, t.model_matrix.w.z);
-            let radius = cgmath::InnerSpace::magnitude(s.value);
-
-            if let Some(t_ray) = camera.is_looking_at(center, radius) {
-                if t_ray <= camera.pick_distance() {
-                    if best_hit.is_none() || t_ray < best_hit.unwrap().1 {
-                        best_hit = Some((idx, t_ray));
-                    }
-                }
-            }
-        }
-        let picked_idx = best_hit.map(|(i, _)| i);
-
-        let highlight: [f32; 3] = [1.0, 25.0, 1.0];
-        let mut batch: std::collections::HashMap<crate::CacheKey, Vec<VertexInstance>> =
-            std::collections::HashMap::new();
-        let frustum = camera.frustum();
-        for idx in 0..self.entity_count {
-            let renderable = match &self.renderables[idx] {
-                Some(r) if r.visible => r,
-                _ => continue,
-            };
-            let transform = match &self.transforms[idx] {
-                Some(t) => t,
-                _ => continue,
-            };
-            let center = cgmath::Point3::new(
-                transform.model_matrix.w.x,
-                transform.model_matrix.w.y,
-                transform.model_matrix.w.z,
-            );
-            let magnitude = match &self.scales[idx] {
-                Some(s) => cgmath::InnerSpace::magnitude(s.value),
-                None => 1.0,
-            };
-            if !frustum.contains_sphere(center, magnitude) {
-                continue;
-            }
-
-            let model = if let Some(m) = model_manager.get(&renderable.model_key) {
-                m.clone()
-            } else {
-                continue;
-            };
-            if let Some(m) = &model.instance.material {
-                let data = transform.to_vertex_instance(m.idx);
-                model_manager
-                    .materials
-                    .update_storage(&mut model_manager.device, m);
-
-                // if Some(idx) == picked_idx {
-                //     data.color = highlight
-                // };
-                batch.entry(renderable.model_key).or_default().push(data);
-            } else {
-                continue;
-            };
-        }
-        batch
-    }
-    pub fn material_data(
-        &self,
-        models: &ModelManager,
-        batch: &HashMap<CacheKey, Vec<VertexInstance>>,
-    ) -> Vec<MaterialData> {
-        let mut data = Vec::new();
-        for (model_key, instances) in batch {
-            if instances.is_empty() {
-                continue;
-            }
-            if let Some(model) = models.get(&model_key) {
-                if let Some(mat) = &model.instance.material {
-                    let asset_data = mat.asset.data();
-                    data.push(asset_data);
-                }
-            }
-        }
-        data
-    }
-}
-
-pub struct WorldTick;
-
-impl WorldTick {
-    pub fn run_tokio() {
-        tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_millis(80));
-            let mut last = std::time::Instant::now();
-            loop {
-                ticker.tick().await;
-
-                if !World::running() {
-                    crate::log_info!("World tick stopping (shutdown flag set)");
-                    break;
-                }
-
-                let now = std::time::Instant::now();
-                let dt = (now - last).as_secs_f32();
-                last = now;
-
-                {
-                    if let Some(world) = World::get() {
-                        match world.write() {
-                            Ok(mut w) => {
-                                w.update(dt);
-                            }
-                            Err(e) => {
-                                crate::log_error!(
-                                    "World update failed, could not acquire lock: {}",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-    pub fn run(world: std::sync::Arc<std::sync::RwLock<World>>) {
-        std::thread::spawn(move || {
-            let mut last = std::time::Instant::now();
-            while World::running() {
-                let now = std::time::Instant::now();
-                let dt = (now - last).as_secs_f32();
-                last = now;
-
-                {
-                    let mut w = world.write().unwrap();
-                    w.update(dt);
-                }
-
-                // ~60Hz
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-            crate::log_info!("World updater thread exiting");
-        });
     }
 }
