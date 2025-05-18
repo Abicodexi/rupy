@@ -15,6 +15,7 @@ log = { version = "0.4.27", optional = true }
 env_logger = { version = "0.11.8", optional = true }
 glyphon = "0.8"
 tokio = { version = "1.44.2",  features = ["full"] }
+glam = "0.30.3"
 
 
 [features]

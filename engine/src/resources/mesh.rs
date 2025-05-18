@@ -50,7 +50,7 @@ impl MeshAsset {
 
         let mesh = &m.mesh;
 
-        // 1) Build initial per-vertex list, zipping pos, uv, normal, color
+        // Initial per-vertex list, zipping pos, uv, normal, color
         let mut vertices: Vec<Vertex> = {
             let positions = mesh.positions.chunks(3);
             let uvs = mesh.texcoords.chunks(2).chain(repeat(&[0.0, 0.0][..]));
@@ -74,12 +74,12 @@ impl MeshAsset {
                 .collect()
         };
 
-        // 2) Prepare accumulators
+        // Accumulators
         let mut accum_normals = vec![[0.0f32; 3]; vertices.len()];
         let mut accum_tangents = vec![[0.0f32; 3]; vertices.len()];
         let mut accum_bitangents = vec![[0.0f32; 3]; vertices.len()];
 
-        // 3) Loop triangles and accumulate
+        // Accumulate
         for idx in mesh.indices.chunks(3) {
             let [i0, i1, i2] = [idx[0] as usize, idx[1] as usize, idx[2] as usize];
 
@@ -122,7 +122,7 @@ impl MeshAsset {
                     .max(1e-6);
             let normal = [n_unnorm[0] / len, n_unnorm[1] / len, n_unnorm[2] / len];
 
-            // accumulate into each corner
+            // corners
             for &i in &[i0, i1, i2] {
                 accum_normals[i]
                     .iter_mut()
@@ -139,7 +139,7 @@ impl MeshAsset {
             }
         }
 
-        // 4) Normalize + orthogonalize & write back
+        // Normalize + orthogonalize
         for (i, v) in vertices.iter_mut().enumerate() {
             // normalize normal
             let n = {
@@ -167,7 +167,7 @@ impl MeshAsset {
         vertices
     }
 }
-
+#[derive(Debug)]
 pub struct Mesh {
     pub vertex_buffer: std::sync::Arc<WgpuBuffer>,
     pub index_buffer: std::sync::Arc<WgpuBuffer>,
@@ -189,7 +189,7 @@ impl Mesh {
         }
     }
 }
-
+#[derive(Debug)]
 pub struct MeshInstance {
     pub mesh: std::sync::Arc<Mesh>,
     pub material: Option<std::sync::Arc<Material>>,

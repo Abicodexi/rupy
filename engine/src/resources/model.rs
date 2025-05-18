@@ -22,7 +22,7 @@ impl ModelAsset {
     ) -> Result<(super::MeshInstance, AABB), EngineError> {
         let (mesh, mat) = &self.asset;
         let material = if let Some(m) = mat {
-            let idx = materials.materials.len() as u32 + 1;
+            let idx = materials.materials.len() as u32;
             Some(Arc::new(Material::from_asset(
                 queue,
                 device,
@@ -193,7 +193,6 @@ impl ModelManager {
             self.models.insert(m_key, model);
             log_info!("Cached model: {}", m.name);
         }
-
         Ok(())
     }
     pub fn load_asset(

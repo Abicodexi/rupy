@@ -1,4 +1,5 @@
 use crate::{CacheKey, CacheStorage, Entity, ModelManager, Texture, World};
+
 #[derive(Debug, Default)]
 pub struct CameraModel {
     model: String,
@@ -18,8 +19,8 @@ impl CameraModel {
             shader: shader.to_string(),
             model_key: None,
             entity: None,
-            distance: 2.0,
-            height: 0.0,
+            distance: 1.0,
+            height: 2.0,
             target_height: 0.0,
             shoulder_offset: 0.0,
         }

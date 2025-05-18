@@ -76,7 +76,7 @@ impl Light {
     }
 
     pub fn orbit(&mut self, time_s: f64) {
-        let angle = time_s; // 1 rad/sec;
+        let angle = time_s; // 1 radian/s;
         let (sin, cos) = angle.sin_cos();
 
         self.position.x = Light::CENTER.x + Light::RADIUS * cos as f32;

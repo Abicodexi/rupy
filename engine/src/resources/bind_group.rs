@@ -1,10 +1,12 @@
+use crate::DebugUniform;
+
 use super::{CacheStorage, HashCache, TextureManager};
 
 pub struct BindGroupBindingType {
     pub(crate) binding: wgpu::BindingType,
 }
 
-/// A single binding definition\, used to build layouts from data-driven descriptors.
+/// A single binding definition.
 pub struct BindingDef {
     pub binding: u32,
     pub visibility: wgpu::ShaderStages,
@@ -32,7 +34,7 @@ fn create_layout(
     })
 }
 
-/// Holds all of your shared bind-group layouts, initialized once per device.
+/// Holds all bind-group layouts.
 pub struct BindGroupLayouts {
     pub device: std::sync::Arc<wgpu::Device>,
     pub diffuse: wgpu::BindGroupLayout,
@@ -43,10 +45,11 @@ pub struct BindGroupLayouts {
     pub uniform: wgpu::BindGroupLayout,
     pub normal: wgpu::BindGroupLayout,
     pub material_storage: wgpu::BindGroupLayout,
+    pub debug: wgpu::BindGroupLayout,
 }
 
 impl BindGroupLayouts {
-    /// Lazily initialize and return the singleton for this device.
+    /// Initialize and return the singleton.
     pub fn get() -> &'static Self {
         static LAYOUTS: once_cell::sync::OnceCell<BindGroupLayouts> =
             once_cell::sync::OnceCell::new();
@@ -79,6 +82,9 @@ impl BindGroupLayouts {
     }
     pub fn normal() -> &'static wgpu::BindGroupLayout {
         &Self::get().normal
+    }
+    pub fn debug() -> &'static wgpu::BindGroupLayout {
+        &Self::get().debug
     }
 
     fn new(device: std::sync::Arc<wgpu::Device>) -> Self {
@@ -115,7 +121,7 @@ impl BindGroupLayouts {
         }];
         let camera = create_layout(&device, Some("camera bind group layout"), camera_defs);
 
-        // Equirectangular compute src
+        // Equirectangular (dual texture)
         let equirect_src_defs = &[
             BindingDef {
                 binding: 0,
@@ -130,7 +136,7 @@ impl BindGroupLayouts {
         ];
         let equirect_src = create_layout(&device, Some("equirect src layout"), equirect_src_defs);
 
-        // Equirectangular render dst
+        // Equirectangular (texture + sampler)
         let equirect_dst_defs = &[
             BindingDef {
                 binding: 0,
@@ -217,6 +223,20 @@ impl BindGroupLayouts {
             Some("material storage bind group layout"),
             material_storage_defs,
         );
+
+        let debug_defs = [BindingDef {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: Some(
+                    std::num::NonZeroU64::new(std::mem::size_of::<DebugUniform>() as u64).unwrap(),
+                ),
+            },
+        }];
+        let debug = create_layout(&device, Some("debug bind grop layout"), &debug_defs);
+
         BindGroupLayouts {
             device: device.clone(),
             diffuse,
@@ -227,6 +247,7 @@ impl BindGroupLayouts {
             uniform,
             normal,
             material_storage,
+            debug,
         }
     }
 }

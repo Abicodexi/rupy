@@ -1,7 +1,11 @@
 use crate::state::{AppInnerState, ApplicationState};
 use engine::{ApplicationEvent, World};
 use pollster::FutureExt;
-use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
+use winit::{
+    event::WindowEvent,
+    event_loop::ActiveEventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+};
 
 impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -17,30 +21,41 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
+        _: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        if let WindowEvent::CloseRequested = event {
-            World::stop();
-            event_loop.exit()
-        }
-
         if let AppInnerState::Running(app) = &mut self.inner {
-            match app.controller(&event) {
-                engine::camera::Action::Projection => app.next_projection(),
-                engine::camera::Action::Movement(..) => (),
-            };
+            if matches!(event, WindowEvent::CloseRequested) {
+                app.shutdown(event_loop)
+            }
+            app.input(&event);
+            match &event {
+                WindowEvent::Resized(size) => app.resize(&size),
+                WindowEvent::CursorEntered { .. } => app.window().set_cursor_visible(false),
+                WindowEvent::CursorLeft { .. } => app.window().set_cursor_visible(true),
 
-            if let WindowEvent::Resized(new_size) = &event {
-                app.resize(new_size)
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if event.state.is_pressed() && event.repeat == false {
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::KeyM) => app.next_projection(),
+                            PhysicalKey::Code(KeyCode::KeyL) => {
+                                let free_look = if app.cam().free_look() { false } else { true };
+                                app.cam_mut().set_free_look(free_look)
+                            }
+                            PhysicalKey::Code(KeyCode::Escape) => app.shutdown(event_loop),
+                            _ => {}
+                        }
+                    }
+                }
+                WindowEvent::RedrawRequested => {
+                    app.update();
+                    app.upload();
+                    app.render();
+                    app.window().request_redraw();
+                }
+                _ => {}
             }
 
-            if let WindowEvent::RedrawRequested = &event {
-                app.update();
-                app.upload();
-                app.render();
-                app.window().request_redraw()
-            }
             match event {
                 WindowEvent::CursorEntered { .. } => {
                     let _ = app.window().set_cursor_visible(false);
@@ -60,8 +75,8 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                     World::stop();
                     event_loop.exit()
                 }
-                ApplicationEvent::Projection(projection) => {
-                    app.set_projection(projection);
+                ApplicationEvent::Projection => {
+                    app.next_projection();
                 }
             }
         }

@@ -245,10 +245,11 @@ impl MaterialAsset {
             .as_ref()
             .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration))
             .unwrap_or_else(|| Ok(Self::fallback_normal(queue, device, textures)))?;
+
+        log_info!("DT: {}", dt.label);
+        log_info!("NT: {}", nt.label);
         let shader = shaders.load(device, &self.shader)?;
         let bgl_refs: Vec<&wgpu::BindGroupLayout> = self.bind_group_layouts.iter().collect();
-
-        log_info!("BGL REFS LEN: {}", bgl_refs.len());
 
         let bind_group = Arc::new(crate::BindGroup::normal(
             device,
@@ -302,7 +303,7 @@ impl MaterialAsset {
         Ok((pipeline, bind_group))
     }
 }
-
+#[derive(Debug)]
 pub struct Material {
     pub asset: MaterialAsset,
     pub bind_group: Arc<wgpu::BindGroup>,
@@ -435,6 +436,8 @@ pub struct MaterialManager {
     pub storage_buffer: WgpuBuffer,
     pub storage_bind_group: wgpu::BindGroup,
     pub storage: HashMap<String, MaterialData>,
+    pub storage_rebuild: bool,
+    pub storage_count: usize,
 }
 
 impl MaterialManager {
@@ -460,26 +463,35 @@ impl MaterialManager {
             storage_buffer,
             storage_bind_group,
             storage: HashMap::new(),
+            storage_rebuild: false,
+            storage_count: 0,
         }
     }
-
+    pub fn toggle_rebuild(&mut self) {
+        self.storage_rebuild = true;
+    }
     pub fn build_storage(&mut self, device: &wgpu::Device) {
         let label = "storage buffer";
         let usage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let data: Vec<MaterialData> = self.storage.values().map(|m| m.clone()).collect();
-        let storage = WgpuBuffer::from_data(device, &data, usage, Some(label));
-        let binding = BindGroup::material_storage(device, &storage, Some(label));
-        self.storage_bind_group = binding;
-        self.storage_buffer = storage;
+        if !data.is_empty() {
+            log_debug!("Building storage");
+            let storage = WgpuBuffer::from_data(device, &data, usage, Some(label));
+            let binding = BindGroup::material_storage(device, &storage, Some(label));
+            self.storage_bind_group = binding;
+            self.storage_buffer = storage;
+            self.storage_rebuild = false;
+            self.storage_count = data.len();
+        }
     }
     pub fn update_storage(&mut self, material: &Material) {
-        if self
+        log_info!("Mat idx count on creation: {}", self.storage.len());
+        self.storage_rebuild = self
             .storage
             .insert(material.asset.name.clone(), material.asset.data())
-            .is_none()
-        {
-            log_debug!("Storage data: {}", material.asset.name);
-        }
+            .is_none();
+
+        log_debug!("Should rebuild storage: {}", self.storage_rebuild);
     }
 
     pub fn load_tobj<'a>(
@@ -523,6 +535,8 @@ impl MaterialManager {
 
         let material = Arc::new(material);
         self.materials.insert(m_key, material.clone());
+        self.toggle_rebuild();
+
         Ok(material)
     }
     pub fn load_tobj_vec<'a>(
@@ -572,6 +586,7 @@ impl MaterialManager {
             materials.push(material);
             idx += 1;
         }
+        self.toggle_rebuild();
         Ok(materials)
     }
     pub fn load_asset<'a>(
@@ -595,7 +610,7 @@ impl MaterialManager {
             surface_configuration,
             buffers,
         )?;
-        let idx = self.materials.len() as u32 + 1;
+        let idx = self.materials.len() as u32;
         let material = Arc::new(Material {
             asset: asset.clone(),
             pipeline,
@@ -603,6 +618,8 @@ impl MaterialManager {
             idx,
         });
         self.materials.insert(asset.key.clone(), material.clone());
+        self.toggle_rebuild();
+
         Ok(material)
     }
 }

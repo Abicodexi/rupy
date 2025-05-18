@@ -1,4 +1,4 @@
-use cgmath::Zero;
+use glam::{Mat4, Vec3};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
@@ -12,12 +12,11 @@ pub struct CameraUniform {
 
 impl CameraUniform {
     pub fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
-            view_proj: cgmath::Matrix4::identity().into(),
-            inv_proj: cgmath::Matrix4::identity().into(),
-            inv_view: cgmath::Matrix4::identity().into(),
-            view_pos: cgmath::Vector3::zero().into(),
+            view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            inv_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            inv_view: Mat4::IDENTITY.to_cols_array_2d(),
+            view_pos: Vec3::ZERO.to_array(),
             _pad: 0.0,
         }
     }
@@ -26,17 +25,13 @@ impl CameraUniform {
     }
     pub fn update(
         &mut self,
-        vp: (
-            cgmath::Matrix4<f32>,
-            cgmath::Matrix4<f32>,
-            cgmath::Matrix4<f32>,
-        ),
-        view_pos: cgmath::Vector3<f32>,
+        vp: (Mat4, Mat4, Mat4), // (view_proj, inv_proj, inv_view)
+        view_pos: Vec3,
     ) {
         let (vp, inv_proj, inv_view) = vp;
-        self.view_proj = vp.into();
-        self.inv_proj = inv_proj.into();
-        self.inv_view = inv_view.into();
-        self.view_pos = [view_pos.x, view_pos.y, view_pos.z];
+        self.view_proj = vp.to_cols_array_2d();
+        self.inv_proj = inv_proj.to_cols_array_2d();
+        self.inv_view = inv_view.to_cols_array_2d();
+        self.view_pos = view_pos.to_array();
     }
 }

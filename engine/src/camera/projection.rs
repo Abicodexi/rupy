@@ -1,6 +1,5 @@
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Projection {
-    #[default]
     FirstPerson,
     ThirdPerson,
 }

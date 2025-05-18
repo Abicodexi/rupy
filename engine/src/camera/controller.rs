@@ -1,11 +1,16 @@
-use crate::{Entity, Rotation, TextRegion, Velocity, World};
-use cgmath::{InnerSpace, Zero};
+use crate::TextRegion;
+use winit::{
+    dpi::PhysicalPosition,
+    event::{ElementState, MouseScrollDelta, WindowEvent},
+    keyboard::{KeyCode, PhysicalKey},
+};
 
-#[derive(Debug)]
-pub enum MovementMode {
-    Full3D,  // WASD follows look, including pitch (flight controls)
-    FPSFlat, // WASD ignores pitch, only follows yaw (classic FPS)
-}
+pub const W: usize = 0;
+pub const A: usize = 1;
+pub const S: usize = 2;
+pub const D: usize = 3;
+pub const J: usize = 4;
+pub const WASDJ: [usize; 5] = [W, A, S, D, J];
 
 #[derive(Debug)]
 pub enum Action {
@@ -14,19 +19,21 @@ pub enum Action {
 }
 
 #[derive(Debug)]
-pub struct CameraController {
+pub struct CameraControls {
     speed: f32,
     sensitivity: f32,
     forward: bool,
     back: bool,
     left: bool,
     right: bool,
+    jump: bool,
     pitch: f32,
     yaw: f32,
+    zoom: f32,
     last_mouse: Option<(f32, f32)>,
 }
 
-impl CameraController {
+impl CameraControls {
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
@@ -35,10 +42,15 @@ impl CameraController {
             back: false,
             left: false,
             right: false,
+            jump: false,
             pitch: 0.0,
-            yaw: -90.0,
+            yaw: 0.0,
+            zoom: 0.0,
             last_mouse: None,
         }
+    }
+    pub fn set_zoom(&mut self, level: f32) {
+        self.zoom = level
     }
     pub fn yaw(&self) -> f32 {
         self.yaw
@@ -49,154 +61,76 @@ impl CameraController {
     pub fn speed(&self) -> f32 {
         self.speed
     }
-    pub fn process(&mut self, event: &winit::event::WindowEvent) -> Action {
+    pub fn sensitivity(&self) -> f32 {
+        self.sensitivity
+    }
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+    pub fn process_event(&mut self, event: &WindowEvent) -> bool {
         match event {
-            winit::event::WindowEvent::KeyboardInput { event, .. } => {
-                let down = event.state == winit::event::ElementState::Pressed;
+            WindowEvent::KeyboardInput { event, .. } => {
+                let down = event.state == ElementState::Pressed;
 
-                if event.physical_key
-                    == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyM)
-                    && down
-                {
-                    return Action::Projection;
-                }
                 match event.physical_key {
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyW) => {
+                    PhysicalKey::Code(KeyCode::KeyW) => {
                         self.forward = down;
-                        Action::Movement(true)
+                        true
                     }
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {
+                    PhysicalKey::Code(KeyCode::KeyS) => {
                         self.back = down;
-                        Action::Movement(true)
+                        true
                     }
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) => {
+                    PhysicalKey::Code(KeyCode::KeyA) => {
                         self.left = down;
-                        Action::Movement(true)
+                        true
                     }
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyD) => {
+                    PhysicalKey::Code(KeyCode::KeyD) => {
                         self.right = down;
-                        Action::Movement(true)
+                        true
                     }
-                    _ => Action::Movement(false),
+                    PhysicalKey::Code(KeyCode::Space) => {
+                        self.jump = down;
+                        true
+                    }
+                    _ => false,
                 }
             }
-            winit::event::WindowEvent::CursorMoved { position, .. } => {
+
+            WindowEvent::CursorMoved { position, .. } => {
                 let (x, y) = (position.x as f32, position.y as f32);
                 if let Some((lx, ly)) = self.last_mouse {
-                    let dx = (x - lx) * self.sensitivity as f32;
-                    let dy = (y - ly) * self.sensitivity as f32;
+                    let dx = (x - lx) * self.sensitivity;
+                    let dy = (y - ly) * self.sensitivity;
                     self.yaw += dx;
-                    self.pitch = (self.pitch + dy).clamp(-89.0, 89.0);
+                    self.pitch = (self.pitch + dy).clamp(-89.9, 89.9);
                 }
                 self.last_mouse = Some((x, y));
-                Action::Movement(true)
+                true
             }
-            winit::event::WindowEvent::MouseWheel { delta, .. } => {
-                if let winit::event::MouseScrollDelta::LineDelta(_, _scroll) = delta {}
-                Action::Movement(true)
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let MouseScrollDelta::LineDelta(_, _scroll) = delta {}
+                true
             }
-            _ => Action::Movement(false),
+            _ => false,
+            _ => false,
         }
     }
-
-    pub fn update(&mut self, camera: &mut super::Camera, dt: f64) {
-        let yaw_rad = self.yaw.to_radians();
-        let pitch_rad = self.pitch.to_radians();
-
-        let front = cgmath::Vector3 {
-            x: yaw_rad.sin() * pitch_rad.cos(),
-            y: pitch_rad.sin(),
-            z: -yaw_rad.cos() * pitch_rad.cos(),
-        }
-        .normalize();
-
-        let up = cgmath::Vector3::unit_y();
-        let right = front.cross(up).normalize();
-
-        let mut displacement = cgmath::Vector3::zero();
-        if self.forward {
-            displacement += front;
-        }
-        if self.back {
-            displacement -= front;
-        }
-        if self.right {
-            displacement += right;
-        }
-        if self.left {
-            displacement -= right;
-        }
-
-        if displacement.magnitude2() > 0.0 {
-            let disp = displacement.normalize() * self.speed * (dt as f32);
-            camera.eye += disp;
-        }
-
-        camera.target = camera.eye + front;
+    pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
+        self.zoom = -match delta {
+            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
+        };
     }
+
     pub fn rotation(&self) -> (f32, f32) {
         (self.yaw, self.pitch)
     }
-    pub fn compute_movement_and_rotation(
-        &self,
-        movement_mode: &MovementMode,
-    ) -> (cgmath::Vector3<f32>, (f32, f32)) {
-        let yaw_rad = self.yaw.to_radians();
-        let pitch_rad = self.pitch.to_radians();
 
-        let front = cgmath::Vector3 {
-            x: yaw_rad.sin() * pitch_rad.cos(),
-            y: pitch_rad.sin(),
-            z: -yaw_rad.cos() * pitch_rad.cos(),
-        }
-        .normalize();
-
-        let flat_front = cgmath::Vector3 {
-            x: yaw_rad.sin(),
-            y: 0.0,
-            z: -yaw_rad.cos(),
-        }
-        .normalize();
-
-        let up = cgmath::Vector3::unit_y();
-        let right = up.cross(front).normalize();
-
-        let mut move_vec = cgmath::Vector3::zero();
-        let use_front = match movement_mode {
-            MovementMode::Full3D => front,
-            MovementMode::FPSFlat => flat_front,
-        };
-        if self.forward {
-            move_vec += right;
-        }
-        if self.back {
-            move_vec -= right;
-        }
-        if self.right {
-            move_vec += use_front;
-        }
-        if self.left {
-            move_vec -= use_front;
-        }
-        (move_vec, (self.yaw, self.pitch))
+    pub fn inputs(&self) -> [bool; 5] {
+        [self.forward, self.right, self.back, self.left, self.jump]
     }
 
-    pub fn apply(
-        &self,
-        world: &mut World,
-        camera_entity: Entity,
-        movement_mode: &MovementMode,
-        speed: f32,
-    ) {
-        let (move_vec, (yaw, pitch)) = self.compute_movement_and_rotation(movement_mode);
-
-        world.insert_rotation(camera_entity, Rotation::from_euler(yaw, pitch, 0.0));
-
-        if let Some(rot) = world.rotations[camera_entity.0].as_ref() {
-            let world_move_vec = rot.quat() * move_vec;
-            world.insert_velocity(camera_entity, Velocity::from(world_move_vec * speed));
-        }
-    }
     pub fn text_region(&mut self, position: [f32; 2]) -> TextRegion {
         let text_area = TextRegion::new(
             format!("Yaw: {:.2} Pitch: {:.2}", self.yaw, self.pitch),

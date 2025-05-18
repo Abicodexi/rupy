@@ -1,9 +1,11 @@
 use {
-    super::{PipelineManager, RenderPass, VertexInstance, HDR},
+    super::{PipelineManager, RenderPass, VertexInstance, AABB, HDR},
     crate::{
-        camera, BindGroup, CacheKey, CacheStorage, EngineError, FrameBuffer, ModelManager,
-        Rotation, Scale, Texture, Transform, WgpuBuffer, World,
+        camera::{self, Frustum},
+        BindGroup, CacheKey, CacheStorage, EngineError, FrameBuffer, ModelManager, Rotation, Scale,
+        Texture, Transform, WgpuBuffer, World,
     },
+    glam::{Mat4, Vec3},
     wgpu::IndexFormat,
 };
 
@@ -95,6 +97,26 @@ impl RenderPass for Renderer3d {
         rpass.draw(0..3, 0..1);
         rpass.set_bind_group(2, &models.materials.storage_bind_group, &[]);
 
+        for instance in world.terrain.mesh_instances() {
+            let Some(mat) = instance.material.as_ref() else {
+                continue;
+            };
+
+            let Some(instance_buffer) = world.terrain.instance_buffer() else {
+                continue;
+            };
+
+            let mesh = &instance.mesh;
+            rpass.set_pipeline(&mat.pipeline);
+            rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
+
+            rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
+            rpass.set_vertex_buffer(1, instance_buffer.buffer.get().slice(..));
+
+            rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
+
+            rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+        }
         self.instances.draw(rpass, models);
     }
 }
@@ -129,44 +151,46 @@ impl InstanceBuffers {
     ) {
         let frustum = camera.frustum();
         self.batch.clear();
-        let rotation_zero = Rotation::zero();
-        let scale_one = Scale::one();
+
+        let default_scale = Scale::one();
+        let default_rotation = Rotation::zero();
+
         for idx in 0..world.entity_count() {
-            let Some(rend) = &world.renderables[idx] else {
+            let Some(renderable) = &world.renderables[idx] else {
                 continue;
             };
-            let Some(pos) = &world.positions[idx] else {
+            let Some(position) = &world.positions[idx] else {
                 continue;
             };
 
-            let rot = world.rotations[idx].as_ref().unwrap_or(&rotation_zero);
-            let scale = world.scales[idx].as_ref().unwrap_or(&scale_one);
-
-            let transform = world.transforms[idx]
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| Transform::from_components(pos, rot, scale));
-
-            if !rend.visible {
+            if !renderable.visible {
                 continue;
             }
 
-            let center = cgmath::Point3::new(
-                transform.model_matrix.w.x,
-                transform.model_matrix.w.y,
-                transform.model_matrix.w.z,
-            );
-            let radius = cgmath::InnerSpace::magnitude(scale.value);
+            let rotation = world.rotations[idx].as_ref().unwrap_or(&default_rotation);
+            let scale = world.scales[idx].as_ref().unwrap_or(&default_scale);
 
-            if !frustum.contains_sphere(center, radius) {
-                continue;
-            }
+            let transform = Transform::from_components(position, rotation, scale);
 
-            if let Some(model) = model_manager.models.get(&rend.model_key) {
+            if let Some(model) = model_manager.models.get(&renderable.model_key) {
+                let visible = frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix);
+                if !visible {
+                    continue;
+                }
                 if let Some(material) = &model.instance.material {
                     let data = transform.to_vertex_instance(material.idx);
-                    self.batch.entry(rend.model_key).or_default().push(data);
-                    model_manager.materials.update_storage(material);
+                    self.batch
+                        .entry(renderable.model_key)
+                        .or_default()
+                        .push(data);
+
+                    if !model_manager
+                        .materials
+                        .storage
+                        .contains_key(&material.asset.name)
+                    {
+                        model_manager.materials.update_storage(material);
+                    }
                 }
             }
         }
@@ -188,14 +212,14 @@ impl InstanceBuffers {
                     ),
                     count: instances.len(),
                     capacity: byte_size,
-                    dirty: true,
+                    dirty: false,
                 });
 
             buffer_data.count = instances.len();
             buffer_data.dirty = true;
         }
-        model_manager.materials.build_storage(&model_manager.device);
     }
+
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
         for (key, data) in &mut self.buffers {
             if let Some(instances) = self.batch.get(key) {
@@ -203,6 +227,7 @@ impl InstanceBuffers {
                     let byte_data = VertexInstance::bytes(instances);
                     data.buffer.write_data(queue, device, &byte_data, Some(0));
                     data.dirty = false;
+                    data.count = instances.len();
                 }
             }
         }
@@ -227,8 +252,31 @@ impl InstanceBuffers {
 
             rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
             rpass.set_vertex_buffer(1, data.buffer.get().slice(..));
+
             rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
             rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
         }
     }
+}
+
+pub fn frustum_cull_aabb(frustum: &Frustum, aabb: &AABB, model_matrix: &Mat4) -> bool {
+    let corners = [
+        Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z),
+        Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
+        Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
+        Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
+        Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z),
+        Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z),
+        Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z),
+        Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z),
+    ];
+    for plane in frustum.planes.iter() {
+        if corners
+            .iter()
+            .all(|corner| plane.distance(model_matrix.transform_point3(*corner)) < 0.0)
+        {
+            return false;
+        }
+    }
+    return true;
 }

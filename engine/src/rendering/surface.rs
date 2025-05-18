@@ -1,6 +1,6 @@
-/// Trait to extend wgpu::Surface with setup and usage methods.
+/// Extends wgpu::Surface with setup and usage methods.
 pub trait SurfaceExt {
-    /// Resizes the surface by updating the configuration and reconfiguring.
+    /// Resizes the surface.
     fn resize(
         &self,
         device: &wgpu::Device,

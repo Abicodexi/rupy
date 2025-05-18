@@ -1,54 +1,61 @@
-#[derive(Copy, Clone, Debug)]
-pub struct Frustum {
-    planes: [Plane; 6],
-}
+use glam::{Mat4, Vec3};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Plane {
-    normal: cgmath::Vector3<f32>,
+    pub normal: Vec3,
     d: f32,
 }
 
 impl Plane {
     pub fn from_components(a: f32, b: f32, c: f32, d: f32) -> Self {
-        let normal = cgmath::Vector3::new(a, b, c);
-        let length = cgmath::InnerSpace::magnitude(normal);
+        let normal = Vec3::new(a, b, c);
+        let length = normal.length();
         Self {
             normal: normal / length,
             d: d / length,
         }
     }
 
-    pub fn distance(&self, point: cgmath::Point3<f32>) -> f32 {
-        cgmath::InnerSpace::dot(self.normal, cgmath::Vector3::new(point.x, point.y, point.z))
-            + self.d
+    pub fn distance(&self, point: Vec3) -> f32 {
+        self.normal.dot(point) + self.d
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Frustum {
+    pub planes: [Plane; 6],
 }
 
 impl Frustum {
     pub fn new() -> Self {
-        Frustum::from_matrix(<cgmath::Matrix4<f32> as cgmath::SquareMatrix>::identity())
+        Frustum::from_matrix(Mat4::IDENTITY)
     }
-    pub fn from_matrix(m: cgmath::Matrix4<f32>) -> Self {
-        let m = cgmath::Matrix::transpose(&m);
+
+    pub fn from_matrix(m: Mat4) -> Self {
+        let m = m.to_cols_array_2d();
+        let row = |i| glam::Vec4::new(m[0][i], m[1][i], m[2][i], m[3][i]);
+        let r0 = row(0);
+        let r1 = row(1);
+        let r2 = row(2);
+        let r3 = row(3);
 
         Self {
             planes: [
-                Plane::from_components(m.w.x + m.x.x, m.w.y + m.x.y, m.w.z + m.x.z, m.w.w + m.x.w), // left
-                Plane::from_components(m.w.x - m.x.x, m.w.y - m.x.y, m.w.z - m.x.z, m.w.w - m.x.w), // right
-                Plane::from_components(m.w.x + m.y.x, m.w.y + m.y.y, m.w.z + m.y.z, m.w.w + m.y.w), // bottom
-                Plane::from_components(m.w.x - m.y.x, m.w.y - m.y.y, m.w.z - m.y.z, m.w.w - m.y.w), // top
-                Plane::from_components(m.w.x + m.z.x, m.w.y + m.z.y, m.w.z + m.z.z, m.w.w + m.z.w), // near
-                Plane::from_components(m.w.x - m.z.x, m.w.y - m.z.y, m.w.z - m.z.z, m.w.w - m.z.w), // far
+                Plane::from_components(r3.x + r0.x, r3.y + r0.y, r3.z + r0.z, r3.w + r0.w), // left
+                Plane::from_components(r3.x - r0.x, r3.y - r0.y, r3.z - r0.z, r3.w - r0.w), // right
+                Plane::from_components(r3.x + r1.x, r3.y + r1.y, r3.z + r1.z, r3.w + r1.w), // bottom
+                Plane::from_components(r3.x - r1.x, r3.y - r1.y, r3.z - r1.z, r3.w - r1.w), // top
+                Plane::from_components(r3.x + r2.x, r3.y + r2.y, r3.z + r2.z, r3.w + r2.w), // near
+                Plane::from_components(r3.x - r2.x, r3.y - r2.y, r3.z - r2.z, r3.w - r2.w), // far
             ],
         }
     }
 
-    pub fn contains_point(&self, point: cgmath::Point3<f32>) -> bool {
+    pub fn contains_point(&self, point: Vec3) -> bool {
         self.planes.iter().all(|plane| plane.distance(point) >= 0.0)
     }
 
-    pub fn contains_sphere(&self, center: cgmath::Point3<f32>, radius: f32) -> bool {
+    pub fn contains_sphere(&self, center: Vec3, radius: f32) -> bool {
         self.planes
             .iter()
             .all(|plane| plane.distance(center) >= -radius)

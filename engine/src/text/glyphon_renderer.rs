@@ -154,8 +154,6 @@ impl RenderText {
         ) {
             crate::log_error!("Error preparing text: {}", e);
         }
-
-        // buffers lives until the end of this function, so all TextArea refs are valid!
     }
     pub fn prepare(
         &mut self,

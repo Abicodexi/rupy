@@ -130,7 +130,6 @@ impl VertexInstance {
         ],
     };
     pub fn bytes(instances: &[VertexInstance]) -> Vec<u8> {
-        let count = instances.len() as u32;
         let mut data = Vec::with_capacity(instances.len() * std::mem::size_of::<VertexInstance>());
         for inst in instances {
             data.extend_from_slice(bytemuck::bytes_of(inst));

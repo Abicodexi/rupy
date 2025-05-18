@@ -1,8 +1,8 @@
 use engine::{
-    camera::{Action, Camera, CameraController, MovementMode, Projection},
-    log_error, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, Light, RenderPass,
-    RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, Scale, ScreenCorner, SurfaceExt,
-    TextRegion, Texture, Time, Vertex, VertexInstance, World,
+    camera::{Camera, CameraControls, Projection},
+    debug_scene, log_error, log_info, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, Light,
+    RenderPass, RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, ScreenCorner,
+    SurfaceExt, TextRegion, Texture, Time, Vertex, VertexInstance, World,
 };
 use std::sync::Arc;
 use winit::{
@@ -24,7 +24,7 @@ pub struct Rupy {
     camera: Camera,
     projection: Projection,
     light: Light,
-    controller: CameraController,
+    controls: CameraControls,
     last_shape_time: std::time::Instant,
     uniform_bind_group: wgpu::BindGroup,
     model_manager: engine::ModelManager,
@@ -41,12 +41,9 @@ impl Rupy {
         };
         let binding = crate::GPU::get();
         let (surface, surface_config, gpu) = {
-            let gpu = binding.read().map_err(|e| {
-                crate::EngineError::GpuError(format!(
-                    "Failed to acquire read lock: {}",
-                    e.to_string()
-                ))
-            })?;
+            let gpu = binding
+                .read()
+                .map_err(|e| crate::EngineError::GpuError(format!("{}", e.to_string())))?;
 
             let surface = gpu.instance().create_surface(win_clone)?;
             let mut surface_config = surface
@@ -79,151 +76,13 @@ impl Rupy {
             surface_config.format,
             &Some(depth_stencil.clone()),
         );
-        let mut camera = Camera::new(&device, MovementMode::Full3D, width as f32 / height as f32);
+
+        let projection = Projection::ThirdPerson;
+        let camera = Camera::new(&device, width as f32 / height as f32);
         let light = Light::new(&device)?;
-        let controller = CameraController::new(0.1, 0.005);
+        let controls = CameraControls::new(6.0, 0.1);
 
         let mut world = World::new(queue, device, &surface_config, Some(depth_stencil.clone()))?;
-
-        let size = 10;
-        let wall_height = 15;
-        let wall_y_offset = 0.0;
-
-        let cube_obj = "goblin.obj";
-
-        camera.add_model(
-            &mut model_manager,
-            &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-            vec![
-                BindGroupLayouts::uniform().clone(),
-                BindGroupLayouts::equirect_dst().clone(),
-                BindGroupLayouts::material_storage().clone(),
-                BindGroupLayouts::normal().clone(),
-            ],
-            &surface_config,
-        );
-
-        camera.spawn(&mut world, &mut model_manager, &surface_config);
-
-        if let Some(model_key) = World::load_object(
-            &mut model_manager,
-            cube_obj,
-            "v_normal.wgsl",
-            &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-            vec![
-                BindGroupLayouts::uniform().clone(),
-                BindGroupLayouts::equirect_dst().clone(),
-                BindGroupLayouts::material_storage().clone(),
-                BindGroupLayouts::normal().clone(),
-            ],
-            &surface_config,
-            wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::all(),
-            },
-            Some(depth_stencil.clone()),
-        ) {
-            let entity = world.spawn();
-            world.insert_scale(entity, Scale::new(10.0, 10.0, 10.0));
-            world.insert_position(entity, (5.0 as f32, 5.5, 3.0 as f32).into());
-            world.insert_renderable(entity, model_key.into());
-        }
-
-        if let Some(model_key) = World::load_object(
-            &mut model_manager,
-            "cube.obj",
-            "v_normal.wgsl",
-            &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-            vec![
-                BindGroupLayouts::uniform().clone(),
-                BindGroupLayouts::equirect_dst().clone(),
-                BindGroupLayouts::material_storage().clone(),
-                BindGroupLayouts::normal().clone(),
-            ],
-            &surface_config,
-            wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::all(),
-            },
-            Some(depth_stencil),
-        ) {
-            for x in 0..(size + 10) {
-                for z in 0..(size + 10) {
-                    let entity = world.spawn();
-
-                    world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                    world.insert_position(entity, ((14.0 - x as f32), 0.0, z as f32).into());
-                    world.insert_renderable(entity, model_key.into());
-                }
-            }
-
-            //  Ceiling at y = wall_height – 1
-            for x in 0..size {
-                for z in 0..size {
-                    let entity = world.spawn();
-
-                    world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                    world.insert_position(
-                        entity,
-                        (x as f32, (wall_height - 1) as f32, z as f32).into(),
-                    );
-                    world.insert_renderable(entity, model_key.into());
-                }
-            }
-
-            // Front & Back walls (vary x & y, fix z)
-
-            for x in 0..size {
-                for y in 0..wall_height {
-                    // front wall at z = 0
-                    let e1 = world.spawn();
-                    world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                    world.insert_position(e1, (x as f32, y as f32 + wall_y_offset, 0.0).into());
-                    world.insert_renderable(e1, model_key.into());
-                }
-            }
-
-            //  Left & Right walls (vary z & y, fix x)
-            for z in 0..size {
-                for y in 0..wall_height {
-                    // left wall at x = 0
-                    let e1 = world.spawn();
-                    world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                    world.insert_position(e1, (0.0, y as f32 + wall_y_offset, z as f32).into());
-                    world.insert_renderable(e1, model_key.into());
-
-                    // right wall at x = size - 1
-                    let e2 = world.spawn();
-                    world.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                    world.insert_position(
-                        e2,
-                        ((size - 1) as f32, y as f32 + wall_y_offset, z as f32).into(),
-                    );
-                    world.insert_renderable(e2, model_key.into());
-                }
-            }
-            world.update_transforms(time.delta_time as f64);
-        }
 
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
@@ -246,7 +105,21 @@ impl Rupy {
             RenderTargetKind::Hdr,
         );
         let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), light.buffer());
-        let projection = Projection::FirstPerson;
+
+        world.generate_terrain(
+            *camera.eye(),
+            1,
+            &surface_config,
+            &depth_stencil,
+            &mut model_manager,
+        );
+
+        debug_scene(
+            &mut model_manager,
+            &mut world,
+            &surface_config,
+            depth_stencil,
+        );
 
         Ok(Rupy {
             time,
@@ -259,34 +132,42 @@ impl Rupy {
             camera,
             projection,
             light,
-            controller,
+            controls,
             render_targets,
             last_shape_time: std::time::Instant::now(),
             uniform_bind_group,
             model_manager,
         })
     }
-
-    pub fn controller(&mut self, event: &winit::event::WindowEvent) -> Action {
-        self.controller.process(event)
+    pub fn shutdown(&self, el: &ActiveEventLoop) {
+        log_info!("Shutdown");
+        World::stop();
+        if !el.exiting() {
+            el.exit();
+        }
     }
-
+    pub fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
+        self.controls.process_event(event)
+    }
     pub fn window(&self) -> &Window {
         &self.window
     }
-    pub fn projection(&self) -> &Projection {
-        &self.projection
+    pub fn cam(&self) -> &Camera {
+        &self.camera
     }
-    pub fn set_projection(&mut self, projection: Projection) {
-        self.projection = projection;
+    pub fn cam_mut(&mut self) -> &mut Camera {
+        &mut self.camera
     }
     pub fn next_projection(&mut self) {
-        self.projection = match self.projection {
-            Projection::FirstPerson => Projection::ThirdPerson,
-            Projection::ThirdPerson => Projection::FirstPerson,
+        self.projection = if self.projection == Projection::FirstPerson {
+            Projection::ThirdPerson
+        } else {
+            Projection::FirstPerson
         };
     }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
+        self.camera
+            .resize(new_size.width as f32, new_size.height as f32);
         self.surface.resize(
             &self.model_manager.device,
             &mut self.surface_config,
@@ -376,10 +257,10 @@ impl Rupy {
     fn text_regions(&mut self) -> Vec<TextRegion> {
         let corner =
             ScreenCorner::TopLeft.pos(self.surface_config.width, self.surface_config.height, 5.0);
-        // let camera = self.camera.text_region(corner);
-        // let controller = self.controller.text_region(corner);
+        let camera = self.camera.text_region(corner);
+        let controller = self.controls.text_region(corner);
         let time = self.time.text_region(corner);
-        let regions = vec![time];
+        let regions = vec![time, camera, controller];
         regions
     }
 
@@ -393,25 +274,27 @@ impl Rupy {
 
     pub fn update(&mut self) {
         self.time.update();
-        let dt = self.time.delta_time;
-        if let Some(entity) = self.camera.entity() {
-            self.controller.apply(
-                &mut self.world,
-                entity,
-                self.camera.movement(),
-                self.controller.speed(),
-            );
-        };
+        let dt = self.time.delta_time as f32;
+        if self.model_manager.materials.storage_rebuild
+            || self.model_manager.materials.storage_count
+                < self.model_manager.materials.storage.len()
+        {
+            self.model_manager
+                .materials
+                .build_storage(&self.model_manager.device);
+        }
 
-        self.world.update(dt);
-        self.camera.update(&self.world, self.projection);
+        self.camera
+            .update(&mut self.world, &mut self.controls, &self.projection);
 
-        self.light.orbit(self.time.elapsed);
+        self.world.terrain.update_streaming(*self.camera.eye(), 2);
+
+        self.light.orbit(self.time.elapsed * 0.1);
         self.render3d
             .instances
             .update(&self.world, &self.camera, &mut self.model_manager);
 
-        if self.last_shape_time.elapsed().as_millis() > 5000 {
+        if self.last_shape_time.elapsed().as_millis() > 1000 {
             self.last_shape_time = std::time::Instant::now();
             let regions = self.text_regions();
             self.rendertxt.prepare_regions(
@@ -421,5 +304,29 @@ impl Rupy {
                 &self.surface_config,
             );
         }
+        if self.camera.entity().is_none() {
+            self.camera.add_model(
+                &mut self.model_manager,
+                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                vec![
+                    BindGroupLayouts::uniform().clone(),
+                    BindGroupLayouts::equirect_dst().clone(),
+                    BindGroupLayouts::material_storage().clone(),
+                    BindGroupLayouts::normal().clone(),
+                ],
+                &self.surface_config,
+            );
+            self.camera.spawn(
+                &mut self.world,
+                &mut self.model_manager,
+                &self.surface_config,
+            );
+        }
+        self.world.update(
+            &self.model_manager.queue,
+            &self.model_manager.device,
+            &self.camera,
+            dt,
+        );
     }
 }

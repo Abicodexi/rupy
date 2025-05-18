@@ -27,3 +27,12 @@ pub use aabb::*;
 
 pub mod render3d;
 pub use render3d::*;
+
+pub mod chunk;
+pub use chunk::*;
+
+pub mod debug;
+pub use debug::*;
+
+pub mod terrain;
+pub use terrain::*;
