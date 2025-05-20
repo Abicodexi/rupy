@@ -1,7 +1,7 @@
-use super::{Position, Renderable, Rotation, Scale, Transform, Velocity};
+use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
-    camera::Camera, log_debug, log_error, CacheKey, EngineError, Entity, EquirectProjection,
-    Medium, ModelManager, Terrain,
+    camera::Camera, log_error, CacheKey, EngineError, Entity, Medium, ModelManager, Terrain,
+    WorldProjection,
 };
 use glam::Vec3;
 use pollster::FutureExt;
@@ -24,21 +24,14 @@ fn _set_batch_dirty(val: bool) {
     BATCH_DIRTY.store(val, std::sync::atomic::Ordering::Relaxed)
 }
 
-fn is_grounded(pos: &Position, vel: &Velocity) -> bool {
-    (pos.0.y - GROUND_Y).abs() < 0.001 && vel.0.y.abs() < 0.01
-}
-
-pub const GROUND_Y: f32 = 2.0;
-
 #[derive(Debug)]
 pub struct World {
-    pub positions: Vec<Option<Position>>,
-    pub velocities: Vec<Option<Velocity>>,
+    pub physics: Physics,
     pub renderables: Vec<Option<Renderable>>,
     pub rotations: Vec<Option<Rotation>>,
     pub scales: Vec<Option<Scale>>,
     pub transforms: Vec<Option<Transform>>,
-    projection: EquirectProjection,
+    projection: WorldProjection,
     entity_count: usize,
     pub terrain: Terrain,
 }
@@ -57,7 +50,7 @@ impl World {
         config: &wgpu::SurfaceConfiguration,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Result<Self, EngineError> {
-        let projection = EquirectProjection::new(
+        let projection = WorldProjection::new(
             &queue,
             &device,
             &config,
@@ -68,8 +61,7 @@ impl World {
         )?;
         let terrain = Terrain::new(Medium::Ground);
         Ok(Self {
-            positions: Vec::new(),
-            velocities: Vec::new(),
+            physics: Physics::new(),
             renderables: Vec::new(),
             rotations: Vec::new(),
             scales: Vec::new(),
@@ -82,10 +74,10 @@ impl World {
     pub fn entity_count(&self) -> usize {
         self.entity_count
     }
-    pub fn set_projection(&mut self, projection: EquirectProjection) {
+    pub fn set_projection(&mut self, projection: WorldProjection) {
         self.projection = projection;
     }
-    pub fn projection(&self) -> &EquirectProjection {
+    pub fn projection(&self) -> &WorldProjection {
         &self.projection
     }
 
@@ -144,8 +136,8 @@ impl World {
         Entity(id)
     }
     fn resize(&mut self, size: usize) {
-        self.positions.resize(size, None);
-        self.velocities.resize(size, None);
+        self.physics.positions.resize(size, None);
+        self.physics.velocities.resize(size, None);
         self.renderables.resize(size, None);
         self.rotations.resize(size, None);
         self.scales.resize(size, None);
@@ -153,8 +145,8 @@ impl World {
     }
     fn ensure_capacity(&mut self, idx: usize) {
         let needed = idx + 1;
-        if self.positions.len() < needed
-            || self.velocities.len() < needed
+        if self.physics.positions.len() < needed
+            || self.physics.velocities.len() < needed
             || self.rotations.len() < needed
             || self.renderables.len() < needed
             || self.scales.len() < needed
@@ -164,13 +156,10 @@ impl World {
         }
     }
     pub fn insert_position(&mut self, entity: Entity, pos: Position) {
-        self.ensure_capacity(entity.0);
-        self.positions[entity.0] = Some(pos);
+        self.physics.insert_position(entity, pos);
     }
-
     pub fn insert_velocity(&mut self, entity: Entity, vel: Velocity) {
-        self.ensure_capacity(entity.0);
-        self.velocities[entity.0] = Some(vel);
+        self.physics.insert_velocity(entity, vel);
     }
     pub fn insert_scale(&mut self, entity: Entity, scale: Scale) {
         self.ensure_capacity(entity.0);
@@ -194,63 +183,16 @@ impl World {
     pub fn get_transform(&self, entity: Entity) -> Option<&Transform> {
         self.transforms.get(entity.0)?.as_ref()
     }
-
     pub fn update(&mut self, queue: &wgpu::Queue, device: &wgpu::Device, camera: &Camera, dt: f32) {
-        self.terrain.update_instance_buffer(queue, device);
-        self.update_physics(camera, dt);
+        self.physics.update(camera, dt, &self.terrain);
         self.update_transforms();
+        self.terrain.update_instance_buffer(queue, device);
     }
-    pub fn update_physics(&mut self, camera: &Camera, dt: f32) {
-        let medium = {
-            if camera.free_look() {
-                Medium::Vacuum
-            } else {
-                self.terrain.default_medium()
-            }
-        };
 
-        let medium_props = medium.properties();
-
-        let drag_factor = medium_props.drag.powf(dt);
-        let ground_y = GROUND_Y;
-        let max_fall_speed = -50.0;
-        for (pos_opt, vel_opt) in self.positions.iter_mut().zip(&mut self.velocities) {
-            if let (Some(pos), Some(vel)) = (pos_opt, vel_opt) {
-                vel.0.x *= drag_factor;
-                vel.0.z *= drag_factor;
-                if vel.0.x.abs() < 0.01 {
-                    vel.0.x = 0.0;
-                }
-                if vel.0.z.abs() < 0.01 {
-                    vel.0.z = 0.0;
-                }
-                // Apply gravity
-                vel.0.y += medium_props.gravity.y * dt;
-                vel.0.y = vel.0.y.max(max_fall_speed);
-
-                // Apply drag
-                vel.0.x *= drag_factor;
-                vel.0.z *= drag_factor;
-
-                // Update position
-                pos.0 += vel.0 * dt;
-
-                // Ground collision check
-                if pos.0.y <= ground_y {
-                    pos.0.y = ground_y;
-
-                    // Snap + consume vertical velocity
-                    if vel.0.y < 0.0 {
-                        vel.0.y = 0.0;
-                    }
-                }
-            }
-        }
-    }
     pub fn update_transforms(&mut self) {
-        for i in 0..self.renderables.len() {
+        for i in 0..self.entity_count {
             if let (Some(pos), Some(rot), Some(scale)) = (
-                self.positions[i].as_ref(),
+                self.physics.positions[i].as_ref(),
                 self.rotations[i].as_ref(),
                 self.scales[i].as_ref(),
             ) {
@@ -265,17 +207,13 @@ impl World {
         radius: i32,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &wgpu::DepthStencilState,
-        model_manager: &mut ModelManager,
+        model_manager: &mut crate::ModelManager,
     ) {
-        let terrain_entity = self.spawn();
+        let entity = self.spawn();
+        let component =
+            self.terrain
+                .chunks(center, radius, surface_config, depth_stencil, model_manager);
 
-        let renderable = self.terrain.generate_initial_chunks(
-            center,
-            radius,
-            surface_config,
-            depth_stencil,
-            model_manager,
-        );
-        self.insert_renderable(terrain_entity, renderable);
+        self.insert_renderable(entity, component);
     }
 }

@@ -1,3 +1,5 @@
+use crate::RenderBindGroupLayouts;
+
 pub struct HDR {
     pipeline: wgpu::RenderPipeline,
 }
@@ -9,7 +11,7 @@ impl HDR {
     ) -> wgpu::RenderPipeline {
         let layout = &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hdr pipeline layout"),
-            bind_group_layouts: &[&crate::BindGroupLayouts::texture()],
+            bind_group_layouts: &[&RenderBindGroupLayouts::texture()],
             push_constant_ranges: &[],
         });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

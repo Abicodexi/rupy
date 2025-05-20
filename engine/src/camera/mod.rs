@@ -15,8 +15,8 @@ pub mod projection;
 pub use projection::*;
 
 use crate::{
-    log_debug, log_warning, BindGroupLayouts, Entity, ModelManager, Position, Renderable, Rotation,
-    Scale, TextRegion, Velocity, Vertex, VertexInstance, WgpuBuffer, World,
+    log_debug, log_warning, Entity, ModelManager, Position, RenderBindGroupLayouts, Renderable,
+    Rotation, Scale, TextRegion, Velocity, Vertex, VertexInstance, WgpuBuffer, World, GROUND_Y,
 };
 
 use glam::{FloatExt, Mat4, Quat, Vec3};
@@ -130,7 +130,7 @@ impl Camera {
         &self.bind_group
     }
 
-    pub fn add_model(
+    fn load_model(
         &mut self,
         model_manager: &mut ModelManager,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -144,22 +144,22 @@ impl Camera {
             surface_configuration,
         );
     }
-    pub fn spawn(
+
+    pub fn world_spawn(
         &mut self,
         world: &mut World,
         model_manager: &mut ModelManager,
         surface_configuration: &wgpu::SurfaceConfiguration,
     ) {
         if self.model.model_key().is_none() && !self.model.model().is_empty() {
-            log_warning!("Attempted to spawn camera without a model");
-            self.model.load_model(
+            self.load_model(
                 model_manager,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                 vec![
-                    BindGroupLayouts::uniform().clone(),
-                    BindGroupLayouts::equirect_dst().clone(),
-                    BindGroupLayouts::material_storage().clone(),
-                    BindGroupLayouts::normal().clone(),
+                    RenderBindGroupLayouts::uniform().clone(),
+                    RenderBindGroupLayouts::equirect_dst().clone(),
+                    RenderBindGroupLayouts::material_storage().clone(),
+                    RenderBindGroupLayouts::normal().clone(),
                 ],
                 surface_configuration,
             );
@@ -175,8 +175,8 @@ impl Camera {
                 new_ent
             };
 
-            world.insert_scale(entity, Scale::new(1.0, 1.0, 1.0));
-            world.insert_position(entity, Position::new(0.0, 0.0, 0.0));
+            world.insert_scale(entity, Scale::one());
+            world.insert_position(entity, Position::new(0.0, GROUND_Y + 1.0, 0.0));
             world.insert_renderable(entity, renderable);
             log_debug!("Spawned camera model: {}", self.model.model());
         } else {
@@ -184,12 +184,19 @@ impl Camera {
             return;
         }
     }
-    pub fn update(&mut self, world: &mut World, cam: &mut CameraControls, projection: &Projection) {
+    pub fn update(
+        &mut self,
+        world: &mut World,
+        cam: &mut CameraControls,
+        projection: &Projection,
+        bossman: &Entity,
+    ) {
         let Some(model_entity) = self.model.entity() else {
             return;
         };
 
         let player_pos = world
+            .physics
             .positions
             .get(model_entity.0)
             .and_then(|p| *p)
@@ -197,6 +204,7 @@ impl Camera {
             .0;
 
         let prev_vel = world
+            .physics
             .velocities
             .get(model_entity.0)
             .and_then(|v| *v)
@@ -213,9 +221,16 @@ impl Camera {
                 self.eye = player_pos + Vec3::Y * 1.6;
                 self.target = self.eye + forward;
                 self.up = Vec3::Y;
+                world.insert_rotation(
+                    model_entity,
+                    Rotation::from(glam::Quat::from_rotation_arc(
+                        Vec3::Z,
+                        cam_rot * -Vec3::Z.normalize(),
+                    )),
+                );
             }
             Projection::ThirdPerson => {
-                let cam_rot = Rotation::from(Quat::from_rotation_y(cam.yaw())).quat();
+                let cam_rot = Rotation::from_euler(cam.yaw().to_radians(), 0.0, 0.0).quat();
 
                 let cam_distance = self.model.distance();
                 let cam_height = self.model.height();
@@ -238,6 +253,7 @@ impl Camera {
 
         let mut forward = self.target - self.eye;
         forward.y = 0.0;
+
         forward = forward.normalize_or_zero();
 
         let right = forward.cross(Vec3::Y).normalize_or_zero();

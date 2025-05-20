@@ -90,34 +90,41 @@ impl RenderPass for Renderer3d {
         world: &World,
         uniform_bind_group: &wgpu::BindGroup,
     ) {
-        let projection = world.projection();
         rpass.set_bind_group(0, uniform_bind_group, &[]);
+        let projection = world.projection();
         rpass.set_bind_group(1, &projection.dst_bind_group, &[]);
-        rpass.set_pipeline(&projection.dst_pipeline);
-        rpass.draw(0..3, 0..1);
         rpass.set_bind_group(2, &models.materials.storage_bind_group, &[]);
+        {
+            rpass.set_pipeline(&projection.dst_pipeline);
 
-        for instance in world.terrain.mesh_instances() {
-            let Some(mat) = instance.material.as_ref() else {
-                continue;
-            };
-
-            let Some(instance_buffer) = world.terrain.instance_buffer() else {
-                continue;
-            };
-
-            let mesh = &instance.mesh;
-            rpass.set_pipeline(&mat.pipeline);
-            rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
-
-            rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
-            rpass.set_vertex_buffer(1, instance_buffer.buffer.get().slice(..));
-
-            rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
-
-            rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+            rpass.draw(0..3, 0..1);
         }
-        self.instances.draw(rpass, models);
+
+        {
+            self.instances.draw(rpass, models);
+        }
+        {
+            for instance in world.terrain.mesh_instances() {
+                let Some(mat) = instance.material.as_ref() else {
+                    continue;
+                };
+
+                let Some(instance_buffer) = world.terrain.instance_buffer() else {
+                    continue;
+                };
+
+                let mesh = &instance.mesh;
+                rpass.set_pipeline(&mat.pipeline);
+                rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
+
+                rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
+                rpass.set_vertex_buffer(1, instance_buffer.buffer.get().slice(..));
+
+                rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
+
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+            }
+        }
     }
 }
 
@@ -159,7 +166,7 @@ impl InstanceBuffers {
             let Some(renderable) = &world.renderables[idx] else {
                 continue;
             };
-            let Some(position) = &world.positions[idx] else {
+            let Some(position) = &world.physics.positions[idx] else {
                 continue;
             };
 
@@ -173,8 +180,7 @@ impl InstanceBuffers {
             let transform = Transform::from_components(position, rotation, scale);
 
             if let Some(model) = model_manager.models.get(&renderable.model_key) {
-                let visible = frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix);
-                if !visible {
+                if !frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix) {
                     continue;
                 }
                 if let Some(material) = &model.instance.material {
@@ -183,14 +189,6 @@ impl InstanceBuffers {
                         .entry(renderable.model_key)
                         .or_default()
                         .push(data);
-
-                    if !model_manager
-                        .materials
-                        .storage
-                        .contains_key(&material.asset.name)
-                    {
-                        model_manager.materials.update_storage(material);
-                    }
                 }
             }
         }

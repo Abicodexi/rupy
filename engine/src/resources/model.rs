@@ -22,7 +22,7 @@ impl ModelAsset {
     ) -> Result<(super::MeshInstance, AABB), EngineError> {
         let (mesh, mat) = &self.asset;
         let material = if let Some(m) = mat {
-            let idx = materials.materials.len() as u32;
+            let idx = materials.storage_count as u32;
             Some(Arc::new(Material::from_asset(
                 queue,
                 device,
@@ -37,6 +37,11 @@ impl ModelAsset {
         } else {
             None
         };
+
+        if let Some(mat) = &material {
+            materials.update_storage(mat.as_ref());
+            materials.build_storage(device);
+        }
         let aabb = AABB::from_vertices(&mesh.vertices);
         let mesh = Mesh::from_asset(queue, device, mesh.clone(), &self.name);
         let instance = MeshInstance {

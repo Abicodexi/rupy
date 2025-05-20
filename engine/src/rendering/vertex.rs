@@ -63,7 +63,7 @@ pub struct VertexInstance {
     pub tangent: [f32; 3],     // 128–139| @location(13)
     pub _pad4: f32,            // 140–143
     pub material_id: u32,      // 144–147| @location(14)
-    pub _pad5: [f32; 3],       // 148–159 (pad to 16 bytes)
+    pub _pad5: [f32; 3],       // 148–159
 }
 impl VertexInstance {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {

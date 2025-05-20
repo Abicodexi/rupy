@@ -35,7 +35,7 @@ fn create_layout(
 }
 
 /// Holds all bind-group layouts.
-pub struct BindGroupLayouts {
+pub struct RenderBindGroupLayouts {
     pub device: std::sync::Arc<wgpu::Device>,
     pub diffuse: wgpu::BindGroupLayout,
     pub light: wgpu::BindGroupLayout,
@@ -48,15 +48,15 @@ pub struct BindGroupLayouts {
     pub debug: wgpu::BindGroupLayout,
 }
 
-impl BindGroupLayouts {
+impl RenderBindGroupLayouts {
     /// Initialize and return the singleton.
     pub fn get() -> &'static Self {
-        static LAYOUTS: once_cell::sync::OnceCell<BindGroupLayouts> =
+        static LAYOUTS: once_cell::sync::OnceCell<RenderBindGroupLayouts> =
             once_cell::sync::OnceCell::new();
         LAYOUTS.get_or_init(|| {
             let binding = crate::GPU::get();
             let gpu = binding.read().expect("GPU resources not initialized");
-            BindGroupLayouts::new(gpu.device().clone())
+            RenderBindGroupLayouts::new(gpu.device().clone())
         })
     }
     pub fn material_storage() -> &'static wgpu::BindGroupLayout {
@@ -237,7 +237,7 @@ impl BindGroupLayouts {
         }];
         let debug = create_layout(&device, Some("debug bind grop layout"), &debug_defs);
 
-        BindGroupLayouts {
+        RenderBindGroupLayouts {
             device: device.clone(),
             diffuse,
             light,
@@ -258,7 +258,7 @@ impl BindGroup {
     pub fn equirect_dst(device: &wgpu::Device, dst: &super::Texture) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} projection destination bind group", dst.label)),
-            layout: BindGroupLayouts::equirect_dst(),
+            layout: RenderBindGroupLayouts::equirect_dst(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -277,7 +277,7 @@ impl BindGroup {
         dst: &super::Texture,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: crate::BindGroupLayouts::equirect_src(),
+            layout: crate::RenderBindGroupLayouts::equirect_src(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -301,7 +301,7 @@ impl BindGroup {
     pub fn camera(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera uniform bind group"),
-            layout: &crate::BindGroupLayouts::camera(),
+            layout: &crate::RenderBindGroupLayouts::camera(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.get().as_entire_binding(),
@@ -311,7 +311,7 @@ impl BindGroup {
     pub fn light(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("light uniform bind group"),
-            layout: &crate::BindGroupLayouts::camera(),
+            layout: &crate::RenderBindGroupLayouts::camera(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.get().as_entire_binding(),
@@ -324,7 +324,7 @@ impl BindGroup {
         light_uniform_buffer: &crate::WgpuBuffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &crate::BindGroupLayouts::uniform(),
+            layout: &crate::RenderBindGroupLayouts::uniform(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -341,7 +341,7 @@ impl BindGroup {
     pub fn texture(device: &wgpu::Device, diffuse: &super::Texture) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group", diffuse.label)),
-            layout: BindGroupLayouts::texture(),
+            layout: RenderBindGroupLayouts::texture(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -363,7 +363,7 @@ impl BindGroup {
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group layout", label)),
-            layout: BindGroupLayouts::normal(),
+            layout: RenderBindGroupLayouts::normal(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -387,7 +387,7 @@ impl BindGroup {
     pub fn hdr(device: &wgpu::Device, hdr: &super::Texture, label: &str) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group layout", label)),
-            layout: BindGroupLayouts::texture(),
+            layout: RenderBindGroupLayouts::texture(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -407,7 +407,7 @@ impl BindGroup {
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
-            layout: crate::BindGroupLayouts::material_storage(),
+            layout: crate::RenderBindGroupLayouts::material_storage(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: material_buffer.get().as_entire_binding(),

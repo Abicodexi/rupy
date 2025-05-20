@@ -108,6 +108,9 @@ impl Scale {
     pub fn one() -> Self {
         Scale(Vec3::ONE)
     }
+    pub fn zero() -> Self {
+        Scale(Vec3::ZERO)
+    }
 }
 impl From<Vec3> for Scale {
     fn from(value: Vec3) -> Self {

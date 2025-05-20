@@ -20,7 +20,7 @@ impl CameraUniform {
             _pad: 0.0,
         }
     }
-    pub fn view_pos(&self) -> [f32; 3] {
+    pub fn pos(&self) -> [f32; 3] {
         self.view_pos
     }
     pub fn update(

@@ -1,9 +1,10 @@
 use engine::{
     camera::{Camera, CameraControls, Projection},
-    debug_scene, log_error, log_info, BindGroup, BindGroupLayouts, EngineError, FrameBuffer, Light,
-    RenderPass, RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, ScreenCorner,
-    SurfaceExt, TextRegion, Texture, Time, Vertex, VertexInstance, World,
+    debug_scene, log_error, log_info, BindGroup, EngineError, Entity, FrameBuffer, Light,
+    RenderPass, RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, Rotation,
+    ScreenCorner, SurfaceExt, TextRegion, Texture, Time, Velocity, World,
 };
+use glam::Vec3;
 use std::sync::Arc;
 use winit::{
     dpi::PhysicalSize,
@@ -28,6 +29,7 @@ pub struct Rupy {
     last_shape_time: std::time::Instant,
     uniform_bind_group: wgpu::BindGroup,
     model_manager: engine::ModelManager,
+    bossman: Entity,
 }
 
 impl Rupy {
@@ -78,9 +80,9 @@ impl Rupy {
         );
 
         let projection = Projection::ThirdPerson;
-        let camera = Camera::new(&device, width as f32 / height as f32);
+        let mut camera = Camera::new(&device, width as f32 / height as f32);
         let light = Light::new(&device)?;
-        let controls = CameraControls::new(6.0, 0.1);
+        let controls = CameraControls::new(5.0, 0.1);
 
         let mut world = World::new(queue, device, &surface_config, Some(depth_stencil.clone()))?;
 
@@ -104,7 +106,16 @@ impl Rupy {
             ),
             RenderTargetKind::Hdr,
         );
+
         let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), light.buffer());
+
+        let bossman = debug_scene(
+            &mut model_manager,
+            &mut world,
+            &surface_config,
+            depth_stencil.clone(),
+        );
+        camera.world_spawn(&mut world, &mut model_manager, &surface_config);
 
         world.generate_terrain(
             *camera.eye(),
@@ -113,14 +124,7 @@ impl Rupy {
             &depth_stencil,
             &mut model_manager,
         );
-
-        debug_scene(
-            &mut model_manager,
-            &mut world,
-            &surface_config,
-            depth_stencil,
-        );
-
+        model_manager.materials.build_storage(device);
         Ok(Rupy {
             time,
             window,
@@ -137,6 +141,7 @@ impl Rupy {
             last_shape_time: std::time::Instant::now(),
             uniform_bind_group,
             model_manager,
+            bossman,
         })
     }
     pub fn shutdown(&self, el: &ActiveEventLoop) {
@@ -275,24 +280,44 @@ impl Rupy {
     pub fn update(&mut self) {
         self.time.update();
         let dt = self.time.delta_time as f32;
-        if self.model_manager.materials.storage_rebuild
-            || self.model_manager.materials.storage_count
-                < self.model_manager.materials.storage.len()
-        {
-            self.model_manager
-                .materials
-                .build_storage(&self.model_manager.device);
+
+        self.camera.update(
+            &mut self.world,
+            &mut self.controls,
+            &self.projection,
+            &self.bossman,
+        );
+
+        if let Some(entity) = self.camera.entity() {
+            if let (Some(cam_pos), Some(boss_pos)) = (
+                self.world.physics.positions[entity.0],
+                self.world.physics.positions[self.bossman.0],
+            ) {
+                let direction = cam_pos.0 - boss_pos.0;
+                let mut direction_normalized = direction.normalize_or_zero();
+                let speed = self.controls.speed() - (self.controls.speed() / 2.0);
+                let velocity = direction_normalized * speed;
+                direction_normalized.y = 0.0;
+                let rot_to_camera = glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
+                self.world
+                    .insert_rotation(self.bossman, Rotation::from(rot_to_camera));
+                self.world.insert_velocity(self.bossman, Velocity(velocity));
+            }
         }
 
-        self.camera
-            .update(&mut self.world, &mut self.controls, &self.projection);
-
-        self.world.terrain.update_streaming(*self.camera.eye(), 2);
+        self.world.terrain.update_streaming(*self.camera.eye(), 4);
 
         self.light.orbit(self.time.elapsed * 0.1);
         self.render3d
             .instances
             .update(&self.world, &self.camera, &mut self.model_manager);
+
+        self.world.update(
+            &self.model_manager.queue,
+            &self.model_manager.device,
+            &self.camera,
+            dt,
+        );
 
         if self.last_shape_time.elapsed().as_millis() > 1000 {
             self.last_shape_time = std::time::Instant::now();
@@ -304,29 +329,5 @@ impl Rupy {
                 &self.surface_config,
             );
         }
-        if self.camera.entity().is_none() {
-            self.camera.add_model(
-                &mut self.model_manager,
-                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-                vec![
-                    BindGroupLayouts::uniform().clone(),
-                    BindGroupLayouts::equirect_dst().clone(),
-                    BindGroupLayouts::material_storage().clone(),
-                    BindGroupLayouts::normal().clone(),
-                ],
-                &self.surface_config,
-            );
-            self.camera.spawn(
-                &mut self.world,
-                &mut self.model_manager,
-                &self.surface_config,
-            );
-        }
-        self.world.update(
-            &self.model_manager.queue,
-            &self.model_manager.device,
-            &self.camera,
-            dt,
-        );
     }
 }

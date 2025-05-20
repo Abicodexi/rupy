@@ -21,7 +21,7 @@ impl CameraModel {
             entity: None,
             distance: 1.0,
             height: 2.0,
-            target_height: 0.0,
+            target_height: 2.0,
             shoulder_offset: 0.0,
         }
     }

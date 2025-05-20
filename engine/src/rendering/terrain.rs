@@ -2,13 +2,11 @@ use glam::Vec3;
 
 use crate::{
     chunk::Chunk, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance, Position,
-    Renderable, Rotation, Scale, Transform, WgpuBuffer,
+    RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
 };
 use std::{collections::HashMap, sync::Arc};
 
 use super::{InstanceBufferData, Vertex, VertexInstance, CHUNK_SIZE};
-
-pub const GRAVITY: f32 = -9.81;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Medium {
@@ -28,11 +26,11 @@ impl Medium {
         match self {
             Medium::Air => MediumProperties {
                 gravity: Vec3::new(0.0, GRAVITY, 0.0),
-                drag: 0.05,
+                drag: 0.1,
             },
             Medium::Water => MediumProperties {
                 gravity: Vec3::new(0.0, GRAVITY + 7.81, 0.0),
-                drag: 0.1,
+                drag: 0.2,
             },
             Medium::Ground => MediumProperties {
                 gravity: Vec3::new(0.0, GRAVITY, 0.0),
@@ -54,7 +52,7 @@ impl Medium {
 }
 #[derive(Debug)]
 pub struct Terrain {
-    chunks: HashMap<(i32, i32, i32), Chunk>,
+    chunk_stream: HashMap<(i32, i32, i32), Chunk>,
     default_medium: Medium,
     mesh_instances: Vec<MeshInstance>,
     instance_buffer: Option<InstanceBufferData>,
@@ -64,7 +62,7 @@ pub struct Terrain {
 impl Terrain {
     pub fn new(default_medium: Medium) -> Self {
         Self {
-            chunks: HashMap::new(),
+            chunk_stream: HashMap::new(),
             default_medium,
             mesh_instances: Vec::new(),
             instance_buffer: None,
@@ -72,30 +70,16 @@ impl Terrain {
         }
     }
 
-    pub fn generate_flat_ground(&mut self, zfar: f32) {
-        let chunk_radius = ((zfar / CHUNK_SIZE as f32).ceil() as i32).max(1);
-
-        for cx in -chunk_radius..=chunk_radius {
-            for cz in -chunk_radius..=chunk_radius {
-                let pos = (cx, 0, cz);
-                let chunk = Chunk::flat(pos);
-                self.chunks.insert(pos, chunk);
-            }
-        }
-
-        self.update_meshes();
+    pub fn insert_chunk_stream(&mut self, chunk: Chunk) {
+        self.chunk_stream.insert(chunk.pos, chunk);
     }
 
-    pub fn insert_chunk(&mut self, chunk: Chunk) {
-        self.chunks.insert(chunk.pos, chunk);
+    pub fn get_chunk_stream(&self, pos: (i32, i32, i32)) -> Option<&Chunk> {
+        self.chunk_stream.get(&pos)
     }
 
-    pub fn get_chunk(&self, pos: (i32, i32, i32)) -> Option<&Chunk> {
-        self.chunks.get(&pos)
-    }
-
-    pub fn get_chunk_mut(&mut self, pos: (i32, i32, i32)) -> Option<&mut Chunk> {
-        self.chunks.get_mut(&pos)
+    pub fn get_chunk_stream_mut(&mut self, pos: (i32, i32, i32)) -> Option<&mut Chunk> {
+        self.chunk_stream.get_mut(&pos)
     }
 
     pub fn default_medium(&self) -> Medium {
@@ -109,7 +93,7 @@ impl Terrain {
             (world_pos.z / CHUNK_SIZE as f32).floor() as i32,
         );
 
-        if let Some(chunk) = self.chunks.get(&chunk_pos) {
+        if let Some(chunk) = self.chunk_stream.get(&chunk_pos) {
             let lx = (world_pos.x as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
             let ly = (world_pos.y as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
             let lz = (world_pos.z as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
@@ -128,8 +112,8 @@ impl Terrain {
         self.medium_at(world_pos).properties()
     }
 
-    pub fn update_meshes(&mut self) {
-        for chunk in self.chunks.values_mut() {
+    pub fn stream_build_meshes(&mut self) {
+        for chunk in self.chunk_stream.values_mut() {
             if chunk.dirty {
                 chunk.mesh = Some(chunk.build_chunk_mesh());
                 chunk.dirty = false;
@@ -142,7 +126,7 @@ impl Terrain {
     pub fn update_instance_buffer(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
         let mut instances = Vec::new();
 
-        for ((cx, cy, cz), _) in &self.chunks {
+        for ((cx, cy, cz), _chunk) in &self.chunk_stream {
             let transform = Transform::from_components(
                 &Position::new(*cx as f32, *cy as f32, *cz as f32),
                 &Rotation::zero(),
@@ -173,35 +157,39 @@ impl Terrain {
     }
 
     pub fn all_meshes(&self) -> impl Iterator<Item = &MeshAsset> {
-        self.chunks.values().filter_map(|c| c.mesh.as_ref())
+        self.chunk_stream.values().filter_map(|c| c.mesh.as_ref())
     }
 
-    pub fn update_streaming(&mut self, camera_pos: Vec3, view_distance: i32) {
-        let new_center = ((camera_pos.x).floor() as i32, (camera_pos.z).floor() as i32);
-
-        if self.last_stream_center == Some(new_center) {
-            return;
-        }
-        self.last_stream_center = Some(new_center);
-
-        let mut needed_chunks = std::collections::HashSet::new();
-
-        for dx in -view_distance..=view_distance {
-            for dz in -view_distance..=view_distance {
-                let chunk_pos = (new_center.0 + dx, 0, new_center.1 + dz);
-                needed_chunks.insert(chunk_pos);
-                if !self.chunks.contains_key(&chunk_pos) {
-                    let chunk = Chunk::flat(chunk_pos);
-                    self.insert_chunk(chunk);
+    fn stream_build_chunks(&mut self, center: (i32, i32), distance: i32) {
+        let mut needed: std::collections::HashSet<(i32, i32, i32)> =
+            std::collections::HashSet::new();
+        for dx in -distance..=distance {
+            for dz in -distance..=distance {
+                let chunk_pos = (center.0 + dx, 0, center.1 + dz);
+                if needed.insert(chunk_pos) && !self.chunk_stream.contains_key(&chunk_pos) {
+                    self.insert_chunk_stream(Chunk::flat(chunk_pos));
                 }
             }
         }
-
-        self.chunks.retain(|pos, _| needed_chunks.contains(pos));
-        self.update_meshes();
+        self.chunk_stream.retain(|pos, _| needed.contains(pos));
+        self.last_stream_center = Some(center);
     }
 
-    pub fn generate_initial_chunks(
+    pub fn update_streaming(&mut self, camera_pos: Vec3, view_distance: i32) {
+        let center = ((camera_pos.x).floor() as i32, (camera_pos.z).floor() as i32);
+
+        if self.last_stream_center == Some(center) {
+            return;
+        }
+        let old_center = self.last_stream_center.unwrap_or(center);
+        if (old_center.0 + center.0).abs() >= view_distance
+            || (old_center.1 + center.1).abs() >= view_distance
+        {
+            self.stream_build_chunks(center, view_distance);
+            self.stream_build_meshes();
+        }
+    }
+    pub fn chunks(
         &mut self,
         center: Vec3,
         radius: i32,
@@ -240,10 +228,10 @@ impl Terrain {
                 write_mask: wgpu::ColorWrites::all(),
             },
             bind_group_layouts: vec![
-                crate::BindGroupLayouts::uniform().clone(),
-                crate::BindGroupLayouts::equirect_dst().clone(),
-                crate::BindGroupLayouts::material_storage().clone(),
-                crate::BindGroupLayouts::normal().clone(),
+                RenderBindGroupLayouts::uniform().clone(),
+                RenderBindGroupLayouts::equirect_dst().clone(),
+                RenderBindGroupLayouts::material_storage().clone(),
+                RenderBindGroupLayouts::normal().clone(),
             ],
         };
 
@@ -266,7 +254,7 @@ impl Terrain {
                 asset: mat_asset,
                 bind_group,
                 pipeline,
-                idx: model_manager.materials.materials.len() as u32,
+                idx: model_manager.materials.storage_count as u32,
             })
         };
 
@@ -287,13 +275,12 @@ impl Terrain {
                     mesh: Arc::new(mesh),
                     material: Some(mat.clone()),
                 };
-                self.insert_chunk(chunk);
+                self.insert_chunk_stream(chunk);
                 self.mesh_instances.push(mesh_instance);
             }
         }
         let renderable = Renderable::new(terrain_mat.into());
 
-        model_manager.materials.update_storage(&mat);
         renderable
     }
     pub fn mesh_instances(&self) -> &[MeshInstance] {

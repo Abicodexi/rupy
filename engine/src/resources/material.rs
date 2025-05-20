@@ -1,5 +1,5 @@
 use crate::{
-    log_debug, log_info, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
+    log_debug, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
     ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -246,8 +246,6 @@ impl MaterialAsset {
             .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration))
             .unwrap_or_else(|| Ok(Self::fallback_normal(queue, device, textures)))?;
 
-        log_info!("DT: {}", dt.label);
-        log_info!("NT: {}", nt.label);
         let shader = shaders.load(device, &self.shader)?;
         let bgl_refs: Vec<&wgpu::BindGroupLayout> = self.bind_group_layouts.iter().collect();
 
@@ -467,31 +465,31 @@ impl MaterialManager {
             storage_count: 0,
         }
     }
-    pub fn toggle_rebuild(&mut self) {
-        self.storage_rebuild = true;
+
+    pub fn create_storage_idx(&mut self) -> u32 {
+        self.storage_count += 1;
+        let new_count = self.storage_count as u32;
+        new_count
     }
     pub fn build_storage(&mut self, device: &wgpu::Device) {
         let label = "storage buffer";
         let usage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
         let data: Vec<MaterialData> = self.storage.values().map(|m| m.clone()).collect();
         if !data.is_empty() {
-            log_debug!("Building storage");
             let storage = WgpuBuffer::from_data(device, &data, usage, Some(label));
             let binding = BindGroup::material_storage(device, &storage, Some(label));
             self.storage_bind_group = binding;
             self.storage_buffer = storage;
             self.storage_rebuild = false;
             self.storage_count = data.len();
+            log_debug!("Storage rebuilt");
         }
     }
     pub fn update_storage(&mut self, material: &Material) {
-        log_info!("Mat idx count on creation: {}", self.storage.len());
         self.storage_rebuild = self
             .storage
             .insert(material.asset.name.clone(), material.asset.data())
             .is_none();
-
-        log_debug!("Should rebuild storage: {}", self.storage_rebuild);
     }
 
     pub fn load_tobj<'a>(
@@ -515,7 +513,7 @@ impl MaterialManager {
         if let Some(mat) = self.materials.get(&m_key) {
             return Ok(mat.clone());
         }
-        let idx = (self.materials.len() + 1) as u32;
+        let idx = self.create_storage_idx();
         let material = Material::from_tobj(
             queue,
             device,
@@ -535,7 +533,7 @@ impl MaterialManager {
 
         let material = Arc::new(material);
         self.materials.insert(m_key, material.clone());
-        self.toggle_rebuild();
+        self.update_storage(&material);
 
         Ok(material)
     }
@@ -556,14 +554,14 @@ impl MaterialManager {
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Vec<Arc<Material>>, EngineError> {
         let mut materials = Vec::new();
-        let mut idx = (self.materials.len() + 1) as u32;
+
         for m in mats {
             let m_key = CacheKey::from(m.name.clone());
             if let Some(mat) = self.materials.get(&m_key) {
                 materials.push(mat.clone());
-                idx += 1;
                 continue;
             }
+            let idx = self.create_storage_idx();
             let material = Material::from_tobj(
                 queue,
                 device,
@@ -583,10 +581,9 @@ impl MaterialManager {
 
             let material = Arc::new(material);
             self.materials.insert(m_key, material.clone());
+            self.update_storage(&material);
             materials.push(material);
-            idx += 1;
         }
-        self.toggle_rebuild();
         Ok(materials)
     }
     pub fn load_asset<'a>(
@@ -610,7 +607,7 @@ impl MaterialManager {
             surface_configuration,
             buffers,
         )?;
-        let idx = self.materials.len() as u32;
+        let idx = self.create_storage_idx();
         let material = Arc::new(Material {
             asset: asset.clone(),
             pipeline,
@@ -618,7 +615,7 @@ impl MaterialManager {
             idx,
         });
         self.materials.insert(asset.key.clone(), material.clone());
-        self.toggle_rebuild();
+        self.update_storage(&material);
 
         Ok(material)
     }

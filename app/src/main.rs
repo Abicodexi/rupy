@@ -5,7 +5,7 @@ use crossbeam::channel::{self, Receiver, Sender};
 use engine::{
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
     logger::LogFactory,
-    ApplicationEvent, BindGroupLayouts, EngineError, GPU,
+    ApplicationEvent, EngineError, RenderBindGroupLayouts, GPU,
 };
 use state::ApplicationState;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ async fn main() -> Result<(), EngineError> {
 
     EventBusProxy::new(&arc_rx, proxy).run_tokio();
 
-    let _ = BindGroupLayouts::get();
+    let _ = RenderBindGroupLayouts::get();
 
     Ok(event_loop.run_app(&mut ApplicationState::new())?)
 }

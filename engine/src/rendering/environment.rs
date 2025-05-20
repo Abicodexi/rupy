@@ -1,5 +1,7 @@
+use crate::RenderBindGroupLayouts;
+
 #[derive(Debug)]
-pub struct EquirectProjection {
+pub struct WorldProjection {
     pub src_shader: wgpu::ShaderModule,
     pub dst_shader: wgpu::ShaderModule,
     pub src_texture: crate::Texture,
@@ -10,7 +12,7 @@ pub struct EquirectProjection {
     pub dst_bind_group: wgpu::BindGroup,
 }
 
-impl EquirectProjection {
+impl WorldProjection {
     pub const DEST_SIZE: u32 = 1080;
     pub const NUM_WORKGROUPS: u32 = (Self::DEST_SIZE + 15) / 16;
     pub const DEPTH_OR_ARRAY_LAYERS: u32 = 6;
@@ -85,7 +87,7 @@ impl EquirectProjection {
         let equirect_src_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("{} layout", src_shader)),
-                bind_group_layouts: &[&crate::BindGroupLayouts::equirect_src()],
+                bind_group_layouts: &[&RenderBindGroupLayouts::equirect_src()],
                 push_constant_ranges: &[],
             });
 
@@ -102,8 +104,8 @@ impl EquirectProjection {
         let equirect_dst_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} layout", dst_shader)),
             bind_group_layouts: &[
-                crate::BindGroupLayouts::uniform(),
-                crate::BindGroupLayouts::equirect_dst(),
+                RenderBindGroupLayouts::uniform(),
+                RenderBindGroupLayouts::equirect_dst(),
             ],
             push_constant_ranges: &[],
         });
@@ -147,7 +149,7 @@ impl EquirectProjection {
             cache: None,
         });
 
-        Ok(EquirectProjection {
+        Ok(WorldProjection {
             src_shader: equirect_src_shader,
             dst_shader: equirect_dst_shader,
             src_texture,
@@ -189,19 +191,17 @@ impl EquirectProjection {
 }
 #[derive(Debug)]
 pub struct Environment {
-    equirect_projection: EquirectProjection,
+    wp: WorldProjection,
 }
 
 impl Environment {
-    pub fn new(equirect_projection: EquirectProjection) -> Self {
-        Self {
-            equirect_projection,
-        }
+    pub fn new(wp: WorldProjection) -> Self {
+        Self { wp }
     }
     pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
-        self.equirect_projection.render(rpass, uniform_bind_group);
+        self.wp.render(rpass, uniform_bind_group);
     }
-    pub fn projection(&self) -> &EquirectProjection {
-        &self.equirect_projection
+    pub fn projection(&self) -> &WorldProjection {
+        &self.wp
     }
 }

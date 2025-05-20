@@ -1,4 +1,4 @@
-use crate::WgpuBuffer;
+use crate::{RenderBindGroupLayouts, WgpuBuffer};
 
 #[repr(C)]
 #[derive(
@@ -47,7 +47,7 @@ impl Light {
     pub fn new(device: &wgpu::Device) -> Result<Self, crate::EngineError> {
         let position: cgmath::Vector3<f32> = Self::CENTER.into();
         let color: cgmath::Vector3<f32> = [1.0, 1.0, 1.0].into();
-        let bind_group_layout = crate::BindGroupLayouts::light();
+        let bind_group_layout = RenderBindGroupLayouts::light();
         let uniform_buffer = WgpuBuffer::from_data(
             device,
             &[LightUniform::new()],

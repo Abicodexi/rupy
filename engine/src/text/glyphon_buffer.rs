@@ -1,5 +1,6 @@
 use crate::{CacheKey, CacheStorage, HashCache};
 /// Wrapper around Glyphon buffers
+#[allow(dead_code)]
 pub struct GlyphonBuffer {
     buffer: glyphon::Buffer,
     shaping: glyphon::Shaping,
