@@ -38,6 +38,7 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                     if event.state.is_pressed() && event.repeat == false {
                         match event.physical_key {
                             PhysicalKey::Code(KeyCode::KeyM) => app.next_projection(),
+                            PhysicalKey::Code(KeyCode::KeyP) => app.next_debug_mode(),
                             PhysicalKey::Code(KeyCode::KeyL) => {
                                 let free_look = if app.cam().free_look() { false } else { true };
                                 app.cam_mut().set_free_look(free_look)

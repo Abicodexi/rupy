@@ -22,7 +22,7 @@ impl ModelAsset {
     ) -> Result<(super::MeshInstance, AABB), EngineError> {
         let (mesh, mat) = &self.asset;
         let material = if let Some(m) = mat {
-            let idx = materials.storage_count as u32;
+            let idx = materials.create_storage_idx();
             Some(Arc::new(Material::from_asset(
                 queue,
                 device,
@@ -180,6 +180,7 @@ impl ModelManager {
                     None
                 }
             };
+
             let model = Arc::new(Model::from_tobj(
                 &self.queue,
                 &self.device,

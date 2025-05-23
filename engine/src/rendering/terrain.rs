@@ -1,8 +1,8 @@
 use glam::Vec3;
 
 use crate::{
-    chunk::Chunk, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance, Position,
-    RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
+    chunk::Chunk, log_info, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance,
+    Position, RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -52,7 +52,7 @@ impl Medium {
 }
 #[derive(Debug)]
 pub struct Terrain {
-    chunk_stream: HashMap<(i32, i32, i32), Chunk>,
+    chunk_stream: HashMap<(i32, i32, i32), (Chunk, Medium)>,
     default_medium: Medium,
     mesh_instances: Vec<MeshInstance>,
     instance_buffer: Option<InstanceBufferData>,
@@ -70,15 +70,15 @@ impl Terrain {
         }
     }
 
-    pub fn insert_chunk_stream(&mut self, chunk: Chunk) {
-        self.chunk_stream.insert(chunk.pos, chunk);
+    pub fn insert_chunk_stream(&mut self, chunk: Chunk, medium: Medium) {
+        self.chunk_stream.insert(chunk.pos, (chunk, medium));
     }
 
-    pub fn get_chunk_stream(&self, pos: (i32, i32, i32)) -> Option<&Chunk> {
+    pub fn get_chunk_stream(&self, pos: (i32, i32, i32)) -> Option<&(Chunk, Medium)> {
         self.chunk_stream.get(&pos)
     }
 
-    pub fn get_chunk_stream_mut(&mut self, pos: (i32, i32, i32)) -> Option<&mut Chunk> {
+    pub fn get_chunk_stream_mut(&mut self, pos: (i32, i32, i32)) -> Option<&mut (Chunk, Medium)> {
         self.chunk_stream.get_mut(&pos)
     }
 
@@ -93,15 +93,14 @@ impl Terrain {
             (world_pos.z / CHUNK_SIZE as f32).floor() as i32,
         );
 
-        if let Some(chunk) = self.chunk_stream.get(&chunk_pos) {
+        if let Some((chunk, medium)) = self.chunk_stream.get(&chunk_pos) {
             let lx = (world_pos.x as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
             let ly = (world_pos.y as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
             let lz = (world_pos.z as isize % CHUNK_SIZE as isize).rem_euclid(CHUNK_SIZE as isize);
-
             if chunk.get_block(lx, ly, lz) == 0 {
                 Medium::Air
             } else {
-                Medium::Ground
+                *medium
             }
         } else {
             self.default_medium
@@ -113,7 +112,7 @@ impl Terrain {
     }
 
     pub fn stream_build_meshes(&mut self) {
-        for chunk in self.chunk_stream.values_mut() {
+        for (chunk, medium) in self.chunk_stream.values_mut() {
             if chunk.dirty {
                 chunk.mesh = Some(chunk.build_chunk_mesh());
                 chunk.dirty = false;
@@ -157,7 +156,9 @@ impl Terrain {
     }
 
     pub fn all_meshes(&self) -> impl Iterator<Item = &MeshAsset> {
-        self.chunk_stream.values().filter_map(|c| c.mesh.as_ref())
+        self.chunk_stream
+            .values()
+            .filter_map(|(c, m)| c.mesh.as_ref())
     }
 
     fn stream_build_chunks(&mut self, center: (i32, i32), distance: i32) {
@@ -167,7 +168,12 @@ impl Terrain {
             for dz in -distance..=distance {
                 let chunk_pos = (center.0 + dx, 0, center.1 + dz);
                 if needed.insert(chunk_pos) && !self.chunk_stream.contains_key(&chunk_pos) {
-                    self.insert_chunk_stream(Chunk::flat(chunk_pos));
+                    let medium = self.medium_at(Vec3 {
+                        x: chunk_pos.0 as f32,
+                        y: chunk_pos.1 as f32,
+                        z: chunk_pos.2 as f32,
+                    });
+                    self.insert_chunk_stream(Chunk::flat(chunk_pos), medium);
                 }
             }
         }
@@ -193,6 +199,7 @@ impl Terrain {
         &mut self,
         center: Vec3,
         radius: i32,
+        mediums: Vec<Medium>,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &wgpu::DepthStencilState,
         model_manager: &mut crate::ModelManager,
@@ -259,10 +266,12 @@ impl Terrain {
         };
 
         self.mesh_instances.clear();
-
+        let default_medium = self.default_medium.clone();
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 let pos = (center.x as i32 + dx, 0, center.z as i32 + dz);
+                let medium = *mediums.get(dx.abs() as usize).unwrap_or(&default_medium);
+
                 let chunk = Chunk::flat(pos);
                 let mesh_asset = chunk.build_chunk_mesh();
                 let mesh = Mesh::from_asset(
@@ -275,7 +284,8 @@ impl Terrain {
                     mesh: Arc::new(mesh),
                     material: Some(mat.clone()),
                 };
-                self.insert_chunk_stream(chunk);
+                log_info!("Building medium: {:?} at pos: {:?}", medium, pos);
+                self.insert_chunk_stream(chunk, medium);
                 self.mesh_instances.push(mesh_instance);
             }
         }

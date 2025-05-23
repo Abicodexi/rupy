@@ -1,3 +1,5 @@
+use super::DebugMode;
+
 pub trait RenderPass {
     fn render(
         &self,
@@ -5,5 +7,6 @@ pub trait RenderPass {
         rpass: &mut wgpu::RenderPass,
         world: &crate::World,
         uniform_bind_group: &wgpu::BindGroup,
+        debug_mode: &DebugMode,
     );
 }

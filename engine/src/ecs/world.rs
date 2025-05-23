@@ -205,14 +205,20 @@ impl World {
         &mut self,
         center: Vec3,
         radius: i32,
+        mediums: Vec<Medium>,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &wgpu::DepthStencilState,
         model_manager: &mut crate::ModelManager,
     ) {
         let entity = self.spawn();
-        let component =
-            self.terrain
-                .chunks(center, radius, surface_config, depth_stencil, model_manager);
+        let component = self.terrain.chunks(
+            center,
+            radius,
+            mediums,
+            surface_config,
+            depth_stencil,
+            model_manager,
+        );
 
         self.insert_renderable(entity, component);
     }

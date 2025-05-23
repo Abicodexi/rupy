@@ -1,5 +1,7 @@
 use glyphon::Attrs;
 
+use crate::DebugMode;
+
 use super::{GlyphonBuffer, TextRegion};
 
 pub struct RenderText {
@@ -196,6 +198,7 @@ impl crate::RenderPass for RenderText {
         rpass: &mut wgpu::RenderPass,
         _world: &crate::World,
         _uniform_bind_group: &wgpu::BindGroup,
+        debug_mode: &DebugMode,
     ) {
         if let Err(e) = self.renderer.render(&self.atlas, &self.viewport, rpass) {
             crate::log_error!("Error rendering text: {}", e);

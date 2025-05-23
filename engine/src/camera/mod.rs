@@ -97,6 +97,9 @@ impl Camera {
     pub fn zfar(&self) -> f32 {
         self.zfar
     }
+    pub fn znear(&self) -> f32 {
+        self.znear
+    }
     pub fn look_at(&mut self, pos: Vec3) {
         self.target = pos;
     }

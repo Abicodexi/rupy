@@ -1,3 +1,5 @@
+use glam::Vec3;
+
 use crate::{camera::Camera, Medium, Terrain};
 
 use super::{Entity, Position, Velocity};
@@ -46,12 +48,20 @@ impl Physics {
 
     /// Physics tick: updates positions/velocities
     pub fn update(&mut self, camera: &Camera, dt: f32, terrain: &Terrain) {
-        let medium = if camera.free_look() {
-            Medium::Vacuum
+        let camera_pos = *camera.eye();
+
+        let medium = if camera.free_look() || camera_pos.y > GROUND_Y + 4.0 {
+            Medium::Air
         } else {
-            terrain.default_medium()
+            let pos = Vec3 {
+                x: camera_pos.x,
+                y: 0.0,
+                z: camera_pos.z,
+            };
+            terrain.medium_at(pos)
         };
         let medium_props = medium.properties();
+
         let drag_factor = medium_props.drag.powf(dt);
         let max_fall_speed = -50.0;
 

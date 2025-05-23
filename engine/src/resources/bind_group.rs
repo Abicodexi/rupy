@@ -1,4 +1,4 @@
-use crate::DebugUniform;
+use crate::{DebugUniform, WgpuBuffer};
 
 use super::{CacheStorage, HashCache, TextureManager};
 
@@ -224,18 +224,44 @@ impl RenderBindGroupLayouts {
             material_storage_defs,
         );
 
-        let debug_defs = [BindingDef {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: Some(
-                    std::num::NonZeroU64::new(std::mem::size_of::<DebugUniform>() as u64).unwrap(),
-                ),
+        // Combined uniform (camera + light)
+        let debug_defs = &[
+            BindingDef {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::camera::uniform::CameraUniform,
+                    >() as u64),
+                },
             },
-        }];
-        let debug = create_layout(&device, Some("debug bind grop layout"), &debug_defs);
+            BindingDef {
+                binding: 1,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                        crate::light::LightUniform,
+                    >() as u64),
+                },
+            },
+            BindingDef {
+                binding: 2,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: Some(
+                        std::num::NonZeroU64::new(std::mem::size_of::<DebugUniform>() as u64)
+                            .unwrap(),
+                    ),
+                },
+            },
+        ];
+        let debug = create_layout(&device, Some("debug bind grop layout"), debug_defs);
 
         RenderBindGroupLayouts {
             device: device.clone(),
@@ -412,6 +438,31 @@ impl BindGroup {
                 binding: 0,
                 resource: material_buffer.get().as_entire_binding(),
             }],
+        })
+    }
+    pub fn debug(
+        device: &wgpu::Device,
+        camera_uniform_buffer: &WgpuBuffer,
+        light_uniform_buffer: &WgpuBuffer,
+        debug: &WgpuBuffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &crate::RenderBindGroupLayouts::debug(),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_uniform_buffer.get().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: light_uniform_buffer.get().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: debug.get().as_entire_binding(),
+                },
+            ],
+            label: Some("combined UBO+debug bind group"),
         })
     }
 }

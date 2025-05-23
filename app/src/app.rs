@@ -1,11 +1,13 @@
 use engine::{
     camera::{Camera, CameraControls, Projection},
-    debug_scene, log_error, log_info, BindGroup, EngineError, Entity, FrameBuffer, Light,
-    RenderPass, RenderTargetKind, RenderTargetManager, RenderText, Renderer3d, Rotation,
-    ScreenCorner, SurfaceExt, TextRegion, Texture, Time, Velocity, World,
+    debug_scene, log_debug, log_error, log_info, BindGroup, DebugMode, DebugUniform, EngineError,
+    Entity, FrameBuffer, Light, Medium, RenderPass, RenderTargetKind, RenderTargetManager,
+    RenderText, Renderer3d, Rotation, ScreenCorner, SurfaceExt, TextRegion, Texture, Time,
+    Velocity, WgpuBuffer, World,
 };
 use glam::Vec3;
 use std::sync::Arc;
+use wgpu::BufferUsages;
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
@@ -30,6 +32,7 @@ pub struct Rupy {
     uniform_bind_group: wgpu::BindGroup,
     model_manager: engine::ModelManager,
     bossman: Entity,
+    debug_mode: DebugMode,
 }
 
 impl Rupy {
@@ -109,6 +112,14 @@ impl Rupy {
 
         let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), light.buffer());
 
+        let debug_mode = DebugMode::new(
+            device,
+            &mut model_manager.materials.shaders,
+            &camera,
+            &light,
+            &surface_config,
+        )?;
+
         let bossman = debug_scene(
             &mut model_manager,
             &mut world,
@@ -116,10 +127,11 @@ impl Rupy {
             depth_stencil.clone(),
         );
         camera.world_spawn(&mut world, &mut model_manager, &surface_config);
-
+        let mediums = vec![Medium::Water, Medium::Water, Medium::Vacuum, Medium::Vacuum];
         world.generate_terrain(
             *camera.eye(),
             1,
+            mediums,
             &surface_config,
             &depth_stencil,
             &mut model_manager,
@@ -142,6 +154,7 @@ impl Rupy {
             uniform_bind_group,
             model_manager,
             bossman,
+            debug_mode,
         })
     }
     pub fn shutdown(&self, el: &ActiveEventLoop) {
@@ -169,6 +182,11 @@ impl Rupy {
         } else {
             Projection::FirstPerson
         };
+    }
+    pub fn next_debug_mode(&mut self) {
+        self.debug_mode
+            .next_mode(&self.model_manager.device, &self.camera, &self.light);
+        log_debug!("Debug mode: {:?}", self.debug_mode.mode());
     }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         self.camera
@@ -217,6 +235,7 @@ impl Rupy {
                         &mut rpass,
                         &self.world,
                         &self.uniform_bind_group,
+                        &self.debug_mode,
                     );
 
                     self.rendertxt.render(
@@ -224,6 +243,7 @@ impl Rupy {
                         &mut rpass,
                         &self.world,
                         &self.uniform_bind_group,
+                        &self.debug_mode,
                     );
                 }
 

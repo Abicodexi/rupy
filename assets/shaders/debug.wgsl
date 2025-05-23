@@ -19,7 +19,11 @@ struct Light {
 @group(0) @binding(1) var<uniform> light: Light;
 
 struct Debug {
-    mode: u32,
+    mode:  u32,
+    pad0:  vec3<f32>,
+    znear: f32,
+    pad1:  vec3<f32>,
+    zfar:  f32,
 };
 
 @group(0) @binding(2) var<uniform> debug: Debug;
@@ -58,6 +62,23 @@ struct VertexOutput {
     @location(5) tint_color:        vec3<f32>,
     @location(6) material_id:       u32,
 };
+
+@group(1) @binding(0) var env_map:    texture_cube<f32>;
+@group(1) @binding(1) var env_samp:   sampler;
+
+struct Material {
+    ambient:   vec3<f32>,
+    diffuse:   vec3<f32>,
+    specular:  vec3<f32>,
+    shininess: f32,
+};
+@group(2) @binding(0) var<storage, read> materials: array<Material>;
+
+
+@group(3) @binding(0) var t_diffuse: texture_2d<f32>;
+@group(3) @binding(1) var s_diffuse: sampler;
+@group(3) @binding(2) var t_normal:  texture_2d<f32>;
+@group(3) @binding(3) var s_normal:  sampler;
 
 @vertex
 fn vs_main(
@@ -103,67 +124,48 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Camera view direction (normalize view - position)
     let view_dir = normalize(in.world_view_pos - in.world_position);
 
-    let mut out_color = vec4<f32>(1.0, 0.0, 1.0, 1.0);
+    var out_color = vec4<f32>(in.tint_color.r, in.tint_color.g, in.tint_color.b, 1.0);
 
     switch debug.mode {
-        case 0: {
-            // Default PBR/Phong shading (your previous code)
-            let material = materials[in.material_id];
+        case 0u: {
+            let N = normalize(in.world_normal);
+            let dNdx = dpdx(N);
+            let dNdy = dpdy(N);
+            let edge_strength = length(dNdx) + length(dNdy);
+            let threshold = 0.2;
 
-            let object_color: vec4<f32> = textureSample(t_diffuse, s_diffuse, in.tex_coords);
-            let object_normal: vec4<f32> = textureSample(t_normal, s_normal, in.tex_coords);
-
-            // TBN
-            let world_tangent = normalize(in.world_tangent - dot(in.world_tangent, in.world_normal) * in.world_normal);
-            let world_bitangent = cross(in.world_normal, world_tangent);
-            let TBN = mat3x3(world_tangent, world_bitangent, in.world_normal);
-
-            let tangent_normal = object_normal.xyz * 2.0 - 1.0;
-            let world_normal = normalize(TBN * tangent_normal);
-
-            let light_dir = normalize(light.position - in.world_position);
-            let view_dir = normalize(in.world_view_pos - in.world_position);
-            let half_dir = normalize(view_dir + light_dir);
-
-            let diffuse_strength = max(dot(world_normal, light_dir), 0.0);
-            let diffuse_color = material.diffuse * light.color * diffuse_strength;
-
-            let specular_strength = pow(max(dot(world_normal, half_dir), 0.0), material.shininess);
-            let specular_color =  material.specular * light.color * specular_strength;
-
-            let world_reflect = reflect(-view_dir, world_normal);
-            let reflection = textureSample(env_map, env_samp, world_reflect).rgb;
-
-            let final_color = (diffuse_color + specular_color) * (object_color.xyz * in.tint_color.rgb) + reflection * material.shininess;
-
-            out_color = vec4<f32>(final_color, object_color.a);
+            var color: vec4<f32>;
+            if (edge_strength > threshold) {
+                color = vec4<f32>(0.0, 0.0, 0.0, 1.0); // Border: black
+            } else {
+                color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // Fill: white
+            }
+            out_color = color;
         }
-        case 1: {
+        case 1u: {
             // Normals (world space), mapped from [-1,1] to [0,1]
             out_color = vec4<f32>(normalize(in.world_normal) * 0.5 + 0.5, 1.0);
         }
-        case 2: {
+        case 2u: {
             // Tangents (world space)
             out_color = vec4<f32>(normalize(in.world_tangent) * 0.5 + 0.5, 1.0);
         }
-        case 3: {
+        case 3u: {
             // Camera view direction (at pixel)
             out_color = vec4<f32>(view_dir * 0.5 + 0.5, 1.0);
         }
-        case 4: {
-            // Depth visualization (non-linear, remap from clip_space.z)
-            // You could pass in near/far to uniform for proper mapping
-            let depth = in.clip_position.z / in.clip_position.w;
-            let depth_norm = (depth + 1.0) * 0.5; // remap [-1,1] to [0,1]
-            out_color = vec4<f32>(depth_norm, depth_norm, depth_norm, 1.0);
+        case 4u: {
+            let ndc_z = in.clip_position.z / in.clip_position.w; // [-1, 1]
+            let eye_z = (2.0 * debug.znear * debug.zfar) / (debug.zfar + debug.znear - ndc_z * (debug.zfar - debug.znear)); // linear eye-space z
+            let linear_depth = (eye_z - debug.znear) / (debug.zfar - debug.znear); // [0, 1]
+            out_color = vec4<f32>(linear_depth, linear_depth, linear_depth, 1.0);
         }
-        case 5: {
+        case 5u: {
             // UV debug (repeated every 1.0)
             let uv = fract(in.tex_coords);
             out_color = vec4<f32>(uv, 0.0, 1.0);
         }
-        case 6: {
-            // Material ID as color
+        case 6u: {
             let mid = f32(in.material_id) / 16.0; // assuming <=16 materials
             out_color = vec4<f32>(mid, 1.0 - mid, 0.3 + 0.7 * mid, 1.0);
         }

@@ -1,5 +1,5 @@
 use {
-    super::{PipelineManager, RenderPass, VertexInstance, AABB, HDR},
+    super::{DebugMode, PipelineManager, RenderPass, VertexInstance, AABB, HDR},
     crate::{
         camera::{self, Frustum},
         BindGroup, CacheKey, CacheStorage, EngineError, FrameBuffer, ModelManager, Rotation, Scale,
@@ -89,20 +89,20 @@ impl RenderPass for Renderer3d {
         rpass: &mut wgpu::RenderPass,
         world: &World,
         uniform_bind_group: &wgpu::BindGroup,
+        debug_mode: &DebugMode,
     ) {
-        rpass.set_bind_group(0, uniform_bind_group, &[]);
         let projection = world.projection();
+
+        rpass.set_bind_group(0, uniform_bind_group, &[]);
         rpass.set_bind_group(1, &projection.dst_bind_group, &[]);
         rpass.set_bind_group(2, &models.materials.storage_bind_group, &[]);
-        {
-            rpass.set_pipeline(&projection.dst_pipeline);
 
-            rpass.draw(0..3, 0..1);
-        }
+        rpass.set_pipeline(&projection.dst_pipeline);
+        rpass.draw(0..3, 0..1);
 
-        {
-            self.instances.draw(rpass, models);
-        }
+        self.instances
+            .draw(rpass, models, debug_mode, uniform_bind_group);
+
         {
             for instance in world.terrain.mesh_instances() {
                 let Some(mat) = instance.material.as_ref() else {
@@ -114,7 +114,7 @@ impl RenderPass for Renderer3d {
                 };
 
                 let mesh = &instance.mesh;
-                rpass.set_pipeline(&mat.pipeline);
+
                 rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
 
                 rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
@@ -122,7 +122,15 @@ impl RenderPass for Renderer3d {
 
                 rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
 
-                rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+                if debug_mode.mode() > 0 {
+                    rpass.set_bind_group(0, debug_mode.bind_group(), &[]);
+                    rpass.set_pipeline(debug_mode.pipeline());
+                    rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+                } else {
+                    rpass.set_bind_group(0, uniform_bind_group, &[]);
+                    rpass.set_pipeline(&mat.pipeline);
+                    rpass.draw_indexed(0..mesh.index_count, 0, 0..instance_buffer.count as u32);
+                }
             }
         }
     }
@@ -231,7 +239,13 @@ impl InstanceBuffers {
         }
     }
 
-    pub fn draw(&self, rpass: &mut wgpu::RenderPass, models: &ModelManager) {
+    pub fn draw(
+        &self,
+        rpass: &mut wgpu::RenderPass,
+        models: &ModelManager,
+        debug: &DebugMode,
+        uniform_bind_group: &wgpu::BindGroup,
+    ) {
         for (model_key, data) in &self.buffers {
             if data.count == 0 {
                 continue;
@@ -245,14 +259,22 @@ impl InstanceBuffers {
             };
 
             let mesh = &model.instance.mesh;
-            rpass.set_pipeline(&mat.pipeline);
+
             rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
 
             rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
             rpass.set_vertex_buffer(1, data.buffer.get().slice(..));
-
             rpass.set_index_buffer(mesh.index_buffer.get().slice(..), IndexFormat::Uint32);
-            rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
+
+            if debug.mode() > 0 {
+                rpass.set_bind_group(0, debug.bind_group(), &[]);
+                rpass.set_pipeline(debug.pipeline());
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
+            } else {
+                rpass.set_bind_group(0, uniform_bind_group, &[]);
+                rpass.set_pipeline(&mat.pipeline);
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
+            }
         }
     }
 }

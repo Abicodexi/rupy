@@ -1,5 +1,5 @@
 use crate::{
-    log_debug, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
+    log_debug, log_info, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
     ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -467,9 +467,10 @@ impl MaterialManager {
     }
 
     pub fn create_storage_idx(&mut self) -> u32 {
+        let count = self.storage_count;
         self.storage_count += 1;
-        let new_count = self.storage_count as u32;
-        new_count
+        let new_count = count as u32;
+        count as u32
     }
     pub fn build_storage(&mut self, device: &wgpu::Device) {
         let label = "storage buffer";
