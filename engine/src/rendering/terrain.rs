@@ -199,7 +199,7 @@ impl Terrain {
         &mut self,
         center: Vec3,
         radius: i32,
-        mediums: Vec<Medium>,
+        medium: Medium,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &wgpu::DepthStencilState,
         model_manager: &mut crate::ModelManager,
@@ -266,11 +266,9 @@ impl Terrain {
         };
 
         self.mesh_instances.clear();
-        let default_medium = self.default_medium.clone();
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 let pos = (center.x as i32 + dx, 0, center.z as i32 + dz);
-                let medium = *mediums.get(dx.abs() as usize).unwrap_or(&default_medium);
 
                 let chunk = Chunk::flat(pos);
                 let mesh_asset = chunk.build_chunk_mesh();

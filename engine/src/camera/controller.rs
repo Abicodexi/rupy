@@ -113,7 +113,6 @@ impl CameraControls {
                 true
             }
             _ => false,
-            _ => false,
         }
     }
     pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {

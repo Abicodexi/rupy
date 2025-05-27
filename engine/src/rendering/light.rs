@@ -32,9 +32,9 @@ pub struct Light {
 
 impl Light {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = LightUniform::LAYOUT;
-    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(1.0, 100.0, 1.0);
+    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(1.0, 10.0, 1.0);
     pub const RADIUS: f32 = 360.0;
-    pub const BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
+    pub const UNIFORM_BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
         binding: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
@@ -75,8 +75,8 @@ impl Light {
         self.position = new_position;
     }
 
-    pub fn orbit(&mut self, time_s: f64) {
-        let angle = time_s; // 1 radian/s;
+    pub fn orbit(&mut self, time_s: f32) {
+        let angle = time_s as f64; // 1 radian/s;
         let (sin, cos) = angle.sin_cos();
 
         self.position.x = Light::CENTER.x + Light::RADIUS * cos as f32;

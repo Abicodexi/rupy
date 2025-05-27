@@ -205,7 +205,7 @@ impl World {
         &mut self,
         center: Vec3,
         radius: i32,
-        mediums: Vec<Medium>,
+        mediums: Medium,
         surface_config: &wgpu::SurfaceConfiguration,
         depth_stencil: &wgpu::DepthStencilState,
         model_manager: &mut crate::ModelManager,

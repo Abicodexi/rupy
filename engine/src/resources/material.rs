@@ -469,7 +469,6 @@ impl MaterialManager {
     pub fn create_storage_idx(&mut self) -> u32 {
         let count = self.storage_count;
         self.storage_count += 1;
-        let new_count = count as u32;
         count as u32
     }
     pub fn build_storage(&mut self, device: &wgpu::Device) {

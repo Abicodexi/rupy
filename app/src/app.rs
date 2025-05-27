@@ -1,13 +1,11 @@
 use engine::{
     camera::{Camera, CameraControls, Projection},
-    debug_scene, log_debug, log_error, log_info, BindGroup, DebugMode, DebugUniform, EngineError,
-    Entity, FrameBuffer, Light, Medium, RenderPass, RenderTargetKind, RenderTargetManager,
-    RenderText, Renderer3d, Rotation, ScreenCorner, SurfaceExt, TextRegion, Texture, Time,
-    Velocity, WgpuBuffer, World,
+    debug_scene, log_debug, log_error, log_info, BindGroup, DebugMode, EngineError, Entity,
+    FrameBuffer, Light, Medium, RenderPass, RenderTargetKind, RenderTargetManager, RenderText,
+    Renderer3d, Rotation, ScreenCorner, SurfaceExt, TextRegion, Texture, Time, Velocity, World,
 };
 use glam::Vec3;
 use std::sync::Arc;
-use wgpu::BufferUsages;
 use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
@@ -127,11 +125,10 @@ impl Rupy {
             depth_stencil.clone(),
         );
         camera.world_spawn(&mut world, &mut model_manager, &surface_config);
-        let mediums = vec![Medium::Water, Medium::Water, Medium::Vacuum, Medium::Vacuum];
         world.generate_terrain(
             *camera.eye(),
             1,
-            mediums,
+            Medium::Ground,
             &surface_config,
             &depth_stencil,
             &mut model_manager,
@@ -248,15 +245,12 @@ impl Rupy {
                 }
 
                 // === 2. Postprocess Scene -> HDR ===
-                if let Some(scene_fb) = self.render_targets.get(&RenderTargetKind::Scene) {
-                    if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-                        self.render3d.hdr(
-                            &mut encoder,
-                            &self.model_manager,
-                            &scene_fb.color(),
-                            hdr_fb,
-                        );
-                    }
+                if let (Some(scene_fb), Some(hdr_fb)) = (
+                    self.render_targets.get(&RenderTargetKind::Scene),
+                    self.render_targets.get(&RenderTargetKind::Hdr),
+                ) {
+                    self.render3d
+                        .hdr(&mut encoder, &self.model_manager, &scene_fb.color(), hdr_fb);
                 }
 
                 // === 3. Final HDR -> swapchain ===
@@ -273,8 +267,14 @@ impl Rupy {
             }
             Err(e) => {
                 log_error!("SurfaceError: {}", e);
-                if let wgpu::SurfaceError::Outdated = e {
-                    self.resize(&self.window.inner_size());
+                match e {
+                    wgpu::SurfaceError::Outdated => self.resize(&self.window.inner_size()),
+                    wgpu::SurfaceError::Other
+                    | wgpu::SurfaceError::OutOfMemory
+                    | wgpu::SurfaceError::Timeout
+                    | wgpu::SurfaceError::Lost => {
+                        panic!("SurfaceError: {}", e);
+                    }
                 }
             }
         };
@@ -315,7 +315,7 @@ impl Rupy {
             ) {
                 let direction = cam_pos.0 - boss_pos.0;
                 let mut direction_normalized = direction.normalize_or_zero();
-                let speed = self.controls.speed() - (self.controls.speed() / 2.0);
+                let speed = 1.0;
                 let velocity = direction_normalized * speed;
                 direction_normalized.y = 0.0;
                 let rot_to_camera = glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
@@ -325,9 +325,9 @@ impl Rupy {
             }
         }
 
-        self.world.terrain.update_streaming(*self.camera.eye(), 4);
+        self.world.terrain.update_streaming(*self.camera.eye(), 1);
 
-        self.light.orbit(self.time.elapsed * 0.1);
+        self.light.orbit(self.time.elapsed as f32);
         self.render3d
             .instances
             .update(&self.world, &self.camera, &mut self.model_manager);

@@ -107,7 +107,7 @@ impl RenderBindGroupLayouts {
         let light_defs = &[BindingDef {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: crate::Light::BUFFER_BINDING.binding.clone(),
+            ty: crate::Light::UNIFORM_BUFFER_BINDING.binding.clone(),
         }];
         let light = create_layout(&device, Some("light bind group layout"), light_defs);
 
