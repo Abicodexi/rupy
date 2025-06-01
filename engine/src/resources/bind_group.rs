@@ -468,7 +468,7 @@ impl BindGroup {
 }
 
 pub struct BindGroupManager {
-    bind_groups: super::HashCache<std::sync::Arc<wgpu::BindGroup>>,
+    bind_groups: HashCache<std::sync::Arc<wgpu::BindGroup>>,
 }
 
 impl BindGroupManager {

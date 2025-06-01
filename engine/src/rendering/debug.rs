@@ -12,6 +12,8 @@ pub struct DebugUniform {
     _pad1: [f32; 3],
     pub znear: f32,
     _pad2: [f32; 3],
+    normal_line_length: f32,
+    normal_color: [f32; 3],
 }
 
 impl DebugUniform {
@@ -33,6 +35,7 @@ pub struct DebugMode {
     uniform: DebugUniform,
     bind_group: wgpu::BindGroup,
     pipeline: RenderPipeline,
+    normal_line_pipeline: RenderPipeline,
     mode: u32,
 }
 
@@ -53,6 +56,8 @@ impl DebugMode {
             _pad1: [0.0; 3],
             znear,
             _pad2: [0.0; 3],
+            normal_line_length: 1.0,
+            normal_color: [1.0; 3],
         };
         let buffer = WgpuBuffer::from_data(
             device,
@@ -111,12 +116,53 @@ impl DebugMode {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(color_target)],
+                targets: &[Some(color_target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: primitive,
-            depth_stencil: Some(depth_stencil),
+            depth_stencil: Some(depth_stencil.clone()),
 
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+        // normal_lines pipeline
+        let line_shader = shaders.load(device, "normal_lines.wgsl")?;
+        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("normal_line_pipeline_layout"),
+            bind_group_layouts: &bind_group_layouts, // reuse same BGLs
+            push_constant_ranges: &[],
+        });
+
+        let normal_line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("normal_line_pipeline"),
+            layout: Some(&line_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &line_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &line_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(color_target)],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(depth_stencil),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -131,25 +177,35 @@ impl DebugMode {
             uniform,
             bind_group,
             pipeline,
+            normal_line_pipeline,
             mode: 0,
         })
+    }
+
+    pub fn normal_line_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.normal_line_pipeline
     }
 
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
     }
+
     pub fn uniform(&self) -> &DebugUniform {
         &self.uniform
     }
+
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
+
     pub fn buffer(&self) -> &WgpuBuffer {
         &self.buffer
     }
+
     pub fn mode(&self) -> u32 {
         self.mode
     }
+
     pub fn next_mode(&mut self, device: &wgpu::Device, camera: &Camera, light: &Light) {
         let mut mode = if self.mode == 0 {
             1
@@ -164,6 +220,7 @@ impl DebugMode {
         }
         self.rebuild(device, mode, camera, light);
     }
+    
     fn rebuild(&mut self, device: &wgpu::Device, mode: u32, camera: &Camera, light: &Light) {
         let zfar = camera.zfar();
         let znear = camera.znear();
@@ -174,6 +231,8 @@ impl DebugMode {
             _pad1: [0.0; 3],
             znear,
             _pad2: [0.0; 3],
+            normal_line_length: 1.0,
+            normal_color: [1.0; 3],
         };
         let buffer = WgpuBuffer::from_data(
             device,

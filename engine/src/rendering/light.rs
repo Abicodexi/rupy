@@ -32,8 +32,8 @@ pub struct Light {
 
 impl Light {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = LightUniform::LAYOUT;
-    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(1.0, 10.0, 1.0);
-    pub const RADIUS: f32 = 360.0;
+    pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(5.0, 25.0, 5.0);
+    pub const RADIUS: f32 = 36.0;
     pub const UNIFORM_BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
         binding: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
