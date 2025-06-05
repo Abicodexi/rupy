@@ -28,11 +28,26 @@ pub use aabb::*;
 pub mod render3d;
 pub use render3d::*;
 
+pub mod render2d;
+pub use render2d::*;
+
 pub mod chunk;
 pub use chunk::*;
 
-pub mod debug;
-pub use debug::*;
-
 pub mod terrain;
 pub use terrain::*;
+
+pub mod wgpu_buffer;
+pub use wgpu_buffer::*;
+
+pub mod frame_buffer;
+pub use frame_buffer::*;
+
+pub mod glyphon_buffer;
+pub use glyphon_buffer::*;
+
+pub mod rendertxt;
+pub use rendertxt::*;
+
+pub mod text_region;
+pub use text_region::*;

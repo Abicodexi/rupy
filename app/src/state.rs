@@ -1,11 +1,14 @@
+use std::sync::Arc;
+
 use crate::app::Rupy;
-use engine::EngineError;
+use crossbeam::channel::Sender;
+use engine::{ApplicationEvent, EngineError};
 use winit::event_loop::ActiveEventLoop;
 
 #[allow(dead_code)]
 
 pub enum AppInnerState {
-    Stopped,
+    Stopped(Arc<Sender<ApplicationEvent>>),
     Running(Rupy),
 }
 
@@ -15,9 +18,9 @@ pub struct ApplicationState {
 
 impl ApplicationState {
     /// Creates a new application state in the "stopped" (uninitialized) phase.
-    pub fn new() -> Self {
+    pub fn new(tx: Arc<Sender<ApplicationEvent>>) -> Self {
         Self {
-            inner: AppInnerState::Stopped,
+            inner: AppInnerState::Stopped(tx),
         }
     }
 
@@ -26,9 +29,9 @@ impl ApplicationState {
         state: &mut ApplicationState,
         event_loop: &ActiveEventLoop,
     ) -> Result<(), EngineError> {
-        match state.inner {
-            AppInnerState::Stopped => {
-                let run = Rupy::new(event_loop)?;
+        match &state.inner {
+            AppInnerState::Stopped(tx) => {
+                let run = Rupy::new(event_loop, tx.clone())?;
                 state.inner = AppInnerState::Running(run);
                 Ok(())
             }

@@ -1,3 +1,5 @@
+use wgpu::BindingType;
+
 use crate::{RenderBindGroupLayouts, WgpuBuffer};
 
 #[repr(C)]
@@ -26,6 +28,7 @@ impl LightUniform {
 pub struct Light {
     position: cgmath::Vector3<f32>,
     color: cgmath::Vector3<f32>,
+    speed: f32,
     bind_group: wgpu::BindGroup,
     uniform_buffer: crate::WgpuBuffer,
 }
@@ -33,15 +36,13 @@ pub struct Light {
 impl Light {
     pub const LAYOUT: wgpu::VertexBufferLayout<'static> = LightUniform::LAYOUT;
     pub const CENTER: cgmath::Vector3<f32> = cgmath::Vector3::new(1.0, 10.0, 1.0);
-    pub const RADIUS: f32 = 360.0;
-    pub const UNIFORM_BUFFER_BINDING: crate::BindGroupBindingType = crate::BindGroupBindingType {
-        binding: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: std::num::NonZeroU64::new(
-                std::mem::size_of::<crate::LightUniform>() as u64
-            ),
-        },
+    pub const RADIUS: f32 = 36.0;
+    pub const BINDING: BindingType = wgpu::BindingType::Buffer {
+        ty: wgpu::BufferBindingType::Uniform,
+        has_dynamic_offset: false,
+        min_binding_size: std::num::NonZeroU64::new(
+            std::mem::size_of::<crate::LightUniform>() as u64
+        ),
     };
 
     pub fn new(device: &wgpu::Device) -> Result<Self, crate::EngineError> {
@@ -68,15 +69,22 @@ impl Light {
             color,
             bind_group,
             uniform_buffer,
+            speed: 0.1,
         })
     }
 
+    pub fn set_speed(&mut self, new_speed: f32) {
+        self.speed = new_speed;
+    }
+    pub fn speed(&self) -> f32 {
+        self.speed
+    }
     pub fn set_position(&mut self, new_position: cgmath::Vector3<f32>) {
         self.position = new_position;
     }
 
-    pub fn orbit(&mut self, time_s: f32) {
-        let angle = time_s as f64; // 1 radian/s;
+    pub fn orbit(&mut self, time: f64) {
+        let angle = time * self.speed as f64; // 1 radian/s;
         let (sin, cos) = angle.sin_cos();
 
         self.position.x = Light::CENTER.x + Light::RADIUS * cos as f32;

@@ -2,12 +2,11 @@ pub mod assets;
 pub mod camera;
 pub mod ecs;
 pub mod gpu;
+pub mod prelude;
 pub mod rendering;
 pub mod resources;
-pub mod text;
+pub mod ui;
 pub mod util;
-
-pub mod prelude;
 pub use prelude::*;
 
 #[cfg(feature = "logging")]

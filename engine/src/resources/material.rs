@@ -1,5 +1,5 @@
 use crate::{
-    log_debug, log_info, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
+    log_debug, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
     ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -11,7 +11,8 @@ use super::{BindGroup, HashCache, Texture, TextureManager};
 pub struct MaterialAsset {
     pub name: String,
     pub key: crate::CacheKey,
-    pub shader: String,
+    pub v_shader: String,
+    pub f_shader: String,
     pub ambient: [f32; 3],
     pub diffuse: [f32; 3],
     pub specular: [f32; 3],
@@ -47,7 +48,8 @@ impl From<tobj::Material> for MaterialAsset {
         Self {
             name: value.name.clone(),
             key: CacheKey::from(value.name),
-            shader: Shader::DEFAULT.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
             ambient: value.ambient.unwrap_or_default(),
             diffuse: value.diffuse.unwrap_or_default(),
             specular: value.specular.unwrap_or_default(),
@@ -59,7 +61,7 @@ impl From<tobj::Material> for MaterialAsset {
             color_target: wgpu::ColorTargetState {
                 format: Texture::DEFAULT_FORMAT,
                 blend: None,
-                write_mask: wgpu::ColorWrites::default(),
+                write_mask: wgpu::ColorWrites::ALL,
             },
             bind_group_layouts: Vec::new(),
         }
@@ -71,7 +73,8 @@ impl From<&tobj::Material> for MaterialAsset {
         Self {
             name: value.name.clone(),
             key: CacheKey::from(value.name.clone()),
-            shader: Shader::DEFAULT.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
             ambient: value.ambient.unwrap_or_default(),
             diffuse: value.diffuse.unwrap_or_default(),
             specular: value.specular.unwrap_or_default(),
@@ -83,7 +86,7 @@ impl From<&tobj::Material> for MaterialAsset {
             color_target: wgpu::ColorTargetState {
                 format: Texture::DEFAULT_FORMAT,
                 blend: None,
-                write_mask: wgpu::ColorWrites::default(),
+                write_mask: wgpu::ColorWrites::ALL,
             },
             bind_group_layouts: Vec::new(),
         }
@@ -246,7 +249,8 @@ impl MaterialAsset {
             .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration))
             .unwrap_or_else(|| Ok(Self::fallback_normal(queue, device, textures)))?;
 
-        let shader = shaders.load(device, &self.shader)?;
+        let v_shader = shaders.load(device, &self.v_shader)?;
+        let f_shader = shaders.load(device, &self.f_shader)?;
         let bgl_refs: Vec<&wgpu::BindGroupLayout> = self.bind_group_layouts.iter().collect();
 
         let bind_group = Arc::new(crate::BindGroup::normal(
@@ -261,7 +265,7 @@ impl MaterialAsset {
             push_constant_ranges: &[],
         });
 
-        let pipeline_label = format!("{}_{}", self.name, self.shader);
+        let pipeline_label = format!("{} render pipeline", self.name);
         let pipeline_cache_key = crate::CacheKey::from(pipeline_label.clone());
 
         let pipeline = pipelines
@@ -272,13 +276,13 @@ impl MaterialAsset {
                         label: Some(&pipeline_label),
                         layout: Some(&pipeline_layout),
                         vertex: wgpu::VertexState {
-                            module: &shader,
+                            module: &v_shader,
                             entry_point: Some("vs_main"),
                             buffers,
                             compilation_options: Default::default(),
                         },
                         fragment: Some(wgpu::FragmentState {
-                            module: &shader,
+                            module: &f_shader,
                             entry_point: Some("fs_main"),
                             targets: &[Some(self.color_target.clone())],
                             compilation_options: Default::default(),
@@ -347,7 +351,8 @@ impl Material {
         pipelines: &mut PipelineManager,
         mat: &tobj::Material,
         idx: u32,
-        shader_path: &'a str,
+        v_shader: &'a str,
+        f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -357,7 +362,8 @@ impl Material {
     ) -> Result<Material, EngineError> {
         let mut asset: MaterialAsset = mat.into();
         asset.depth_stencil = depth_stencil.as_ref().cloned();
-        asset.shader = shader_path.to_owned();
+        asset.v_shader = v_shader.to_owned();
+        asset.f_shader = f_shader.to_owned();
         asset.primitive = primitive;
         asset.color_target = color_target;
         asset.bind_group_layouts = bind_group_layouts;
@@ -385,7 +391,8 @@ impl Material {
         pipelines: &mut PipelineManager,
         mats: &[tobj::Material],
         base_idx: u32,
-        shader: &'a str,
+        v_shader: &'a str,
+        f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -404,7 +411,8 @@ impl Material {
                     pipelines,
                     m,
                     idx,
-                    shader,
+                    v_shader,
+                    f_shader,
                     primitive,
                     color_target.clone(),
                     surface_configuration,
@@ -501,7 +509,8 @@ impl MaterialManager {
         pipelines: &mut PipelineManager,
         mat: &tobj::Material,
         mat_id: usize,
-        shader_path: &'a str,
+        v_shader: &'a str,
+        f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -522,7 +531,8 @@ impl MaterialManager {
             pipelines,
             mat,
             idx,
-            shader_path,
+            v_shader,
+            f_shader,
             primitive,
             color_target,
             surface_configuration,
@@ -545,7 +555,8 @@ impl MaterialManager {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         mats: Vec<&tobj::Material>,
-        shader_path: &'a str,
+        v_shader: &'a str,
+        f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -555,22 +566,24 @@ impl MaterialManager {
     ) -> Result<Vec<Arc<Material>>, EngineError> {
         let mut materials = Vec::new();
 
-        for m in mats {
-            let m_key = CacheKey::from(m.name.clone());
+        for mat in mats {
+            let m_key = CacheKey::from(mat.name.clone());
             if let Some(mat) = self.materials.get(&m_key) {
                 materials.push(mat.clone());
                 continue;
             }
             let idx = self.create_storage_idx();
+
             let material = Material::from_tobj(
                 queue,
                 device,
                 textures,
                 shaders,
                 pipelines,
-                m,
+                mat,
                 idx,
-                shader_path,
+                v_shader,
+                f_shader,
                 primitive,
                 color_target.clone(),
                 surface_configuration,
@@ -608,6 +621,7 @@ impl MaterialManager {
             buffers,
         )?;
         let idx = self.create_storage_idx();
+
         let material = Arc::new(Material {
             asset: asset.clone(),
             pipeline,

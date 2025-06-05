@@ -149,22 +149,19 @@ impl Transform {
     pub fn to_vertex_instance(&self, mat_id: u32) -> VertexInstance {
         let model: [[f32; 4]; 4] = self.model_matrix.to_cols_array_2d();
         let normal: [[f32; 4]; 4] = self.normal_matrix.to_cols_array_2d();
-        let translation = self.model_matrix.w_axis.truncate().to_array();
 
         VertexInstance {
             model,
             color: [1.0, 1.0, 1.0],
             _pad0: 0.0,
-            translation,
-            _pad1: 0.0,
             uv_offset: [0.0, 0.0],
-            _pad2: [0.0; 2],
+            _pad1: [0.0; 2],
             normal: [normal[0][0], normal[0][1], normal[0][2]],
-            _pad3: 0.0,
+            _pad2: 0.0,
             tangent: [normal[1][0], normal[1][1], normal[1][2]],
-            _pad4: 0.0,
+            _pad3: 0.0,
             material_id: mat_id,
-            _pad5: [0.0; 3],
+            _pad4: [0.0; 3],
         }
     }
 }

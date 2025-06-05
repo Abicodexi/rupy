@@ -1,11 +1,11 @@
-use super::DebugMode;
+use crate::{DebugMode, ModelManager, World};
 
 pub trait RenderPass {
     fn render(
         &self,
-        models: &mut crate::ModelManager,
+        models: &mut ModelManager,
         rpass: &mut wgpu::RenderPass,
-        world: &crate::World,
+        world: &World,
         uniform_bind_group: &wgpu::BindGroup,
         debug_mode: &DebugMode,
     );

@@ -17,57 +17,26 @@ impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
     pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
-    pub const D2: [super::BindGroupBindingType; 2] = [
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Texture {
-                multisampled: false,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            },
+    pub const PROJECTION: [wgpu::BindingType; 2] = [
+        wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
         },
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        wgpu::BindingType::StorageTexture {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            format: wgpu::TextureFormat::Rgba32Float,
+            view_dimension: wgpu::TextureViewDimension::D2Array,
         },
     ];
+    pub const TEXTURE_D2_BINDING: wgpu::BindingType = wgpu::BindingType::Texture {
+        multisampled: false,
+        view_dimension: wgpu::TextureViewDimension::D2,
+        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+    };
+    pub const SAMPLER_FILTERING_BINDING: wgpu::BindingType =
+        wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
 
-    pub const PROJECTION: [super::BindGroupBindingType; 2] = [
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-        },
-        crate::BindGroupBindingType {
-            binding: wgpu::BindingType::StorageTexture {
-                access: wgpu::StorageTextureAccess::WriteOnly,
-                format: wgpu::TextureFormat::Rgba32Float,
-                view_dimension: wgpu::TextureViewDimension::D2Array,
-            },
-        },
-    ];
-    pub const NORMAL: [super::BindGroupBindingType; 4] = [
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Texture {
-                multisampled: false,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            },
-        },
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        },
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Texture {
-                multisampled: false,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            },
-        },
-        super::BindGroupBindingType {
-            binding: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        },
-    ];
     pub fn create_view(&self, desc: &wgpu::TextureViewDescriptor) -> wgpu::TextureView {
         self.texture.create_view(desc)
     }
@@ -185,6 +154,16 @@ impl Texture {
             sampler,
             label,
         }
+    }
+    pub async fn from_file(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        file_name: &str,
+    ) -> Result<Texture, EngineError> {
+        let path = &format!("textures/{}", file_name);
+        let file_bytes = crate::Asset::read_bytes(path)?;
+        let texture = Self::from_bytes(device, queue, &file_bytes, path).await?;
+        Ok(texture)
     }
     pub async fn from_bytes<P: AsRef<std::path::Path>>(
         device: &wgpu::Device,

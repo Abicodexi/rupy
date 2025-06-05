@@ -1,9 +1,10 @@
 use {
-    super::{DebugMode, PipelineManager, RenderPass, VertexInstance, AABB, HDR},
+    super::{RenderPass, VertexInstance, AABB},
     crate::{
-        camera::{self, Frustum},
-        BindGroup, CacheKey, CacheStorage, EngineError, FrameBuffer, ModelManager, Rotation, Scale,
-        Texture, Transform, WgpuBuffer, World,
+        camera::{self, Frustum, Projection},
+        create_hdr_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, FrameBuffer,
+        ModelManager, RenderPipelineManager, Rotation, Scale, Texture, Transform, WgpuBuffer,
+        World,
     },
     glam::{Mat4, Vec3},
     wgpu::IndexFormat,
@@ -11,19 +12,30 @@ use {
 
 #[warn(dead_code)]
 pub struct Renderer3d {
-    hdr: HDR,
     pub instances: InstanceBuffers,
+    pub hdr_pipeline_key: CacheKey,
 }
 
 impl Renderer3d {
-    pub fn new(
+    pub fn new() -> Self {
+        let instances: InstanceBuffers = InstanceBuffers::new();
+        let hdr_pipeline_key = crate::CacheKey::from("hdr");
+        Renderer3d {
+            instances,
+            hdr_pipeline_key,
+        }
+    }
+    pub fn build_pipelines(
+        &mut self,
         device: &wgpu::Device,
-        surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<Self, EngineError> {
-        let hdr = PipelineManager::hdr(device, surface_config)?;
-        let instances = InstanceBuffers::new();
-
-        Ok(Renderer3d { hdr, instances })
+        cfg: &wgpu::SurfaceConfiguration,
+        pipeline_manager: &mut RenderPipelineManager,
+    ) -> Result<(), crate::EngineError> {
+        if !pipeline_manager.contains(&self.hdr_pipeline_key) {
+            let hdr_pipeline = create_hdr_pipeline(device, cfg.format)?;
+            pipeline_manager.insert(self.hdr_pipeline_key, hdr_pipeline.into());
+        }
+        Ok(())
     }
 
     pub fn compute_pass(&self, world: &World, queue: &wgpu::Queue, device: &wgpu::Device) {
@@ -36,27 +48,35 @@ impl Renderer3d {
         encoder: &mut wgpu::CommandEncoder,
         hdr_texture: &Texture,
         surface_view: &wgpu::TextureView,
+        model_manager: &ModelManager,
     ) {
-        let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
+        if let Some(hdr_pipeline) = model_manager
+            .materials
+            .pipelines
+            .render
+            .get(&CacheKey::from("hdr"))
+        {
+            let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Final Blit to Surface"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: surface_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Final Blit to Surface"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-        pass.set_pipeline(&self.hdr.pipeline());
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..3, 0..1);
+            pass.set_pipeline(hdr_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 
     pub fn hdr(
@@ -66,19 +86,26 @@ impl Renderer3d {
         scene_texture: &Texture,
         hdr_fb: &FrameBuffer,
     ) {
-        let bind_group = BindGroup::hdr(&model_manager.device, scene_texture, "hdr input");
+        if let Some(hdr_pipeline) = model_manager
+            .materials
+            .pipelines
+            .render
+            .get(&CacheKey::from("hdr"))
+        {
+            let bind_group = BindGroup::hdr(&model_manager.device, scene_texture, "hdr input");
 
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("HDR Pass"),
-            color_attachments: &[Some(hdr_fb.color_attachment())],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("HDR Pass"),
+                color_attachments: &[Some(hdr_fb.color_attachment())],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-        pass.set_pipeline(&self.hdr.pipeline());
-        pass.set_bind_group(0, &bind_group, &[]);
-        pass.draw(0..3, 0..1);
+            pass.set_pipeline(&hdr_pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 }
 
@@ -162,9 +189,10 @@ impl InstanceBuffers {
         &mut self,
         world: &World,
         camera: &camera::Camera,
+        projection: &Projection,
         model_manager: &mut ModelManager,
     ) {
-        let frustum = camera.frustum();
+        let frustum = camera.frustum(projection);
         self.batch.clear();
 
         let default_scale = Scale::one();
@@ -174,13 +202,14 @@ impl InstanceBuffers {
             let Some(renderable) = &world.renderables[idx] else {
                 continue;
             };
-            let Some(position) = &world.physics.positions[idx] else {
-                continue;
-            };
 
             if !renderable.visible {
                 continue;
             }
+
+            let Some(position) = &world.physics.positions[idx] else {
+                continue;
+            };
 
             let rotation = world.rotations[idx].as_ref().unwrap_or(&default_rotation);
             let scale = world.scales[idx].as_ref().unwrap_or(&default_scale);
@@ -259,7 +288,6 @@ impl InstanceBuffers {
             };
 
             let mesh = &model.instance.mesh;
-
             rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
 
             rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
@@ -285,10 +313,6 @@ pub fn frustum_cull_aabb(frustum: &Frustum, aabb: &AABB, model_matrix: &Mat4) ->
         Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
         Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
         Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
-        Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z),
-        Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z),
-        Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z),
-        Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z),
     ];
     for plane in frustum.planes.iter() {
         if corners
