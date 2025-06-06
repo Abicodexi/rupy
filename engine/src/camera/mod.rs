@@ -44,6 +44,7 @@ pub struct Camera {
     reach_distance: f32,
     model: CameraModel, // optional “entity” that the camera “drives”/follows
     free_look: bool,
+    freeze_movement: bool,
     controls: CameraControls,
 
     // --- GPU side: uniform buffer + bind group
@@ -86,6 +87,7 @@ impl Camera {
         let zfar = 100.0;
         let reach_distance = 2.0;
         let free_look = false;
+        let freeze_movement = false;
         let controls = CameraControls::new(speed, sensitivity);
 
         Camera {
@@ -100,6 +102,7 @@ impl Camera {
             reach_distance,
             model,
             free_look,
+            freeze_movement,
             controls,
             uniform_buffer,
             bind_group,
@@ -146,6 +149,12 @@ impl Camera {
     }
     pub fn fovy(&self) -> f32 {
         self.fovy
+    }
+    pub fn freeze(&mut self) {
+        self.freeze_movement = true;
+    }
+    pub fn unfreeze(&mut self) {
+        self.freeze_movement = false;
     }
     pub fn set_free_look(&mut self, val: bool) {
         self.free_look = val;
@@ -249,7 +258,8 @@ impl Camera {
             .and_then(|v| *v)
             .unwrap_or(Velocity(Vec3::ZERO))
             .0;
-
+        
+        if !self.freeze_movement {
         match projection {
             Projection::FirstPerson => {
                 // Tumble camera with yaw/pitch under free‐look
@@ -307,17 +317,14 @@ impl Camera {
             }
         }
 
-        // 3) Figure out your “forward” vector on the XZ‐plane (unless free‐look).
         let mut forward_vec = (self.target - self.eye).normalize_or_zero();
         if !self.free_look {
             forward_vec.y = 0.0;
         }
         forward_vec = forward_vec.normalize_or_zero();
 
-        // 4) Build a “right” vector
         let right = forward_vec.cross(Vec3::Y).normalize_or_zero();
 
-        // 5) Build a displacement based on WASD
         let mut displacement = Vec3::ZERO;
         let inputs = self.controls.inputs();
         if inputs[W] {
@@ -333,7 +340,6 @@ impl Camera {
             displacement += right;
         }
 
-        // 6) If “free_look” is on, vertical movement on SPACE (inputs[4])
         if self.free_look {
             if inputs.len() > 4 && inputs[4] {
                 displacement += Vec3::Y;
@@ -347,7 +353,6 @@ impl Camera {
             return;
         }
 
-        // 7) Otherwise, blend‐smooth XZ movement into velocity
         let mut velocity = prev_vel;
         if displacement.length_squared() > 0.0 {
             let mv = displacement.normalize() * self.controls.speed();
@@ -356,12 +361,12 @@ impl Camera {
             velocity.z = FloatExt::lerp(prev_vel.z, mv.z, blend);
         }
 
-        // 8) If “jump” button is pressed and Y‐velocity is almost zero → launch upward
         if inputs.len() > 4 && inputs[4] && prev_vel.y.abs() < 0.01 {
             velocity.y = 5.0;
         }
 
         world.insert_velocity(model_entity, Velocity(velocity));
+        }
     }
 
     /// Compute (view_proj, inv_proj, inv_view) or return a Frustum for culling.

@@ -57,8 +57,14 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                                 app.world.light.set_speed(new_speed);
                             }
                             PhysicalKey::Code(KeyCode::KeyQ) => match app.menu.visible() {
-                                true => app.menu.hide(),
-                                false => app.menu.show(),
+                                true => {
+                                    app.menu.hide();
+                                    app.camera.freeze();
+                                }
+                                false => {
+                                    app.menu.show();
+                                    app.camera.unfreeze();
+                                }
                             },
                             PhysicalKey::Code(KeyCode::KeyM) => app.next_projection(),
                             PhysicalKey::Code(KeyCode::KeyP) => app.next_debug_mode(),

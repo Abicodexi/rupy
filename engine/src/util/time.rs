@@ -15,7 +15,7 @@ pub struct Time {
 }
 
 impl Time {
-    pub const TIME_STEP: f64 = 1.0 / 144.0;
+    pub const TIME_STEP: f64 = 1.0 / 60.0;
     pub const MAX_FRAME_TIME: f64 = 0.25;
     pub fn new() -> Self {
         let now = Instant::now();
