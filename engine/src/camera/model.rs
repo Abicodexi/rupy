@@ -3,7 +3,8 @@ use crate::{CacheKey, CacheStorage, Entity, ModelManager, Texture, World};
 #[derive(Debug, Default)]
 pub struct CameraModel {
     model: String,
-    shader: String,
+    v_shader: String,
+    f_shader: String,
     model_key: Option<CacheKey>,
     entity: Option<Entity>,
     distance: f32,
@@ -13,10 +14,11 @@ pub struct CameraModel {
 }
 
 impl CameraModel {
-    pub fn new(model: &str, shader: &str) -> Self {
+    pub fn new(model: &str, v_shader: &str, f_shader: &str) -> Self {
         Self {
             model: model.to_string(),
-            shader: shader.to_string(),
+            v_shader: v_shader.to_string(),
+            f_shader: f_shader.to_string(),
             model_key: None,
             entity: None,
             distance: 1.0,
@@ -50,13 +52,14 @@ impl CameraModel {
         self.model_key
     }
 
-    pub fn update(&mut self, model: &str, shader: &str) {
+    pub fn update(&mut self, model: &str, v_shader: &str, f_shader: &str) {
         self.model = model.to_owned();
-        self.shader = shader.to_owned();
+        self.v_shader = v_shader.to_owned();
+        self.f_shader = f_shader.to_owned();
     }
 
-    pub fn shader(&self) -> &str {
-        &self.shader
+    pub fn shaders(&self) -> (&str, &str) {
+        (&self.v_shader, &self.f_shader)
     }
 
     pub fn load_model(
@@ -66,15 +69,15 @@ impl CameraModel {
         bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
     ) {
-        let file = &self.model;
-        let shader = &self.shader;
-
         let prev_model = if let Some(key) = self.model_key {
             self.model_key = None;
             model_manager.remove(&key)
         } else {
             None
         };
+
+        let file = &self.model;
+        let (v_shader, f_shader) = self.shaders();
 
         let primitive = wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -89,7 +92,7 @@ impl CameraModel {
         let color_target = wgpu::ColorTargetState {
             format: surface_configuration.format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::all(),
+            write_mask: wgpu::ColorWrites::ALL,
         };
 
         let depth_stencil = wgpu::DepthStencilState {
@@ -103,7 +106,8 @@ impl CameraModel {
         self.model_key = World::load_object(
             model_manager,
             file,
-            shader,
+            v_shader,
+            f_shader,
             buffers,
             bind_group_layouts,
             surface_configuration,

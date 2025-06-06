@@ -1,10 +1,12 @@
-use super::{Light, ShaderManager, Vertex, VertexInstance};
-use crate::{camera::Camera, BindGroup, EngineError, RenderBindGroupLayouts, Texture, WgpuBuffer};
+use crate::{
+    camera::Camera, BindGroup, EngineError, Light, RenderBindGroupLayouts, ShaderManager, Texture,
+    Vertex, VertexInstance, WgpuBuffer,
+};
 use bytemuck::{Pod, Zeroable};
 use wgpu::{BufferUsages, RenderPipeline};
 
 #[repr(C)]
-#[derive(Copy, Clone, Zeroable, Pod)]
+#[derive(Debug, Copy, Clone, Zeroable, Pod)]
 pub struct DebugUniform {
     pub mode: u32,
     _pad0: [f32; 3],
@@ -93,7 +95,7 @@ impl DebugMode {
         let color_target = wgpu::ColorTargetState {
             format: surface_configuration.format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::all(),
+            write_mask: wgpu::ColorWrites::ALL,
         };
 
         let depth_stencil = wgpu::DepthStencilState {
@@ -207,18 +209,13 @@ impl DebugMode {
     }
 
     pub fn next_mode(&mut self, device: &wgpu::Device, camera: &Camera, light: &Light) {
-        let mut mode = if self.mode == 0 {
-            1
-        } else {
-            let current_mode = self.mode;
-            let next_mode = current_mode + 1;
-            next_mode
-        };
+        let current_mode = self.mode;
+        let mut next_mode = current_mode + 1;
 
-        if mode > 7 {
-            mode = 0;
+        if next_mode > 7 {
+            next_mode = 0;
         }
-        self.rebuild(device, mode, camera, light);
+        self.rebuild(device, next_mode, camera, light);
     }
     
     fn rebuild(&mut self, device: &wgpu::Device, mode: u32, camera: &Camera, light: &Light) {

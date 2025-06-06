@@ -1,70 +1,109 @@
-use crate::RenderBindGroupLayouts;
+use crate::{EngineError, RenderBindGroupLayouts, Vertex2d};
 
-pub struct HDR {
-    pipeline: wgpu::RenderPipeline,
+pub fn create_hdr_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> Result<wgpu::RenderPipeline, EngineError> {
+    let v_shader = crate::Shader::load("hdr.vert.wgsl")?;
+    let f_shader = crate::Shader::load("hdr.frag.wgsl")?;
+
+    let pipeline_layout = &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("hdr pipeline layout"),
+        bind_group_layouts: &[&RenderBindGroupLayouts::texture()],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("HDR pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &v_shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &f_shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: None,
+
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        multiview: None,
+        cache: None,
+    });
+    Ok(pipeline)
 }
-impl HDR {
-    fn create_pipeline(
-        device: &wgpu::Device,
-        shader: &wgpu::ShaderModule,
-        format: wgpu::TextureFormat,
-    ) -> wgpu::RenderPipeline {
-        let layout = &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("hdr pipeline layout"),
-            bind_group_layouts: &[&RenderBindGroupLayouts::texture()],
-            push_constant_ranges: &[],
-        });
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("HDR pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
+pub fn create_sprite2d_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> Result<wgpu::RenderPipeline, EngineError> {
+    let f_shader = crate::Shader::load("sprite2d.frag.wgsl")?;
+    let v_shader = crate::Shader::load("sprite2d.vert.wgsl")?;
+    let ortho_bind_group_layout = crate::RenderBindGroupLayouts::ortho_uniform();
+    let texture_bind_group_layout = crate::RenderBindGroupLayouts::texture();
 
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        })
-    }
-    pub fn create(
-        device: &wgpu::Device,
-        surface_config: &wgpu::SurfaceConfiguration,
-    ) -> Result<HDR, crate::EngineError> {
-        let shader = "hdr.wgsl";
-        let hdr_shader = crate::Shader::load(shader)?;
-        let pipeline = HDR::create_pipeline(device, &hdr_shader, surface_config.format);
-        Ok(Self { pipeline })
-    }
-    pub fn pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.pipeline
-    }
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(&format!("spride 2d pipeline layout")),
+        bind_group_layouts: &[ortho_bind_group_layout, texture_bind_group_layout],
+        push_constant_ranges: &[],
+    });
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(&format!("sprite 2d pipeline",)),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &v_shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Vertex2d::LAYOUT],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &f_shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent::OVER,
+                    alpha: wgpu::BlendComponent::OVER,
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: Default::default(),
+    });
+    Ok(pipeline)
 }
 
 pub struct PipelineManager {
@@ -78,13 +117,6 @@ impl PipelineManager {
             render: crate::RenderPipelineManager::new(),
             compute: crate::ComputePipelineManager::new(),
         }
-    }
-
-    pub fn hdr(
-        device: &wgpu::Device,
-        cfg: &wgpu::SurfaceConfiguration,
-    ) -> Result<HDR, crate::EngineError> {
-        HDR::create(device, cfg)
     }
 }
 pub struct ComputePipelineManager {

@@ -1,18 +1,27 @@
 use glam::{Mat4, Vec3};
 
+//
+// --------------
+//  CAMERA UNIFORM
+// --------------
+
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
-    inv_proj: [[f32; 4]; 4],
-    inv_view: [[f32; 4]; 4],
-    view_pos: [f32; 3],
+    /// (projection * view) matrix
+    pub view_proj: [[f32; 4]; 4],
+    /// inverse of the projection matrix
+    pub inv_proj: [[f32; 4]; 4],
+    /// inverse of the view matrix
+    pub inv_view: [[f32; 4]; 4],
+    /// camera world‐position (xyz); w is unused
+    pub view_pos: [f32; 3],
     _pad: f32,
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
-        Self {
+        CameraUniform {
             view_proj: Mat4::IDENTITY.to_cols_array_2d(),
             inv_proj: Mat4::IDENTITY.to_cols_array_2d(),
             inv_view: Mat4::IDENTITY.to_cols_array_2d(),
@@ -20,18 +29,33 @@ impl CameraUniform {
             _pad: 0.0,
         }
     }
-    pub fn pos(&self) -> [f32; 3] {
-        self.view_pos
-    }
-    pub fn update(
-        &mut self,
-        vp: (Mat4, Mat4, Mat4), // (view_proj, inv_proj, inv_view)
-        view_pos: Vec3,
-    ) {
-        let (vp, inv_proj, inv_view) = vp;
+
+    /// Overwrite this uniform given:
+    ///   - view:    Mat4 look‐at matrix (camera→world)
+    ///   - proj:    Mat4 projection matrix (perspective or ortho)
+    ///   - cam_pos: camera’s world position
+    pub fn update(&mut self, view: Mat4, proj: Mat4, cam_pos: Vec3) {
+        let vp = proj * view;
+        let inv_proj = proj.inverse();
+        let inv_view = view.inverse();
+
         self.view_proj = vp.to_cols_array_2d();
         self.inv_proj = inv_proj.to_cols_array_2d();
         self.inv_view = inv_view.to_cols_array_2d();
-        self.view_pos = view_pos.to_array();
+        self.view_pos = cam_pos.to_array();
+    }
+}
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct OrthoUniform {
+    pub proj: [[f32; 4]; 4],
+}
+
+impl OrthoUniform {
+    pub fn new(width: f32, height: f32) -> Self {
+        let ortho = glam::Mat4::orthographic_rh_gl(0.0, width, height, 0.0, -1.0, 1.0);
+        Self {
+            proj: ortho.to_cols_array_2d(),
+        }
     }
 }

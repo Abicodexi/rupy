@@ -47,7 +47,7 @@ impl Physics {
     }
 
     /// Physics tick: updates positions/velocities
-    pub fn update(&mut self, camera: &Camera, dt: f32, terrain: &Terrain) {
+    pub fn update(&mut self, camera: &Camera, dt: f64, terrain: &Terrain) {
         let camera_pos = *camera.eye();
 
         let medium = if camera.free_look() || camera_pos.y > GROUND_Y + 4.0 {
@@ -62,7 +62,7 @@ impl Physics {
         };
         let medium_props = medium.properties();
 
-        let drag_factor = medium_props.drag.powf(dt);
+        let drag_factor = medium_props.drag.powf(dt as f32);
         let max_fall_speed = -50.0;
 
         for (pos_opt, vel_opt) in self.positions.iter_mut().zip(&mut self.velocities) {
@@ -75,9 +75,9 @@ impl Physics {
                 if vel.0.z.abs() < 0.01 {
                     vel.0.z = 0.0;
                 }
-                vel.0.y += medium_props.gravity.y * dt;
+                vel.0.y += medium_props.gravity.y * dt as f32;
                 vel.0.y = vel.0.y.max(max_fall_speed);
-                pos.0 += vel.0 * dt;
+                pos.0 += vel.0 * dt as f32;
 
                 if pos.0.y < ENTITY_MIN_Y {
                     pos.0.y = ENTITY_MIN_Y;

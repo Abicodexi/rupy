@@ -1,10 +1,9 @@
-use crate::{DebugUniform, WgpuBuffer};
+use crate::{
+    camera::{Camera, CameraUniform, OrthoUniform},
+    DebugUniform, Light, LightUniform, Texture, WgpuBuffer,
+};
 
 use super::{CacheStorage, HashCache, TextureManager};
-
-pub struct BindGroupBindingType {
-    pub(crate) binding: wgpu::BindingType,
-}
 
 /// A single binding definition.
 pub struct BindingDef {
@@ -46,6 +45,8 @@ pub struct RenderBindGroupLayouts {
     pub normal: wgpu::BindGroupLayout,
     pub material_storage: wgpu::BindGroupLayout,
     pub debug: wgpu::BindGroupLayout,
+    pub sprite_2d: wgpu::BindGroupLayout,
+    pub ortho_uniform: wgpu::BindGroupLayout,
 }
 
 impl RenderBindGroupLayouts {
@@ -86,6 +87,12 @@ impl RenderBindGroupLayouts {
     pub fn debug() -> &'static wgpu::BindGroupLayout {
         &Self::get().debug
     }
+    pub fn sprite_2d() -> &'static wgpu::BindGroupLayout {
+        &Self::get().sprite_2d
+    }
+    pub fn ortho_uniform() -> &'static wgpu::BindGroupLayout {
+        &Self::get().ortho_uniform
+    }
 
     fn new(device: std::sync::Arc<wgpu::Device>) -> Self {
         // Diffuse textures (2D)
@@ -93,12 +100,12 @@ impl RenderBindGroupLayouts {
             BindingDef {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::D2[0].binding.clone(),
+                ty: Texture::TEXTURE_D2_BINDING,
             },
             BindingDef {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::D2[1].binding.clone(),
+                ty: Texture::SAMPLER_FILTERING_BINDING,
             },
         ];
         let diffuse = create_layout(&device, Some("texture bind group layout"), diffuse_defs);
@@ -107,7 +114,7 @@ impl RenderBindGroupLayouts {
         let light_defs = &[BindingDef {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: crate::Light::UNIFORM_BUFFER_BINDING.binding.clone(),
+            ty: Light::BINDING,
         }];
         let light = create_layout(&device, Some("light bind group layout"), light_defs);
 
@@ -115,9 +122,7 @@ impl RenderBindGroupLayouts {
         let camera_defs = &[BindingDef {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: crate::camera::Camera::UNIFORM_BUFFER_BINDING
-                .binding
-                .clone(),
+            ty: Camera::BINDING,
         }];
         let camera = create_layout(&device, Some("camera bind group layout"), camera_defs);
 
@@ -126,12 +131,12 @@ impl RenderBindGroupLayouts {
             BindingDef {
                 binding: 0,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: crate::Texture::PROJECTION[0].binding.clone(),
+                ty: Texture::PROJECTION[0],
             },
             BindingDef {
                 binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: crate::Texture::PROJECTION[1].binding.clone(),
+                ty: Texture::PROJECTION[1],
             },
         ];
         let equirect_src = create_layout(&device, Some("equirect src layout"), equirect_src_defs);
@@ -163,9 +168,9 @@ impl RenderBindGroupLayouts {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                        crate::camera::uniform::CameraUniform,
-                    >() as u64),
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<CameraUniform>() as u64,
+                    ),
                 },
             },
             BindingDef {
@@ -174,9 +179,9 @@ impl RenderBindGroupLayouts {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                        crate::light::LightUniform,
-                    >() as u64),
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<LightUniform>() as u64,
+                    ),
                 },
             },
         ];
@@ -187,22 +192,22 @@ impl RenderBindGroupLayouts {
             BindingDef {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::NORMAL[0].binding.clone(),
+                ty: crate::Texture::TEXTURE_D2_BINDING,
             },
             BindingDef {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::NORMAL[1].binding.clone(),
+                ty: crate::Texture::SAMPLER_FILTERING_BINDING,
             },
             BindingDef {
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::NORMAL[2].binding.clone(),
+                ty: crate::Texture::TEXTURE_D2_BINDING,
             },
             BindingDef {
                 binding: 3,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: crate::Texture::NORMAL[3].binding.clone(),
+                ty: crate::Texture::SAMPLER_FILTERING_BINDING,
             },
         ];
         let normal = create_layout(&device, Some("normal bind group layout"), normal_defs);
@@ -232,9 +237,9 @@ impl RenderBindGroupLayouts {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                        crate::camera::uniform::CameraUniform,
-                    >() as u64),
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<CameraUniform>() as u64,
+                    ),
                 },
             },
             BindingDef {
@@ -243,9 +248,9 @@ impl RenderBindGroupLayouts {
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
-                        crate::light::LightUniform,
-                    >() as u64),
+                    min_binding_size: std::num::NonZeroU64::new(
+                        std::mem::size_of::<LightUniform>() as u64,
+                    ),
                 },
             },
             BindingDef {
@@ -263,6 +268,45 @@ impl RenderBindGroupLayouts {
         ];
         let debug = create_layout(&device, Some("debug bind grop layout"), debug_defs);
 
+        let sprite_2d_defs = &[
+            // binding 0 → a 2D texture‐array (one layer per font page)
+            BindingDef {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            },
+            // binding 1 → a filtering sampler
+            BindingDef {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            },
+        ];
+        let sprite_2d = create_layout(
+            &device,
+            Some("sprite_fonts bind group layout"),
+            sprite_2d_defs,
+        );
+        let ortho_uniform_defs = &[BindingDef {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(
+                    std::mem::size_of::<OrthoUniform>() as u64
+                ),
+            },
+        }];
+        let ortho_uniform = create_layout(
+            &device,
+            Some("ortho uniform bind group layout"),
+            ortho_uniform_defs,
+        );
         RenderBindGroupLayouts {
             device: device.clone(),
             diffuse,
@@ -274,6 +318,8 @@ impl RenderBindGroupLayouts {
             normal,
             material_storage,
             debug,
+            sprite_2d,
+            ortho_uniform,
         }
     }
 }
@@ -281,6 +327,19 @@ impl RenderBindGroupLayouts {
 pub struct BindGroup;
 
 impl BindGroup {
+    pub fn ortho_uniform(
+        device: &wgpu::Device,
+        ortho_uniform_buffer: &crate::WgpuBuffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &RenderBindGroupLayouts::ortho_uniform(),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ortho_uniform_buffer.get().as_entire_binding(),
+            }],
+            label: Some("combined UBO bind group"),
+        })
+    }
     pub fn equirect_dst(device: &wgpu::Device, dst: &super::Texture) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} projection destination bind group", dst.label)),
@@ -337,7 +396,7 @@ impl BindGroup {
     pub fn light(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("light uniform bind group"),
-            layout: &crate::RenderBindGroupLayouts::camera(),
+            layout: &crate::RenderBindGroupLayouts::light(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.get().as_entire_binding(),
@@ -463,6 +522,24 @@ impl BindGroup {
                 },
             ],
             label: Some("combined UBO+debug bind group"),
+        })
+    }
+    pub fn sprite2d(device: &wgpu::Device, texture: &super::Texture) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("sprite 2d bind group")),
+            layout: RenderBindGroupLayouts::sprite_2d(),
+            entries: &[
+                // binding 0 → texture array view
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                // binding 1 → sampler
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
         })
     }
 }

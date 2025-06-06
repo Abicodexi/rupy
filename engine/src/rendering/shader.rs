@@ -1,7 +1,5 @@
 pub struct Shader;
 impl Shader {
-    pub const DEFAULT: &str = "v_normal.wgsl";
-
     pub fn load(shader: &str) -> Result<wgpu::ShaderModule, crate::EngineError> {
         let binding = crate::GPU::get();
         let gpu = binding

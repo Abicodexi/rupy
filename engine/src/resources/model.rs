@@ -23,6 +23,7 @@ impl ModelAsset {
         let (mesh, mat) = &self.asset;
         let material = if let Some(m) = mat {
             let idx = materials.create_storage_idx();
+
             Some(Arc::new(Material::from_asset(
                 queue,
                 device,
@@ -81,7 +82,8 @@ impl Model {
         materials: &mut MaterialManager,
         model: &tobj::Model,
         material: Option<&tobj::Material>,
-        shader: &str,
+        v_shader: &str,
+        f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         surface_configuration: &wgpu::SurfaceConfiguration,
         primitive: wgpu::PrimitiveState,
@@ -100,7 +102,8 @@ impl Model {
                     mat_asset.color_target = color_target;
                     mat_asset.depth_stencil = depth_stencil;
                     mat_asset.bind_group_layouts = bind_group_layouts;
-                    mat_asset.shader = shader.to_string();
+                    mat_asset.v_shader = v_shader.to_string();
+                    mat_asset.f_shader = f_shader.to_string();
 
                     Some(mat_asset)
                 } else {
@@ -138,7 +141,8 @@ impl ModelManager {
     pub async fn load_object_file(
         &mut self,
         file: &str,
-        shader: &str,
+        v_shader: &str,
+        f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -187,7 +191,8 @@ impl ModelManager {
                 &mut self.materials,
                 &m,
                 mat,
-                &shader,
+                v_shader,
+                f_shader,
                 buffers,
                 surface_configuration,
                 primitive,

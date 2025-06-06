@@ -6,6 +6,7 @@ use winit::event_loop::EventLoopProxy;
 pub enum ApplicationEvent {
     Shutdown,
     Projection,
+    MenuCallback(&'static str),
 }
 
 pub trait EventProxyTrait<T: 'static + std::fmt::Debug> {

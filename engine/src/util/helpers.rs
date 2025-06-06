@@ -37,7 +37,8 @@ pub fn debug_scene(
     if let Some(model_key) = World::load_object(
         model_manager,
         "goblin.obj",
-        "v_normal.wgsl",
+        "normal.vert.wgsl",
+        "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
         vec![
             RenderBindGroupLayouts::uniform().clone(),
@@ -50,7 +51,7 @@ pub fn debug_scene(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Front),
+            cull_mode: Some(wgpu::Face::Back),
             unclipped_depth: false,
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
@@ -58,7 +59,7 @@ pub fn debug_scene(
         wgpu::ColorTargetState {
             format: surface_config.format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::all(),
+            write_mask: wgpu::ColorWrites::ALL,
         },
         Some(depth_stencil.clone()),
     ) {
@@ -72,7 +73,8 @@ pub fn debug_scene(
     if let Some(model_key) = World::load_object(
         model_manager,
         "cube.obj",
-        "v_normal.wgsl",
+        "normal.vert.wgsl",
+        "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
         vec![
             RenderBindGroupLayouts::uniform().clone(),
@@ -85,7 +87,7 @@ pub fn debug_scene(
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Front),
+            cull_mode: Some(wgpu::Face::Back),
             unclipped_depth: false,
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
@@ -93,7 +95,7 @@ pub fn debug_scene(
         wgpu::ColorTargetState {
             format: surface_config.format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::all(),
+            write_mask: wgpu::ColorWrites::ALL,
         },
         Some(depth_stencil),
     ) {

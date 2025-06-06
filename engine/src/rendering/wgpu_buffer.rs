@@ -39,6 +39,27 @@ impl WgpuBuffer {
         self.size
     }
 
+    /// Allocate a GPU buffer with a fixed byte‐capacity (uninitialized),
+    /// using the given usage flags. `capacity` is in bytes.
+    pub fn with_capacity(
+        device: &wgpu::Device,
+        capacity: wgpu::BufferAddress,
+        usage: wgpu::BufferUsages,
+        label: Option<&str>,
+    ) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: capacity,
+            usage,
+            mapped_at_creation: false,
+        });
+        WgpuBuffer {
+            buffer,
+            size: capacity as usize,
+            usage,
+            label: label.unwrap_or("unnamed").to_string(),
+        }
+    }
     /// Create a new empty GPU buffer with given usage flags
     pub fn new_empty(
         device: &wgpu::Device,

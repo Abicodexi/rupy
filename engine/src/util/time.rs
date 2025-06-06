@@ -4,35 +4,59 @@ use crate::TextRegion;
 
 #[derive(Debug)]
 pub struct Time {
-    last_update: Instant,
+    pub last_update: Instant,
     pub delta_time: f64,
     pub fps: f64,
     pub elapsed: f64,
-    frame_count: u32,
+    pub frame_count: u32,
+
+    pub accumulator: f64,
+    pub last_frame_time: Instant,
 }
 
 impl Time {
+    pub const TIME_STEP: f64 = 1.0 / 144.0;
+    pub const MAX_FRAME_TIME: f64 = 0.25;
     pub fn new() -> Self {
+        let now = Instant::now();
         Self {
-            last_update: Instant::now(),
+            last_update: now,
             delta_time: 0.0,
             fps: 0.0,
             elapsed: 0.0,
             frame_count: 0,
+            accumulator: 0.0,
+            last_frame_time: now,
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, max_frame_time: f64) -> f64 {
         let now = Instant::now();
-        let duration = now - self.last_update;
-        self.last_update = now;
+        let mut delta = (now - self.last_frame_time).as_secs_f64();
+        if delta > max_frame_time {
+            delta = max_frame_time;
+        }
+        self.last_frame_time = now;
 
-        self.delta_time = duration.as_secs_f64();
+        self.delta_time = delta;
         self.elapsed += self.delta_time;
         self.frame_count += 1;
 
         if self.delta_time > 0.0 {
             self.fps = 1.0 / self.delta_time;
+        }
+
+        self.accumulator += self.delta_time;
+
+        self.delta_time
+    }
+
+    pub fn consume_accumulator(&mut self, fixed_time_step: f64) -> bool {
+        if self.accumulator >= fixed_time_step {
+            self.accumulator -= fixed_time_step;
+            true
+        } else {
+            false
         }
     }
 

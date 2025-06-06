@@ -1,8 +1,8 @@
 use glam::Vec3;
 
 use crate::{
-    chunk::Chunk, log_info, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance,
-    Position, RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
+    chunk::Chunk, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance, Position,
+    RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -112,9 +112,10 @@ impl Terrain {
     }
 
     pub fn stream_build_meshes(&mut self) {
-        for (chunk, medium) in self.chunk_stream.values_mut() {
+        for (chunk, ..) in self.chunk_stream.values_mut() {
             if chunk.dirty {
-                chunk.mesh = Some(chunk.build_chunk_mesh());
+                let mesh = chunk.build_chunk_mesh();
+                chunk.mesh = Some(mesh);
                 chunk.dirty = false;
             }
         }
@@ -131,7 +132,7 @@ impl Terrain {
                 &Rotation::zero(),
                 &Scale::one(),
             );
-            let vertex_instances: VertexInstance = transform.to_vertex_instance(0);
+            let vertex_instances: VertexInstance = transform.to_vertex_instance(1);
             instances.push(vertex_instances);
         }
 
@@ -154,8 +155,8 @@ impl Terrain {
             });
         }
     }
-
     pub fn all_meshes(&self) -> impl Iterator<Item = &MeshAsset> {
+        #[allow(unused_variables)]
         self.chunk_stream
             .values()
             .filter_map(|(c, m)| c.mesh.as_ref())
@@ -206,13 +207,16 @@ impl Terrain {
     ) -> Renderable {
         let terrain_mat = "ground";
 
-        let mat_shader = "v_normal.wgsl";
+        let v_shader = "normal.vert.wgsl";
+        let f_shader = "normal.frag.wgsl";
+
         let vec3_zero = [0.0; 3];
         let mat_key = CacheKey::from(terrain_mat);
         let mat_asset = MaterialAsset {
             name: terrain_mat.to_string(),
             key: mat_key,
-            shader: mat_shader.to_string(),
+            v_shader: v_shader.to_string(),
+            f_shader: f_shader.to_string(),
             ambient: vec3_zero,
             diffuse: vec3_zero,
             specular: vec3_zero,
@@ -223,7 +227,7 @@ impl Terrain {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Front),
+                cull_mode: Some(wgpu::Face::Back),
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -232,7 +236,7 @@ impl Terrain {
             color_target: wgpu::ColorTargetState {
                 format: surface_config.format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::all(),
+                write_mask: wgpu::ColorWrites::ALL,
             },
             bind_group_layouts: vec![
                 RenderBindGroupLayouts::uniform().clone(),
@@ -282,7 +286,6 @@ impl Terrain {
                     mesh: Arc::new(mesh),
                     material: Some(mat.clone()),
                 };
-                log_info!("Building medium: {:?} at pos: {:?}", medium, pos);
                 self.insert_chunk_stream(chunk, medium);
                 self.mesh_instances.push(mesh_instance);
             }

@@ -13,6 +13,25 @@ pub const J: usize = 4;
 pub const WASDJ: [usize; 5] = [W, A, S, D, J];
 
 #[derive(Debug)]
+struct MouseState {
+    is_down: bool,
+    just_pressed: bool,
+}
+
+impl MouseState {
+    pub fn new() -> Self {
+        Self {
+            is_down: false,
+            just_pressed: false,
+        }
+    }
+    fn update(&mut self, is_down_now: bool) {
+        self.just_pressed = is_down_now && !self.is_down;
+        self.is_down = is_down_now;
+    }
+}
+
+#[derive(Debug)]
 pub enum Action {
     Projection,
     Movement(bool),
@@ -31,6 +50,8 @@ pub struct CameraControls {
     yaw: f32,
     zoom: f32,
     last_mouse: Option<(f32, f32)>,
+    mouse_state_left: MouseState,
+    mouse_state_right: MouseState,
 }
 
 impl CameraControls {
@@ -47,6 +68,8 @@ impl CameraControls {
             yaw: 0.0,
             zoom: 0.0,
             last_mouse: None,
+            mouse_state_left: MouseState::new(),
+            mouse_state_right: MouseState::new(),
         }
     }
     pub fn set_zoom(&mut self, level: f32) {
@@ -66,6 +89,21 @@ impl CameraControls {
     }
     pub fn zoom(&self) -> f32 {
         self.zoom
+    }
+    pub fn last_mouse_pos(&self) -> &Option<(f32, f32)> {
+        &self.last_mouse
+    }
+    pub fn mouse_state_is_down(&self) -> (bool, bool) {
+        (
+            self.mouse_state_left.is_down,
+            self.mouse_state_right.is_down,
+        )
+    }
+    pub fn mouse_just_pressed(&self) -> (bool, bool) {
+        (
+            self.mouse_state_left.just_pressed,
+            self.mouse_state_right.just_pressed,
+        )
     }
     pub fn process_event(&mut self, event: &WindowEvent) -> bool {
         match event {
@@ -96,7 +134,6 @@ impl CameraControls {
                     _ => false,
                 }
             }
-
             WindowEvent::CursorMoved { position, .. } => {
                 let (x, y) = (position.x as f32, position.y as f32);
                 if let Some((lx, ly)) = self.last_mouse {
@@ -108,17 +145,40 @@ impl CameraControls {
                 self.last_mouse = Some((x, y));
                 true
             }
+            WindowEvent::MouseInput { state, button, .. } => match button {
+                winit::event::MouseButton::Left => {
+                    self.mouse_state_left.update(state.is_pressed());
+                    true
+                }
+                winit::event::MouseButton::Right => {
+                    self.mouse_state_right.update(state.is_pressed());
+                    true
+                }
+                _ => false,
+            },
             WindowEvent::MouseWheel { delta, .. } => {
-                if let MouseScrollDelta::LineDelta(_, _scroll) = delta {}
+                self.process_scroll(delta);
                 true
             }
             _ => false,
         }
     }
     pub fn process_scroll(&mut self, delta: &MouseScrollDelta) {
-        self.zoom = -match delta {
-            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
-            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
+        self.zoom += match delta {
+            MouseScrollDelta::LineDelta(_, scroll) => {
+                if *scroll > 0.0 {
+                    0.1
+                } else {
+                    -0.1
+                }
+            }
+            MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => {
+                if *scroll > 0.0 {
+                    0.1
+                } else {
+                    -0.1
+                }
+            }
         };
     }
 
@@ -127,7 +187,7 @@ impl CameraControls {
     }
 
     pub fn inputs(&self) -> [bool; 5] {
-        [self.forward, self.right, self.back, self.left, self.jump]
+        [self.forward, self.left, self.back, self.right, self.jump]
     }
 
     pub fn text_region(&mut self, position: [f32; 2]) -> TextRegion {

@@ -1,4 +1,3 @@
-use crate::{CacheKey, CacheStorage, HashCache};
 /// Wrapper around Glyphon buffers
 #[allow(dead_code)]
 pub struct GlyphonBuffer {
@@ -36,6 +35,9 @@ impl GlyphonBuffer {
     }
     pub fn get(&self) -> &glyphon::Buffer {
         &self.buffer
+    }
+    pub fn get_mut(&mut self) -> &mut glyphon::Buffer {
+        &mut self.buffer
     }
     /// Create a Glyphon buffer from explicit metrics and pre-populated lines
     pub fn from_data(
@@ -80,42 +82,5 @@ impl GlyphonBuffer {
     /// Clear all lines from the buffer
     pub fn shape(&mut self, font_system: &mut glyphon::FontSystem) {
         self.buffer.shape_until_scroll(font_system, false);
-    }
-}
-
-pub type GlyphonBufferCacheType = HashCache<GlyphonBuffer>;
-pub struct GlyphonBufferManager {
-    inner: GlyphonBufferCacheType,
-}
-
-impl GlyphonBufferManager {
-    pub fn new() -> Self {
-        Self {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl CacheStorage<GlyphonBuffer> for GlyphonBufferManager {
-    fn get(&self, key: &CacheKey) -> Option<&GlyphonBuffer> {
-        self.inner.get(&key)
-    }
-    fn contains(&self, key: &CacheKey) -> bool {
-        self.inner.contains_key(key)
-    }
-    fn get_mut(&mut self, key: &CacheKey) -> Option<&mut GlyphonBuffer> {
-        self.inner.get_mut(key)
-    }
-    fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> &mut GlyphonBuffer
-    where
-        F: FnOnce() -> GlyphonBuffer,
-    {
-        self.inner.entry(key).or_insert_with(create_fn)
-    }
-    fn insert(&mut self, key: CacheKey, resource: GlyphonBuffer) {
-        self.inner.insert(key, resource);
-    }
-    fn remove(&mut self, key: &CacheKey) -> Option<GlyphonBuffer> {
-        self.inner.remove(key)
     }
 }

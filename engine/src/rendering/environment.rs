@@ -25,8 +25,7 @@ impl WorldProjection {
         hdr_texture: &str,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Result<Self, crate::EngineError> {
-        let path = &crate::Asset::resolve(&format!("hdr/{}", hdr_texture));
-        let bytes = crate::Asset::read_bytes(&path)?;
+        let bytes = crate::Asset::read_bytes(&format!("hdr/{}", hdr_texture))?;
         let (pixels, meta) = crate::Texture::decode_hdr(&bytes)?;
 
         let src_texture = crate::Texture::new(

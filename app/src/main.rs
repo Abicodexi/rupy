@@ -19,9 +19,10 @@ async fn main() -> Result<(), EngineError> {
         let _ = logger.init();
     }
 
-    let (_tx, rx): (Sender<ApplicationEvent>, Receiver<ApplicationEvent>) = channel::unbounded();
+    let (tx, rx): (Sender<ApplicationEvent>, Receiver<ApplicationEvent>) = channel::unbounded();
 
     let arc_rx = Arc::new(rx);
+    let arc_tx = Arc::new(tx);
 
     let event_loop = EventLoop::<ApplicationEvent>::with_user_event().build()?;
     let proxy: Arc<dyn EventProxyTrait<ApplicationEvent> + Send + Sync> =
@@ -33,5 +34,5 @@ async fn main() -> Result<(), EngineError> {
 
     let _ = RenderBindGroupLayouts::get();
 
-    Ok(event_loop.run_app(&mut ApplicationState::new())?)
+    Ok(event_loop.run_app(&mut ApplicationState::new(arc_tx))?)
 }

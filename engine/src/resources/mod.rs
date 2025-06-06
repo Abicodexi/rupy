@@ -4,9 +4,6 @@ pub use bind_group::*;
 pub mod material;
 pub use material::*;
 
-pub mod buffer;
-pub use buffer::*;
-
 pub mod cache;
 pub use cache::*;
 
@@ -27,7 +24,6 @@ pub struct Managers {
     pub device: std::sync::Arc<wgpu::Device>,
     pub shader_manager: crate::ShaderManager,
     pub pipeline_manager: crate::PipelineManager,
-    pub buffer_manager: BufferManager,
     pub texture_manager: TextureManager,
     pub material_manager: crate::MaterialManager,
     pub bind_group_manager: crate::BindGroupManager,
@@ -37,7 +33,6 @@ impl Managers {
     fn new(queue: std::sync::Arc<wgpu::Queue>, device: std::sync::Arc<wgpu::Device>) -> Self {
         let shader_manager = crate::ShaderManager::new();
         let texture_manager = TextureManager::new();
-        let buffer_manager = BufferManager::new();
         let material_manager = crate::MaterialManager::new(&device);
         let bind_group_manager = BindGroupManager::new();
         let pipeline_manager = crate::PipelineManager::new();
@@ -46,7 +41,6 @@ impl Managers {
             device: device.clone(),
             shader_manager,
             pipeline_manager,
-            buffer_manager,
             texture_manager,
             material_manager,
             bind_group_manager,

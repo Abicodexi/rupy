@@ -25,7 +25,8 @@ impl Asset {
             .map_err(|e| EngineError::FileSystemError(format!("{:?}: {}", path, e)))
     }
 
-    pub fn read_bytes<P: AsRef<std::path::Path>>(path: &P) -> Result<Vec<u8>, EngineError> {
+    pub fn read_bytes(rel_path: &str) -> Result<Vec<u8>, EngineError> {
+        let path = Asset::resolve(rel_path);
         let bytes = std::fs::read(path)?;
         Ok(bytes)
     }

@@ -11,7 +11,7 @@ pub enum RenderTargetKind {
 pub struct FrameBufferSize(pub u32, u32);
 impl From<winit::dpi::PhysicalSize<u32>> for FrameBufferSize {
     fn from(value: winit::dpi::PhysicalSize<u32>) -> Self {
-        FrameBufferSize(value.width,value.height)
+        FrameBufferSize(value.width, value.height)
     }
 }
 impl From<(u32, u32)> for FrameBufferSize {
@@ -31,7 +31,10 @@ impl From<&wgpu::SurfaceConfiguration> for FrameBufferSize {
 }
 impl Into<glyphon::Resolution> for FrameBufferSize {
     fn into(self) -> glyphon::Resolution {
-        glyphon::Resolution { width: self.0, height: self.1 }
+        glyphon::Resolution {
+            width: self.0,
+            height: self.1,
+        }
     }
 }
 
@@ -125,14 +128,16 @@ impl FrameBuffer {
     }
 
     pub fn depth_attachment(&self) -> Option<wgpu::RenderPassDepthStencilAttachment> {
-        self.depth.as_ref().map(|d| wgpu::RenderPassDepthStencilAttachment {
-            view: &d.view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: wgpu::StoreOp::Store,
-            }),
-            stencil_ops: None,
-        })
+        self.depth
+            .as_ref()
+            .map(|d| wgpu::RenderPassDepthStencilAttachment {
+                view: &d.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            })
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, new_size: FrameBufferSize) {
