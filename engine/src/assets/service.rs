@@ -1,4 +1,4 @@
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -30,15 +30,23 @@ pub struct AssetService {
 }
 
 impl AssetService {
-    pub fn new(queue: Arc<wgpu::Queue>, device: Arc<wgpu::Device>) -> Self {
+    pub fn new(
+        queue: Arc<wgpu::Queue>,
+        device: Arc<wgpu::Device>,
+        materials: MaterialManager,
+        models: ModelManager,
+        textures: TextureManager,
+        shaders: ShaderManager,
+        pipelines: PipelineManager,
+    ) -> Self {
         Self {
             queue,
             device,
-            materials: Arc::new(RwLock::new(MaterialManager::new())),
-            models: Arc::new(RwLock::new(ModelManager::new())),
-            textures: Arc::new(RwLock::new(TextureManager::new())),
-            shaders: Arc::new(RwLock::new(ShaderManager::new())),
-            pipelines: Arc::new(RwLock::new(PipelineManager::new())),
+            materials: Arc::new(RwLock::new(materials)),
+            models: Arc::new(RwLock::new(models)),
+            textures: Arc::new(RwLock::new(textures)),
+            shaders: Arc::new(RwLock::new(shaders)),
+            pipelines: Arc::new(RwLock::new(pipelines)),
         }
     }
     // Immutable borrowors
@@ -57,25 +65,45 @@ impl AssetService {
     pub fn pipelines(&self) -> Arc<RwLock<PipelineManager>> {
         Arc::clone(&self.pipelines)
     }
+    pub fn spawn_thread(
+        queue: Arc<wgpu::Queue>,
+        device: Arc<wgpu::Device>,
+        rx: Arc<Receiver<AssetRequest>>,
+        materials: MaterialManager,
+        models: ModelManager,
+        textures: TextureManager,
+        shaders: ShaderManager,
+        pipelines: PipelineManager,
+    ) {
+        spawn_asset_service_thread(
+            queue, device, rx, materials, models, textures, shaders, pipelines,
+        );
+    }
 }
 
-pub fn spawn_asset_service_thread(
+fn spawn_asset_service_thread(
     queue: Arc<wgpu::Queue>,
     device: Arc<wgpu::Device>,
-) -> Sender<AssetRequest> {
-    let (tx, rx): (Sender<AssetRequest>, Receiver<AssetRequest>) = unbounded();
-    let service = Arc::new(AssetService::new(queue, device));
+    rx: Arc<Receiver<AssetRequest>>,
+    materials: MaterialManager,
+    models: ModelManager,
+    textures: TextureManager,
+    shaders: ShaderManager,
+    pipelines: PipelineManager,
+) {
+    let service: Arc<AssetService> = AssetService::new(
+        queue, device, materials, models, textures, shaders, pipelines,
+    )
+    .into();
     GLOBAL_ASSET_SERVICE.set(service.clone()).ok().unwrap();
-    GLOBAL_ASSET_TX.set(tx.clone()).ok().unwrap();
+    let rx_clone = rx.clone();
 
     std::thread::spawn(move || {
-        asset_service_thread(service, rx);
+        asset_service_thread(service, rx_clone);
     });
-
-    tx
 }
 
-fn asset_service_thread(service: Arc<AssetService>, rx: Receiver<AssetRequest>) {
+fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetRequest>>) {
     while let Ok(request) = rx.recv() {
         match request {
             AssetRequest::LoadTexture { texture, format } => {
