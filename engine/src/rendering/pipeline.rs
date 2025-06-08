@@ -1,79 +1,27 @@
-use crate::{EngineError, RenderBindGroupLayouts, Vertex2d};
+use wgpu::VertexBufferLayout;
 
-pub fn create_hdr_pipeline(
+use crate::{EngineError, ShaderManager};
+
+pub fn create_render_pipeline<'a>(
     device: &wgpu::Device,
+    shaders: &mut ShaderManager,
+    f_shader: &str,
+    v_shader: &str,
+    layout: wgpu::PipelineLayout,
+    buffers: &'a [VertexBufferLayout<'a>],
     format: wgpu::TextureFormat,
+    label: String,
 ) -> Result<wgpu::RenderPipeline, EngineError> {
-    let v_shader = crate::Shader::load("hdr.vert.wgsl")?;
-    let f_shader = crate::Shader::load("hdr.frag.wgsl")?;
+    let f_shader = shaders.load(device, f_shader)?;
+    let v_shader = shaders.load(device, v_shader)?;
 
-    let pipeline_layout = &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("hdr pipeline layout"),
-        bind_group_layouts: &[&RenderBindGroupLayouts::texture()],
-        push_constant_ranges: &[],
-    });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("HDR pipeline"),
-        layout: Some(&pipeline_layout),
+        label: Some(&label),
+        layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &v_shader,
             entry_point: Some("vs_main"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &f_shader,
-            entry_point: Some("fs_main"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            polygon_mode: wgpu::PolygonMode::Fill,
-            unclipped_depth: false,
-            conservative: false,
-        },
-        depth_stencil: None,
-
-        multisample: wgpu::MultisampleState {
-            count: 1,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-        cache: None,
-    });
-    Ok(pipeline)
-}
-pub fn create_sprite2d_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-) -> Result<wgpu::RenderPipeline, EngineError> {
-    let f_shader = crate::Shader::load("sprite2d.frag.wgsl")?;
-    let v_shader = crate::Shader::load("sprite2d.vert.wgsl")?;
-    let ortho_bind_group_layout = crate::RenderBindGroupLayouts::ortho_uniform();
-    let texture_bind_group_layout = crate::RenderBindGroupLayouts::texture();
-
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some(&format!("spride 2d pipeline layout")),
-        bind_group_layouts: &[ortho_bind_group_layout, texture_bind_group_layout],
-        push_constant_ranges: &[],
-    });
-
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(&format!("sprite 2d pipeline",)),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &v_shader,
-            entry_point: Some("vs_main"),
-            buffers: &[Vertex2d::LAYOUT],
+            buffers: &buffers,
             compilation_options: Default::default(),
         },
         fragment: Some(wgpu::FragmentState {

@@ -1,6 +1,7 @@
 use super::{CacheKey, HashCache, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance};
 use crate::{
-    log_info, log_warning, Asset, EngineError, PipelineManager, ShaderManager, TextureManager, AABB,
+    log_info, log_warning, AssetLoader, EngineError, PipelineManager, ShaderManager,
+    TextureManager, AABB,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -20,8 +21,8 @@ impl ModelAsset {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<(super::MeshInstance, AABB), EngineError> {
         let material = if let Some(asset) = &self.asset.1 {
@@ -33,7 +34,7 @@ impl ModelAsset {
                 pipeline_manager,
                 bind_group_layouts,
                 asset.clone(),
-                surface_configuration,
+                format,
                 buffers,
             )?;
             Some(m)
@@ -65,8 +66,8 @@ impl Model {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
     ) -> std::result::Result<Self, EngineError> {
@@ -78,7 +79,7 @@ impl Model {
             shader_manager,
             pipeline_manager,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
         )?;
         Ok(Self {
@@ -99,11 +100,11 @@ impl Model {
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
         primitive: wgpu::PrimitiveState,
         depth_stencil: Option<wgpu::DepthStencilState>,
         color_target: wgpu::ColorTargetState,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
     ) -> Result<Model, EngineError> {
         let vertices = MeshAsset::compute_vertex(&model);
         let indices = model.mesh.indices.clone();
@@ -134,7 +135,7 @@ impl Model {
             shader_manager,
             pipeline_manager,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
         )?;
         Ok(Self {
@@ -167,13 +168,13 @@ impl ModelManager {
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<(), EngineError> {
-        let base_dir = Asset::base_path();
+        let base_dir = AssetLoader::base_path();
         let path = base_dir.join("models").join(file);
         let (models, mat_res) = tobj::load_obj(
             &path,
@@ -220,11 +221,11 @@ impl ModelManager {
                 v_shader,
                 f_shader,
                 buffers,
-                surface_configuration,
+                format,
                 primitive,
                 depth_stencil.clone(),
                 color_target.clone(),
-                bind_group_layouts,
+                bind_group_layouts.clone(),
             )?);
 
             self.models.insert(m_key, model);
@@ -240,8 +241,8 @@ impl ModelManager {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
     ) -> Result<Arc<Model>, EngineError> {
@@ -257,7 +258,7 @@ impl ModelManager {
             shader_manager,
             pipeline_manager,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
             asset,
         )?);

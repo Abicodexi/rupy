@@ -1,10 +1,7 @@
+use super::Material;
+use crate::{Vertex, WgpuBuffer};
 use std::sync::Arc;
 
-use crate::{Vertex, WgpuBuffer};
-
-use super::Material;
-
-/// Raw vertex & index arrays off‐CPU.
 #[derive(Clone, Debug)]
 pub struct MeshAsset {
     pub vertices: Vec<Vertex>,

@@ -1,7 +1,8 @@
 use crate::{
-    BindGroupManager, CacheKey, CacheStorage, Entity, MaterialManager, ModelManager,
-    PipelineManager, ShaderManager, Texture, TextureManager, World,
+    CacheKey, CacheStorage, Entity, MaterialManager, ModelManager, PipelineManager, ShaderManager,
+    Texture, TextureManager, World,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub struct CameraModel {
@@ -75,8 +76,8 @@ impl CameraModel {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
     ) {
         let prev_model = if let Some(key) = self.model_key {
             self.model_key = None;
@@ -99,7 +100,7 @@ impl CameraModel {
         };
 
         let color_target = wgpu::ColorTargetState {
-            format: surface_configuration.format,
+            format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             write_mask: wgpu::ColorWrites::ALL,
         };
@@ -125,7 +126,7 @@ impl CameraModel {
             f_shader,
             buffers,
             bind_group_layouts,
-            surface_configuration,
+            format,
             primitive,
             color_target,
             Some(depth_stencil),

@@ -215,14 +215,14 @@ impl Camera {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
-        surface_config: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
     ) {
         if self.model.model_key().is_none() && !self.model.model().is_empty() {
-            let bind_group_layouts = &vec![
-                RenderBindGroupLayouts::uniform(),
-                RenderBindGroupLayouts::equirect_dst(),
-                RenderBindGroupLayouts::material_storage(),
-                RenderBindGroupLayouts::normal(),
+            let bind_group_layouts = vec![
+                RenderBindGroupLayouts::uniform().clone(),
+                RenderBindGroupLayouts::equirect_dst().clone(),
+                RenderBindGroupLayouts::material_storage().clone(),
+                RenderBindGroupLayouts::normal().clone(),
             ];
             self.model.load_model(
                 queue,
@@ -234,7 +234,7 @@ impl Camera {
                 pipeline_manager,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                 bind_group_layouts,
-                surface_config,
+                format,
             );
         }
     }

@@ -4,10 +4,13 @@ use pollster::FutureExt;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use crate::create_render_pipeline;
 use crate::log_info;
 use crate::AssetRequest;
 use crate::CacheStorage;
+use crate::RenderBindGroupLayouts;
 use crate::Vertex;
+use crate::Vertex2d;
 use crate::VertexInstance;
 use crate::{
     log_error, MaterialManager, ModelManager, PipelineManager, ShaderManager, TextureManager,
@@ -19,6 +22,7 @@ static GLOBAL_ASSET_TX: OnceCell<Sender<AssetRequest>> = OnceCell::new();
 pub struct AssetService {
     pub queue: Arc<wgpu::Queue>,
     pub device: Arc<wgpu::Device>,
+    pub bind_group_layouts: Arc<RenderBindGroupLayouts>,
     pub materials: Arc<RwLock<MaterialManager>>,
     pub models: Arc<RwLock<ModelManager>>,
     pub textures: Arc<RwLock<TextureManager>>,
@@ -36,9 +40,12 @@ impl AssetService {
         shaders: ShaderManager,
         pipelines: PipelineManager,
     ) -> Self {
+        RenderBindGroupLayouts::init();
+        let bind_group_layouts = RenderBindGroupLayouts::get().clone();
         Self {
             queue,
             device,
+            bind_group_layouts,
             materials: Arc::new(RwLock::new(materials)),
             models: Arc::new(RwLock::new(models)),
             textures: Arc::new(RwLock::new(textures)),
@@ -46,7 +53,6 @@ impl AssetService {
             pipelines: Arc::new(RwLock::new(pipelines)),
         }
     }
-    // Immutable borrowors
     pub fn materials(&self) -> Arc<RwLock<MaterialManager>> {
         Arc::clone(&self.materials)
     }
@@ -66,12 +72,12 @@ impl AssetService {
         queue: Arc<wgpu::Queue>,
         device: Arc<wgpu::Device>,
         rx: Arc<Receiver<AssetRequest>>,
-        materials: MaterialManager,
-        models: ModelManager,
-        textures: TextureManager,
-        shaders: ShaderManager,
-        pipelines: PipelineManager,
     ) {
+        let materials = MaterialManager::new();
+        let models = ModelManager::new();
+        let textures = TextureManager::new();
+        let shaders = ShaderManager::new();
+        let pipelines = PipelineManager::new();
         spawn_asset_service_thread(
             queue, device, rx, materials, models, textures, shaders, pipelines,
         );
@@ -88,15 +94,13 @@ fn spawn_asset_service_thread(
     shaders: ShaderManager,
     pipelines: PipelineManager,
 ) {
-    let service: Arc<AssetService> = AssetService::new(
+    let service = Arc::new(AssetService::new(
         queue, device, materials, models, textures, shaders, pipelines,
-    )
-    .into();
+    ));
     GLOBAL_ASSET_SERVICE.set(service.clone()).ok().unwrap();
-    let rx_clone = rx.clone();
 
     std::thread::spawn(move || {
-        asset_service_thread(service, rx_clone);
+        asset_service_thread(service, rx.clone());
     });
 }
 
@@ -112,6 +116,8 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
             }
             AssetRequest::LoadRenderPipeline {
                 layout,
+                f_shader,
+                v_shader,
                 format,
                 key,
                 label,
@@ -122,7 +128,10 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                             if let Ok(pipeline) = create_render_pipeline(
                                 &service.device,
                                 &mut shaders,
+                                &f_shader,
+                                &v_shader,
                                 layout,
+                                &[Vertex2d::LAYOUT],
                                 format,
                                 label,
                             ) {
@@ -134,9 +143,7 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
             }
             AssetRequest::LoadTexture { texture } => {
                 if let Ok(mut textures) = service.textures.write() {
-                    if let Err(e) =
-                        pollster::block_on(textures.load(&service.queue, &service.device, &texture))
-                    {
+                    if let Err(e) = textures.load(&service.queue, &service.device, &texture) {
                         log_error!("{}", e.to_string());
                     } else {
                         log_info!("Loaded texture: {}", texture);
@@ -197,8 +204,8 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                     service.shaders.write(),
                 ) {
                     if let Err(e) = materials.load_asset(
-                        &service.queue,
-                        &service.device,
+                        service.device.as_ref(),
+                        service.queue.as_ref(),
                         &mut textures,
                         &mut shaders,
                         &mut pipelines,

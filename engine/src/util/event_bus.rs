@@ -14,11 +14,11 @@ pub trait EventProxyTrait<T: 'static + std::fmt::Debug> {
 }
 
 pub struct EventProxy<T: 'static + std::fmt::Debug> {
-    event_loop_proxy: Arc<EventLoopProxy<T>>,
+    event_loop_proxy: EventLoopProxy<T>,
 }
 
 impl<T: 'static + std::fmt::Debug> EventProxy<T> {
-    pub fn new(event_loop_proxy: Arc<EventLoopProxy<T>>) -> Self {
+    pub fn new(event_loop_proxy: EventLoopProxy<T>) -> Self {
         Self { event_loop_proxy }
     }
 }

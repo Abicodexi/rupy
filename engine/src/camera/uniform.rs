@@ -8,13 +8,9 @@ use glam::{Mat4, Vec3};
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
-    /// (projection * view) matrix
     pub view_proj: [[f32; 4]; 4],
-    /// inverse of the projection matrix
     pub inv_proj: [[f32; 4]; 4],
-    /// inverse of the view matrix
     pub inv_view: [[f32; 4]; 4],
-    /// camera world‐position (xyz); w is unused
     pub view_pos: [f32; 3],
     _pad: f32,
 }
@@ -30,10 +26,6 @@ impl CameraUniform {
         }
     }
 
-    /// Overwrite this uniform given:
-    ///   - view:    Mat4 look‐at matrix (camera→world)
-    ///   - proj:    Mat4 projection matrix (perspective or ortho)
-    ///   - cam_pos: camera’s world position
     pub fn update<P: Into<Mat4>>(&mut self, view: Mat4, proj: P, cam_pos: Vec3) {
         let proj_mat: Mat4 = proj.into();
         let vp = proj_mat * view;

@@ -1,10 +1,10 @@
 use super::{BindGroup, HashCache, Texture, TextureManager};
 use crate::{
-    fallback_diffuse, fallback_normal, log_debug, log_warning, BindGroupManager, CacheKey,
-    CacheStorage, EngineError, PipelineManager, ShaderManager, WgpuBuffer,
+    fallback_diffuse, fallback_normal, log_debug, CacheKey, CacheStorage, EngineError,
+    PipelineManager, ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
-use wgpu::{BindGroupLayout, BufferUsages};
+use wgpu::BufferUsages;
 
 #[derive(Clone, Debug)]
 pub struct MaterialAsset {
@@ -109,8 +109,8 @@ impl MaterialAsset {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
-        bind_group_layouts: &Vec<&BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<
         (
@@ -122,12 +122,12 @@ impl MaterialAsset {
         let (dt, ..) = self
             .diffuse_texture
             .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration.format))
+            .map(|p| textures.get_or_load_texture(queue, device, p, format))
             .unwrap_or_else(|| Ok(fallback_diffuse(queue, device, textures)))?;
         let (nt, ..) = self
             .normal_texture
             .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration.format))
+            .map(|p| textures.get_or_load_texture(queue, device, p, format))
             .unwrap_or_else(|| Ok(fallback_normal(queue, device, textures)))?;
 
         let v_shader = shaders.load(device, &self.v_shader)?;
@@ -136,10 +136,11 @@ impl MaterialAsset {
         let label = self.name.clone();
         let cache_key = CacheKey::from(label.clone());
         let bind_group = BindGroup::normal(device, &dt, &nt, label.as_ref()).into();
-
+        let bgl_refs: Vec<&wgpu::BindGroupLayout> =
+            bind_group_layouts.iter().map(|arc| arc.as_ref()).collect();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&self.name),
-            bind_group_layouts: &bind_group_layouts,
+            bind_group_layouts: bgl_refs.as_ref(),
             push_constant_ranges: &[],
         });
 
@@ -209,8 +210,8 @@ impl Material {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: MaterialAsset,
     ) -> Result<Self, EngineError> {
@@ -221,7 +222,7 @@ impl Material {
             shaders,
             pipelines,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
         )?;
 
@@ -238,13 +239,13 @@ impl Material {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        mat: &tobj::Material,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        mat: tobj::Material,
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Material, EngineError> {
@@ -262,7 +263,7 @@ impl Material {
             shaders,
             pipelines,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
             asset,
         )?;
@@ -380,15 +381,15 @@ impl MaterialManager {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        mat: &tobj::Material,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        mat: tobj::Material,
         v_shader: &'a str,
         f_shader: &'a str,
-        primitive: &wgpu::PrimitiveState,
-        color_target: &wgpu::ColorTargetState,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        primitive: wgpu::PrimitiveState,
+        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
-        depth_stencil: &Option<wgpu::DepthStencilState>,
+        depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
         if let Some(mat) = self.materials.get(&CacheKey::from(format!("{}", mat.name))) {
             return Ok(mat.clone());
@@ -405,7 +406,7 @@ impl MaterialManager {
             f_shader,
             primitive.clone(),
             color_target.clone(),
-            surface_configuration,
+            format,
             buffers,
             depth_stencil.clone(),
         )?;
@@ -422,9 +423,9 @@ impl MaterialManager {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
         if let Some(mat) = self.materials.get(&asset.key) {
@@ -438,7 +439,7 @@ impl MaterialManager {
             shaders,
             pipelines,
             bind_group_layouts,
-            surface_configuration,
+            format,
             buffers,
         )?;
 

@@ -1,9 +1,9 @@
-use crate::{CacheKey, CacheStorage, EngineError, HashCache};
+use crate::{AssetLoader, CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
+use pollster::FutureExt;
 use std::io::Cursor;
 use std::sync::Arc;
 
-/// A GPU-ready texture: the texture itself, a view, and a sampler.
 #[derive(Debug)]
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -161,7 +161,7 @@ impl Texture {
         file_name: &str,
     ) -> Result<Texture, EngineError> {
         let path = &format!("textures/{}", file_name);
-        let file_bytes = crate::Asset::read_bytes(path)?;
+        let file_bytes = AssetLoader::read_bytes(path)?;
         let texture = Self::from_bytes(device, queue, &file_bytes, path).await?;
         Ok(texture)
     }
@@ -292,6 +292,19 @@ pub struct TextureManager {
     textures: HashCache<Arc<Texture>>,
 }
 impl TextureManager {
+    pub fn load(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        texture: &str,
+    ) -> Result<(), EngineError> {
+        let tex_key = CacheKey::from(texture);
+        if !self.contains(&tex_key) {
+            let tex = AssetLoader::load_texture_file(&queue, &device, texture).block_on()?;
+            self.insert(tex_key, tex.into());
+        }
+        Ok(())
+    }
     pub fn get_or_load_texture(
         &mut self,
         queue: &wgpu::Queue,
@@ -346,7 +359,6 @@ impl TextureManager {
         }
     }
 
-    /// Unload a texture from the manager (will free when Arc drops)
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
     }

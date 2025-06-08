@@ -1,7 +1,6 @@
 use crate::{
-    BindGroupManager, Entity, MaterialManager, ModelManager, PipelineManager, Position,
-    RenderBindGroupLayouts, Scale, ShaderManager, TextureManager, Vertex, VertexInstance, World,
-    GROUND_Y,
+    Entity, MaterialManager, ModelManager, PipelineManager, Position, RenderBindGroupLayouts,
+    Scale, ShaderManager, TextureManager, Vertex, VertexInstance, World, GROUND_Y,
 };
 
 pub enum ScreenCorner {
@@ -36,7 +35,7 @@ pub fn debug_scene(
     shaders: &mut ShaderManager,
     pipelines: &mut PipelineManager,
     world: &mut World,
-    surface_config: &wgpu::SurfaceConfiguration,
+    format: wgpu::TextureFormat,
     depth_stencil: wgpu::DepthStencilState,
 ) -> Entity {
     let bossman = world.spawn();
@@ -53,13 +52,13 @@ pub fn debug_scene(
         "normal.vert.wgsl",
         "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        &vec![
-            RenderBindGroupLayouts::uniform(),
-            RenderBindGroupLayouts::equirect_dst(),
-            RenderBindGroupLayouts::material_storage(),
-            RenderBindGroupLayouts::normal(),
+        vec![
+            RenderBindGroupLayouts::uniform().clone(),
+            RenderBindGroupLayouts::equirect_dst().clone(),
+            RenderBindGroupLayouts::material_storage().clone(),
+            RenderBindGroupLayouts::normal().clone(),
         ],
-        surface_config,
+        format,
         wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
@@ -70,7 +69,7 @@ pub fn debug_scene(
             conservative: false,
         },
         wgpu::ColorTargetState {
-            format: surface_config.format,
+            format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             write_mask: wgpu::ColorWrites::ALL,
         },
@@ -95,13 +94,13 @@ pub fn debug_scene(
         "normal.vert.wgsl",
         "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        &vec![
-            RenderBindGroupLayouts::uniform(),
-            RenderBindGroupLayouts::equirect_dst(),
-            RenderBindGroupLayouts::material_storage(),
-            RenderBindGroupLayouts::normal(),
+        vec![
+            RenderBindGroupLayouts::uniform().clone(),
+            RenderBindGroupLayouts::equirect_dst().clone(),
+            RenderBindGroupLayouts::material_storage().clone(),
+            RenderBindGroupLayouts::normal().clone(),
         ],
-        surface_config,
+        format,
         wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
@@ -112,7 +111,7 @@ pub fn debug_scene(
             conservative: false,
         },
         wgpu::ColorTargetState {
-            format: surface_config.format,
+            format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             write_mask: wgpu::ColorWrites::ALL,
         },

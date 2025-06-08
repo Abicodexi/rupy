@@ -1,3 +1,5 @@
+use crate::AssetLoader;
+
 pub struct Shader;
 impl Shader {
     pub fn load(shader: &str) -> Result<wgpu::ShaderModule, crate::EngineError> {
@@ -6,7 +8,7 @@ impl Shader {
             .read()
             .map_err(|e| crate::EngineError::PoisonError(format!("{}", e.to_string())))?;
 
-        let path = crate::Asset::base_path().join("shaders").join(shader);
+        let path = AssetLoader::base_path().join("shaders").join(shader);
 
         let shader_source = std::fs::read_to_string(&path)?;
         let shader_module = gpu
@@ -37,7 +39,7 @@ impl ShaderManager {
         let start = std::time::Instant::now();
 
         if !crate::CacheStorage::contains(self, &cache_key) {
-            let path = crate::Asset::base_path().join("shaders").join(shader);
+            let path = AssetLoader::base_path().join("shaders").join(shader);
 
             let shader_source = std::fs::read_to_string(&path)?;
             let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {

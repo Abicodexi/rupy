@@ -1,10 +1,8 @@
 use crate::{
-    camera::{Camera, OrthoUniform},
-    create_sprite2d_pipeline,
-    menu_container::MenuContainer,
-    menu_element::MenuElement,
-    CacheKey, CacheStorage, EngineError, GlyphonTextRenderer, ModelManager, PipelineManager,
-    RenderBindGroupLayouts, RenderPipelineManager, Renderer2d, WgpuBuffer,
+    camera::OrthoUniform, create_render_pipeline, menu_container::MenuContainer,
+    menu_element::MenuElement, CacheKey, CacheStorage, EngineError, GlyphonTextRenderer,
+    PipelineManager, RenderBindGroupLayouts, RenderPipelineManager, Renderer2d, ShaderManager,
+    Vertex2d, WgpuBuffer,
 };
 use winit::{
     event::WindowEvent,
@@ -16,7 +14,6 @@ pub struct Menu {
     pub ortho_bind_group: wgpu::BindGroup,
     pub texture_bind_group: wgpu::BindGroup,
     pub pipeline_key: CacheKey,
-
     root: MenuContainer,
     is_visible: bool,
 }
@@ -96,9 +93,28 @@ impl Menu {
         device: &wgpu::Device,
         cfg: &wgpu::SurfaceConfiguration,
         pipeline_manager: &mut RenderPipelineManager,
+        shaders: &mut ShaderManager,
+        bind_group_layouts: &RenderBindGroupLayouts,
     ) -> Result<(), EngineError> {
         if !pipeline_manager.contains(&self.pipeline_key) {
-            let sprite2d_pipeline = create_sprite2d_pipeline(device, cfg.format)?;
+            let ortho_bind_group_layout = &bind_group_layouts.ortho_uniform;
+            let texture_bind_group_layout = &bind_group_layouts.diffuse;
+            let label = "spride 2d pipeline";
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(&format!("{} layout", label)),
+                bind_group_layouts: &[ortho_bind_group_layout, texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            let sprite2d_pipeline = create_render_pipeline(
+                device,
+                shaders,
+                "sprite2d.frag.wgsl",
+                "sprite2d.vert.wgsl",
+                pipeline_layout,
+                &[Vertex2d::LAYOUT],
+                cfg.format,
+                label.into(),
+            )?;
             pipeline_manager.insert(self.pipeline_key, sprite2d_pipeline.into());
         }
         Ok(())
@@ -161,6 +177,7 @@ impl Menu {
     }
     pub fn add_element(&mut self, element: MenuElement) {
         self.root.push_element(element);
+        self.root.layout();
     }
     pub fn update(&mut self, mouse_position: Option<(f32, f32)>, clicked: (bool, bool)) {
         for elem in self.root.elements_mut() {
@@ -168,7 +185,6 @@ impl Menu {
                 MenuElement::Button(menu_button) => {
                     menu_button.update(mouse_position, clicked);
                 }
-                _ => (),
             }
         }
     }
@@ -184,7 +200,6 @@ impl Menu {
                         break;
                     }
                 }
-                _ => {}
             }
         }
     }

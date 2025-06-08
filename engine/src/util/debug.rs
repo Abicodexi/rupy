@@ -70,15 +70,15 @@ impl DebugMode {
         let bind_group = BindGroup::debug(device, camera.buffer(), light.buffer(), &buffer);
         let shader = shaders.load(device, "debug.wgsl")?;
         let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
-        let bind_group_layouts = [
-            RenderBindGroupLayouts::debug(),
-            RenderBindGroupLayouts::equirect_dst(),
-            RenderBindGroupLayouts::material_storage(),
-            RenderBindGroupLayouts::normal(),
-        ];
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("debug_pipeline_layout"),
-            bind_group_layouts: &bind_group_layouts,
+            bind_group_layouts: &[
+                RenderBindGroupLayouts::debug().as_ref(),
+                RenderBindGroupLayouts::equirect_dst().as_ref(),
+                RenderBindGroupLayouts::material_storage().as_ref(),
+                RenderBindGroupLayouts::normal().as_ref(),
+            ],
             push_constant_ranges: &[],
         });
 
@@ -136,7 +136,12 @@ impl DebugMode {
         let line_shader = shaders.load(device, "normal_lines.wgsl")?;
         let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("normal_line_pipeline_layout"),
-            bind_group_layouts: &bind_group_layouts, // reuse same BGLs
+            bind_group_layouts: &[
+                RenderBindGroupLayouts::debug().as_ref(),
+                RenderBindGroupLayouts::equirect_dst().as_ref(),
+                RenderBindGroupLayouts::material_storage().as_ref(),
+                RenderBindGroupLayouts::normal().as_ref(),
+            ],
             push_constant_ranges: &[],
         });
 

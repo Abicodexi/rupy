@@ -2,30 +2,59 @@ use {
     super::{RenderPass, VertexInstance, AABB},
     crate::{
         camera::{self, Frustum, Projection},
-        create_hdr_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError,
-        FrameBuffer, MaterialManager, ModelManager, PipelineManager, Rotation, Scale, Texture,
-        Transform, WgpuBuffer, World,
+        create_render_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError,
+        FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation, Scale,
+        ShaderManager, Texture, Transform, Vertex, WgpuBuffer, World,
     },
     glam::{Mat4, Vec3},
-    wgpu::{IndexFormat, RenderPipeline},
+    std::sync::Arc,
+    wgpu::{DepthStencilState, IndexFormat, RenderPipeline},
 };
 
 #[warn(dead_code)]
 pub struct Renderer3d {
     pub instances: InstanceBuffers,
     pub hdr_pipeline: RenderPipeline,
+    pub depth_stencil: Arc<DepthStencilState>,
 }
 
 impl Renderer3d {
     pub fn new(
         device: &wgpu::Device,
+        shaders: &mut ShaderManager,
+        bind_group_layouts: &RenderBindGroupLayouts,
         surface_config: &wgpu::SurfaceConfiguration,
     ) -> Result<Self, EngineError> {
         let instances: InstanceBuffers = InstanceBuffers::new();
-        let hdr_pipeline = create_hdr_pipeline(device, surface_config.format)?;
+        let v_shader = "hdr.vert.wgsl";
+        let f_shader = "hdr.frag.wgsl";
+        let label = "hdr pipeline";
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&format!("{} layout", label)),
+            bind_group_layouts: &[&bind_group_layouts.diffuse],
+            push_constant_ranges: &[],
+        });
+        let hdr_pipeline = create_render_pipeline(
+            device,
+            shaders,
+            f_shader,
+            v_shader,
+            pipeline_layout,
+            &[],
+            surface_config.format,
+            label.to_string(),
+        )?;
+        let depth_stencil = Arc::new(wgpu::DepthStencilState {
+            format: Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        });
         Ok(Renderer3d {
             instances,
             hdr_pipeline,
+            depth_stencil,
         })
     }
 

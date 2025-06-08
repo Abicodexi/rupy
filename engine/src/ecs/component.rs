@@ -61,7 +61,6 @@ impl Rotation {
         self.0 = delta * self.0;
     }
     pub fn from_euler(yaw: f32, pitch: f32, roll: f32) -> Self {
-        // Note: glam expects (yaw, pitch, roll) in radians
         Self(Quat::from_euler(glam::EulerRot::YXZ, yaw, pitch, roll))
     }
     pub fn quat(&self) -> Quat {
@@ -70,23 +69,17 @@ impl Rotation {
     pub fn zero() -> Self {
         Self(Quat::from_array([0.0, 0.0, 0.0, 0.0]))
     }
-    /// Returns a rotation that makes the model's forward (+Z) face the -Z direction in world space.
-    /// Optionally takes an up vector (default Y).
+
     pub fn face_neg_z(up: Vec3) -> Self {
-        // +Z (model) to -Z (world): so, look from origin toward -Z.
         let rot = Quat::from_mat4(&Mat4::look_at_lh(Vec3::ZERO, -Vec3::Z, up).inverse());
         Self(rot)
     }
 
-    /// Returns a rotation that makes the model's forward (+Z) face the +Z direction in world space.
-    /// Optionally takes an up vector (default Y).
     pub fn face_pos_z(up: Vec3) -> Self {
-        // +Z (model) to +Z (world): look from origin toward +Z.
         let rot = Quat::from_mat4(&Mat4::look_at_lh(Vec3::ZERO, Vec3::Z, up).inverse());
         Self(rot)
     }
 
-    /// Defaults with Y up, for convenience
     pub fn face_neg_z_y_up() -> Self {
         Self::face_neg_z(Vec3::Y)
     }

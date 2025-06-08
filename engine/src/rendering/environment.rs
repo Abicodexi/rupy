@@ -1,4 +1,4 @@
-use crate::RenderBindGroupLayouts;
+use crate::{AssetLoader, RenderBindGroupLayouts};
 
 #[derive(Debug)]
 pub struct WorldProjection {
@@ -25,7 +25,7 @@ impl WorldProjection {
         hdr_texture: &str,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Result<Self, crate::EngineError> {
-        let bytes = crate::Asset::read_bytes(&format!("hdr/{}", hdr_texture))?;
+        let bytes = AssetLoader::read_bytes(&format!("hdr/{}", hdr_texture))?;
         let (pixels, meta) = crate::Texture::decode_hdr(&bytes)?;
 
         let src_texture = crate::Texture::new(
@@ -103,8 +103,8 @@ impl WorldProjection {
         let equirect_dst_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{} layout", dst_shader)),
             bind_group_layouts: &[
-                RenderBindGroupLayouts::uniform(),
-                RenderBindGroupLayouts::equirect_dst(),
+                RenderBindGroupLayouts::uniform().as_ref(),
+                RenderBindGroupLayouts::equirect_dst().as_ref(),
             ],
             push_constant_ranges: &[],
         });

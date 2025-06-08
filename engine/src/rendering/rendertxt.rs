@@ -1,11 +1,9 @@
+use super::{GlyphonBuffer, TextRegion};
 use glyphon::{
     cosmic_text::{Align, LineEnding},
     Attrs, AttrsList, BufferLine, Color, FontSystem, Shaping, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer, Viewport,
 };
-use winit::dpi::PhysicalSize;
-
-use super::{GlyphonBuffer, TextRegion};
 
 pub struct GlyphonTextRenderer {
     buffer: GlyphonBuffer,

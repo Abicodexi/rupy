@@ -1,14 +1,15 @@
 use crossbeam::channel::Sender;
 use engine::{
     camera::{Camera, Projection},
-    debug_scene, log_info,
+    debug_scene, log_info, log_warning,
     menu::Menu,
     menu_button::MenuButton,
     menu_element::MenuElement,
-    service::{asset_service, AssetRequest},
-    ApplicationEvent, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError, Entity,
-    FrameBuffer, GlyphonTextRenderer, Medium, RenderPass, RenderTargetKind, RenderTargetManager,
-    Renderer2d, Renderer3d, ScreenCorner, SurfaceExt, TextRegion, Texture, Time, World, GPU,
+    service::asset_service,
+    ApplicationEvent, AssetRequest, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
+    EngineError, Entity, FrameBuffer, GlyphonTextRenderer, Light, Medium, RenderPass,
+    RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner, SurfaceExt,
+    Terrain, TextRegion, Texture, Time, World, WorldProjection, GPU,
 };
 use std::{sync::Arc, time::Instant};
 use winit::{
@@ -37,7 +38,7 @@ pub struct Rupy {
     pub menu: Menu,
     tx: Arc<Sender<ApplicationEvent>>,
     asset_tx: Arc<Sender<AssetRequest>>,
-
+    service: Arc<engine::AssetService>,
     accumulator: f32,
     last_frame_time: Instant,
 }
@@ -45,6 +46,7 @@ pub struct Rupy {
 impl Rupy {
     pub fn new(
         event_loop: &ActiveEventLoop,
+        service: &'static Arc<AssetService>,
         tx: Arc<Sender<ApplicationEvent>>,
         asset_tx: Arc<Sender<AssetRequest>>,
     ) -> Result<Rupy, EngineError> {
@@ -59,7 +61,7 @@ impl Rupy {
         let (surface, surface_config) = {
             let gpu = binding
                 .read()
-                .map_err(|e| crate::EngineError::GpuError(format!("{}", e.to_string())))?;
+                .map_err(|e| EngineError::GpuError(format!("{}", e.to_string())))?;
 
             let surface = gpu.instance().create_surface(win_clone)?;
             let mut surface_config = surface
@@ -71,34 +73,20 @@ impl Rupy {
             (surface, surface_config)
         };
 
-        let service = asset_service();
-        let device = &service.device;
-        let queue = &service.queue;
-
-        surface.configure(&device, &surface_config);
+        surface.configure(&service.device, &surface_config);
 
         let time = Time::new();
-        let render3d = Renderer3d::new(device, &surface_config)?;
-        let render2d = Renderer2d::new(device)?;
 
-        let depth_stencil = wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-        let rendertxt = GlyphonTextRenderer::new(device, queue, surface_config.format);
+        let rendertxt =
+            GlyphonTextRenderer::new(&service.device, &service.queue, surface_config.format);
 
         let projection = Projection::FirstPerson;
-        let mut camera = Camera::new(device, width as f32, height as f32, 5.0, 0.4);
-
-        let mut world = World::new(queue, device, &surface_config, Some(depth_stencil.clone()))?;
+        let mut camera = Camera::new(&service.device, width as f32, height as f32, 5.0, 0.4);
 
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
             FrameBuffer::new_with_depth(
-                &device,
+                &service.device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
                 Texture::DEPTH_FORMAT,
@@ -108,7 +96,7 @@ impl Rupy {
         );
         render_targets.insert(
             FrameBuffer::new_color_only(
-                &device,
+                &service.device,
                 (surface_config.width, surface_config.height).into(),
                 surface_config.format,
                 "hdr buffer",
@@ -116,7 +104,6 @@ impl Rupy {
             RenderTargetKind::Hdr,
         );
 
-        let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), world.light.buffer());
         if let (
             Ok(mut models),
             Ok(mut materials),
@@ -130,42 +117,46 @@ impl Rupy {
             service.shaders.write(),
             service.pipelines.write(),
         ) {
-            let debug_mode =
-                DebugMode::new(device, &mut shaders, &camera, &world.light, &surface_config)?;
+            let render3d = Renderer3d::new(
+                &service.device,
+                &mut shaders,
+                &service.bind_group_layouts,
+                &surface_config,
+            )?;
+            let render2d = Renderer2d::new(&service.device)?;
+            let world_projection = WorldProjection::new(
+                &service.queue,
+                &service.device,
+                &surface_config,
+                "equirect_src.wgsl",
+                "equirect_dst.wgsl",
+                "pure-sky.hdr",
+                Some(render3d.depth_stencil.as_ref().clone()),
+            )?;
+            let terrain = Terrain::new(Medium::Ground);
+            let light = Light::new(&service.device)?;
+            let mut world = World::new(world_projection, terrain, light)?;
+            let uniform_bind_group =
+                BindGroup::uniform(&service.device, camera.buffer(), world.light.buffer());
+            let debug_mode = DebugMode::new(
+                &service.device,
+                &mut shaders,
+                &camera,
+                &world.light,
+                &surface_config,
+            )?;
             let bossman = debug_scene(
-                &queue,
-                &device,
+                &service.queue,
+                &service.device,
                 &mut models,
                 &mut materials,
                 &mut textures,
                 &mut shaders,
                 &mut pipelines,
                 &mut world,
-                &surface_config,
-                depth_stencil.clone(),
+                surface_config.format,
+                render3d.depth_stencil.as_ref().clone(),
             );
-            camera.load_model(
-                &queue,
-                &device,
-                &mut models,
-                &mut materials,
-                &mut textures,
-                &mut shaders,
-                &mut pipelines,
-                &surface_config,
-            );
-            camera.spawn(&mut world);
-
-            if let Some(material) = materials.get(&CacheKey::from("Material.001")) {
-                world.generate_terrain(
-                    &queue,
-                    &device,
-                    *camera.eye(),
-                    1,
-                    Medium::Ground,
-                    material,
-                )?;
-            }
             let button_uv = [0.0, 0.0, 1.0, 1.0];
             let container_uv = [0.0, 0.0, 0.0, 0.0];
             let play_button = MenuElement::Button(MenuButton::new(
@@ -192,15 +183,14 @@ impl Rupy {
             ));
 
             let diffuse_texture = textures.get_or_load_texture(
-                queue,
-                device,
+                &service.queue,
+                &service.device,
                 "cube-diffuse.jpg",
                 surface_config.format,
             )?;
-            let texture_bind_group = BindGroup::texture(device, &diffuse_texture.0);
-
+            let texture_bind_group = BindGroup::texture(&service.device, &diffuse_texture.0);
             let mut menu = Menu::with_elements(
-                &device,
+                &service.device,
                 texture_bind_group,
                 width,
                 height,
@@ -211,7 +201,37 @@ impl Rupy {
                 20.0,
                 vec![play_button, quit_button],
             );
-            menu.build_pipeline(device, &surface_config, &mut pipelines.render)?;
+            menu.build_pipeline(
+                &service.device,
+                &surface_config,
+                &mut pipelines.render,
+                &mut shaders,
+                &service.bind_group_layouts,
+            )?;
+
+            camera.load_model(
+                &service.queue,
+                &service.device,
+                &mut models,
+                &mut materials,
+                &mut textures,
+                &mut shaders,
+                &mut pipelines,
+                surface_config.format,
+            );
+            camera.spawn(&mut world);
+
+            if let Some(material) = materials.get(&CacheKey::from("Material.001")) {
+                world.generate_terrain(
+                    &service.queue,
+                    &service.device,
+                    *camera.eye(),
+                    1,
+                    Medium::Ground,
+                    material,
+                )?;
+            }
+
             return Ok(Rupy {
                 time,
                 window,
@@ -231,6 +251,7 @@ impl Rupy {
                 menu,
                 tx,
                 asset_tx,
+                service: service.clone(),
                 accumulator: 0.0,
                 last_frame_time: Instant::now(),
             });
@@ -262,14 +283,18 @@ impl Rupy {
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         let width = new_size.width.max(1) as f32;
         let height = new_size.height.max(1) as f32;
-        let service = asset_service();
-        self.surface
-            .resize(&service.device, &mut self.surface_config, width, height);
+        self.surface.resize(
+            &self.service.device,
+            &mut self.surface_config,
+            width,
+            height,
+        );
         self.camera.resize(width, height);
         self.menu
-            .resize(&service.queue, &service.device, width, height);
-        self.rendertxt.resize(&service.queue, width, height);
-        self.render_targets.resize(&service.device, width, height);
+            .resize(&self.service.queue, &self.service.device, width, height);
+        self.rendertxt.resize(&self.service.queue, width, height);
+        self.render_targets
+            .resize(&self.service.device, width, height);
     }
 
     fn text_regions(&mut self) -> Vec<TextRegion> {
@@ -283,20 +308,26 @@ impl Rupy {
 
     pub fn redraw(&mut self) {
         self.time.update(Time::MAX_FRAME_TIME);
+        if self.menu.is_visible() {
+            self.menu.update(
+                self.camera.controller().last_mouse_pos(),
+                self.camera.controller().mouse_just_pressed(),
+            );
+        }
         while self.time.consume_accumulator(Time::TIME_STEP) {
-            let service = asset_service();
+            self.camera.update(&mut self.world, &self.projection);
             self.world.update(
-                &service.queue,
-                &service.device,
+                &self.service.queue,
+                &self.service.device,
                 &self.time,
                 &mut self.camera,
                 &self.projection,
                 self.bossman,
             );
-            let screen_size = self.window.inner_size();
-            if let Ok(mut models) = service.models.write() {
+            if let Ok(mut models) = self.service.models.write() {
+                let screen_size = self.window.inner_size();
                 self.render3d.instances.update(
-                    &service.device,
+                    &self.service.device,
                     &self.world,
                     &self.camera,
                     (screen_size.width as f32, screen_size.height as f32),
@@ -308,30 +339,24 @@ impl Rupy {
             self.upload();
         }
 
-        self.menu.update(
-            self.camera.controller().last_mouse_pos(),
-            self.camera.controller().mouse_just_pressed(),
-        );
-
         self.render();
         self.window.request_redraw();
     }
 
     pub fn upload(&mut self) {
         let screen_size = self.window.inner_size();
-        let service = asset_service();
 
         self.camera.upload(
-            &service.queue,
-            &service.device,
+            &self.service.queue,
+            &self.service.device,
             self.projection,
             screen_size.height as f32,
             screen_size.width as f32,
         );
-        self.world.upload(&service.queue, &service.device);
+        self.world.upload(&self.service.queue, &self.service.device);
         self.render3d
             .instances
-            .upload(&service.queue, &service.device);
+            .upload(&self.service.queue, &self.service.device);
     }
 
     pub fn render(&mut self) {
@@ -339,36 +364,40 @@ impl Rupy {
             Ok(f) => f,
             Err(e) => {
                 match e {
-                    wgpu::SurfaceError::Outdated => self.resize(&self.window.inner_size()),
+                    wgpu::SurfaceError::Outdated => {
+                        return self.resize(&self.window.inner_size());
+                    }
                     wgpu::SurfaceError::Other
-                    | wgpu::SurfaceError::OutOfMemory
                     | wgpu::SurfaceError::Timeout
                     | wgpu::SurfaceError::Lost => {
-                        panic!("SurfaceError: {}", e);
+                        log_warning!("{}", e);
+                        return;
                     }
-                }
-                return;
+                    wgpu::SurfaceError::OutOfMemory => {
+                        panic!("{}", e);
+                    }
+                };
             }
         };
 
         let surface_view = frame.texture.create_view(&Default::default());
-        let service = asset_service();
-        let mut encoder = service
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Scene Encoder"),
-            });
+        let mut encoder =
+            self.service
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Scene Encoder"),
+                });
 
         if let Some(framebuffer) = self.render_targets.get(&RenderTargetKind::Scene) {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Scene Pass"),
-                color_attachments: &[Some(framebuffer.color_attachment())],
-                depth_stencil_attachment: framebuffer.depth_attachment(),
-                ..Default::default()
-            });
             if let (Ok(mut models), Ok(materials)) =
-                (service.models.write(), service.materials.read())
+                (self.service.models.write(), self.service.materials.read())
             {
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Scene Pass"),
+                    color_attachments: &[Some(framebuffer.color_attachment())],
+                    depth_stencil_attachment: framebuffer.depth_attachment(),
+                    ..Default::default()
+                });
                 self.render3d.render(
                     &mut models,
                     &materials,
@@ -377,6 +406,7 @@ impl Rupy {
                     &self.uniform_bind_group,
                     &self.debug_mode,
                 );
+                drop(rpass);
             }
         }
 
@@ -384,62 +414,64 @@ impl Rupy {
             self.render_targets.get(&RenderTargetKind::Scene),
             self.render_targets.get(&RenderTargetKind::Hdr),
         ) {
-            self.render3d
-                .hdr(&service.device, &mut encoder, &scene_fb.color(), hdr_fb);
+            self.render3d.hdr(
+                &self.service.device,
+                &mut encoder,
+                &scene_fb.color(),
+                hdr_fb,
+            );
         }
 
         if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
             self.render3d.final_blit_to_surface(
-                &service.device,
+                &self.service.device,
                 &mut encoder,
                 hdr_fb.color(),
                 &surface_view,
             );
         }
 
-        {
-            let mut rpass2d = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("2D Overlay on Swapchain"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
+        let mut rpass2d = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("2D Overlay on Swapchain"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &surface_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
 
-            self.render2d.begin_batch();
+        self.render2d.begin_batch();
 
-            for item in self.text_regions() {
-                self.rendertxt.queue_text(
-                    &item.text,
-                    item.pos[0],
-                    item.pos[1],
-                    glyphon::Color::rgb(255, 255, 255),
-                );
-            }
-            if let Ok(pipelines) = service.pipelines.read() {
-                self.menu.render(
-                    &mut rpass2d,
-                    &mut self.render2d,
-                    &mut self.rendertxt,
-                    &service.queue,
-                    &pipelines,
-                );
-            }
-            self.rendertxt.draw(
-                &service.device,
-                &service.queue,
-                &self.surface_config,
-                &mut rpass2d,
+        for item in self.text_regions() {
+            self.rendertxt.queue_text(
+                &item.text,
+                item.pos[0],
+                item.pos[1],
+                glyphon::Color::rgb(255, 255, 255),
             );
-            drop(rpass2d);
         }
-        service.queue.submit(Some(encoder.finish()));
+        if let Ok(pipelines) = self.service.pipelines.read() {
+            self.menu.render(
+                &mut rpass2d,
+                &mut self.render2d,
+                &mut self.rendertxt,
+                &self.service.queue,
+                &pipelines,
+            );
+        }
+        self.rendertxt.draw(
+            &self.service.device,
+            &self.service.queue,
+            &self.surface_config,
+            &mut rpass2d,
+        );
+        drop(rpass2d);
+        self.service.queue.submit(Some(encoder.finish()));
         frame.present();
     }
 }

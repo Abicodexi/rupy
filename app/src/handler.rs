@@ -1,6 +1,5 @@
 use crate::state::{AppInnerState, ApplicationState};
-use engine::{camera::Projection, ApplicationEvent};
-use pollster::FutureExt;
+use engine::{camera::Projection, log_error, ApplicationEvent, World};
 use winit::{
     event::WindowEvent,
     event_loop::ActiveEventLoop,
@@ -11,11 +10,13 @@ use winit::{
 impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let AppInnerState::Stopped(..) = &self.inner {
-            ApplicationState::init(self, event_loop)
-                .block_on()
-                .expect("State init on resume failed");
-
-            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+            if let Err(e) = pollster::block_on(ApplicationState::run(self, event_loop)) {
+                log_error!("{}", e.to_string());
+                World::stop();
+                event_loop.exit();
+            } else {
+                event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+            }
         }
     }
 
@@ -51,14 +52,14 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                                 if !app.window.is_resizable() {
                                     return;
                                 }
-
-                                let is_fullscreen = app.window.fullscreen().is_some();
-                                let monitor = app.window.current_monitor();
-                                app.window.set_fullscreen(match is_fullscreen {
-                                    true => None,
-                                    false => Some(Fullscreen::Borderless(monitor)),
-                                });
-                                app.window.set_cursor_visible(is_fullscreen);
+                                if app.window.fullscreen().is_some() {
+                                    app.window.set_cursor_visible(true);
+                                    app.window.set_fullscreen(None);
+                                } else {
+                                    app.window.set_fullscreen(Some(Fullscreen::Borderless(
+                                        app.window.current_monitor(),
+                                    )))
+                                }
                             }
                             PhysicalKey::Code(KeyCode::Numpad1) => {
                                 let new_speed = (app.world.light().speed() + 0.1).clamp(0.1, 1.5);
@@ -86,12 +87,8 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
         if let AppInnerState::Running(app) = &mut self.inner {
             match event {
-                ApplicationEvent::Shutdown => {
-                    app.shutdown(event_loop);
-                }
-                ApplicationEvent::Projection => {
-                    app.next_projection();
-                }
+                ApplicationEvent::Shutdown => app.shutdown(event_loop),
+                ApplicationEvent::Projection => app.next_projection(),
                 ApplicationEvent::MenuCallback(callback) => {
                     if callback == "Quit" {
                         app.menu.hide();

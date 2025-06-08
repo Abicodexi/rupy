@@ -3,9 +3,8 @@ use std::sync::Arc;
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
     camera::{Camera, Projection},
-    log_error, BindGroupManager, CacheKey, EngineError, Entity, Light, Material, MaterialManager,
-    Medium, ModelManager, PipelineManager, RenderBindGroupLayouts, ShaderManager, Terrain,
-    TextureManager, Time, WorldProjection,
+    log_error, CacheKey, EngineError, Entity, Light, Material, MaterialManager, Medium,
+    ModelManager, PipelineManager, ShaderManager, Terrain, TextureManager, Time, WorldProjection,
 };
 use glam::Vec3;
 use pollster::FutureExt;
@@ -50,23 +49,10 @@ impl World {
     }
 
     pub fn new(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,
-        depth_stencil_state: Option<wgpu::DepthStencilState>,
+        projection: WorldProjection,
+        terrain: Terrain,
+        light: Light,
     ) -> Result<Self, EngineError> {
-        let projection = WorldProjection::new(
-            &queue,
-            &device,
-            &config,
-            "equirect_src.wgsl",
-            "equirect_dst.wgsl",
-            "pure-sky.hdr",
-            depth_stencil_state,
-        )?;
-        let terrain = Terrain::new(Medium::Ground);
-        let light = Light::new(&device)?;
-
         Ok(Self {
             physics: Physics::new(),
             renderables: Vec::new(),
@@ -118,8 +104,8 @@ impl World {
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
-        surface_configuration: &wgpu::SurfaceConfiguration,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        format: wgpu::TextureFormat,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -137,7 +123,7 @@ impl World {
                 f_shader,
                 buffers,
                 bind_group_layouts,
-                surface_configuration,
+                format,
                 primitive,
                 color_target,
                 depth_stencil,

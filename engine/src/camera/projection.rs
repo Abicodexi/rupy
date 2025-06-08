@@ -1,7 +1,6 @@
 use super::Camera;
 use glam::Mat4;
 
-/// The three camera‐projection modes we support.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub enum Projection {
     FirstPerson,
@@ -16,7 +15,6 @@ impl Projection {
     pub fn orthographic(screen_w: f32, screen_h: f32) -> Mat4 {
         glam::Mat4::orthographic_rh_gl(0.0, screen_w, screen_h, 0.0, -1.0, 1.0)
     }
-    /// Given a `Camera`, return the appropriate projection‐matrix.
     pub fn matrix(&self, camera: &Camera, screen_w: f32, screen_h: f32) -> Mat4 {
         match self {
             Projection::FirstPerson | Projection::ThirdPerson => Projection::perspective(camera),
