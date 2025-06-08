@@ -7,7 +7,7 @@ use winit::dpi::PhysicalSize;
 
 use super::{GlyphonBuffer, TextRegion};
 
-pub struct RenderText {
+pub struct GlyphonTextRenderer {
     buffer: GlyphonBuffer,
 
     font_system: FontSystem,
@@ -24,7 +24,7 @@ pub struct RenderText {
     regions: Vec<TextRegion>,
 }
 
-impl RenderText {
+impl GlyphonTextRenderer {
     pub const LINE_ENDING: LineEnding = LineEnding::Lf;
     pub const ALIGNMENT: Align = Align::Left;
     pub const SHAPING: Shaping = Shaping::Basic;
@@ -56,7 +56,7 @@ impl RenderText {
         );
         let regions = Vec::new();
 
-        RenderText {
+        GlyphonTextRenderer {
             buffer,
             font_system,
             swash_cache,
@@ -108,12 +108,12 @@ impl RenderText {
         self.regions.clear();
     }
 
-    pub fn resize(&mut self, queue: &wgpu::Queue, new_size: PhysicalSize<u32>) {
+    pub fn resize(&mut self, queue: &wgpu::Queue, width: f32, height: f32) {
         self.viewport.update(
             queue,
             glyphon::Resolution {
-                width: new_size.width,
-                height: new_size.height,
+                width: width as u32,
+                height: height as u32,
             },
         );
     }

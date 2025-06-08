@@ -50,7 +50,6 @@ impl MeshAsset {
 
         let mesh = &m.mesh;
 
-        // Initial per-vertex list, zipping pos, uv, normal, color
         let mut vertices: Vec<Vertex> = {
             let positions = mesh.positions.chunks(3);
             let uvs = mesh.texcoords.chunks(2).chain(repeat(&[0.0, 0.0][..]));
@@ -79,7 +78,6 @@ impl MeshAsset {
         let mut accum_tangents = vec![[0.0f32; 3]; vertices.len()];
         let mut accum_bitangents = vec![[0.0f32; 3]; vertices.len()];
 
-        // Accumulate
         for idx in mesh.indices.chunks(3) {
             let [i0, i1, i2] = [idx[0] as usize, idx[1] as usize, idx[2] as usize];
 

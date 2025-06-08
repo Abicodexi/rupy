@@ -1,4 +1,4 @@
-use crate::TextRegion;
+use crate::{camera::Camera, TextRegion};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, MouseScrollDelta, WindowEvent},
@@ -90,8 +90,8 @@ impl CameraControls {
     pub fn zoom(&self) -> f32 {
         self.zoom
     }
-    pub fn last_mouse_pos(&self) -> &Option<(f32, f32)> {
-        &self.last_mouse
+    pub fn last_mouse_pos(&self) -> Option<(f32, f32)> {
+        self.last_mouse
     }
     pub fn mouse_state_is_down(&self) -> (bool, bool) {
         (
@@ -105,30 +105,35 @@ impl CameraControls {
             self.mouse_state_right.just_pressed,
         )
     }
-    pub fn process_event(&mut self, event: &WindowEvent) -> bool {
+    pub fn process_event(camera: &mut Camera, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
 
                 match event.physical_key {
                     PhysicalKey::Code(KeyCode::KeyW) => {
-                        self.forward = down;
+                        camera.controls.forward = down;
                         true
                     }
                     PhysicalKey::Code(KeyCode::KeyS) => {
-                        self.back = down;
+                        camera.controls.back = down;
                         true
                     }
                     PhysicalKey::Code(KeyCode::KeyA) => {
-                        self.left = down;
+                        camera.controls.left = down;
                         true
                     }
                     PhysicalKey::Code(KeyCode::KeyD) => {
-                        self.right = down;
+                        camera.controls.right = down;
                         true
                     }
                     PhysicalKey::Code(KeyCode::Space) => {
-                        self.jump = down;
+                        camera.controls.jump = down;
+                        true
+                    }
+                    PhysicalKey::Code(KeyCode::KeyL) => {
+                        let free_look = if camera.free_look() { false } else { true };
+                        camera.set_free_look(free_look);
                         true
                     }
                     _ => false,
@@ -136,28 +141,28 @@ impl CameraControls {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let (x, y) = (position.x as f32, position.y as f32);
-                if let Some((lx, ly)) = self.last_mouse {
-                    let dx = (x - lx) * self.sensitivity;
-                    let dy = (y - ly) * self.sensitivity;
-                    self.yaw += dx;
-                    self.pitch = (self.pitch + dy).clamp(-89.9, 89.9);
+                if let Some((lx, ly)) = camera.controls.last_mouse {
+                    let dx = (x - lx) * camera.controls.sensitivity;
+                    let dy = (y - ly) * camera.controls.sensitivity;
+                    camera.controls.yaw += dx;
+                    camera.controls.pitch = (camera.controls.pitch + dy).clamp(-89.9, 89.9);
                 }
-                self.last_mouse = Some((x, y));
+                camera.controls.last_mouse = Some((x, y));
                 true
             }
             WindowEvent::MouseInput { state, button, .. } => match button {
                 winit::event::MouseButton::Left => {
-                    self.mouse_state_left.update(state.is_pressed());
+                    camera.controls.mouse_state_left.update(state.is_pressed());
                     true
                 }
                 winit::event::MouseButton::Right => {
-                    self.mouse_state_right.update(state.is_pressed());
+                    camera.controls.mouse_state_right.update(state.is_pressed());
                     true
                 }
                 _ => false,
             },
             WindowEvent::MouseWheel { delta, .. } => {
-                self.process_scroll(delta);
+                camera.controls.process_scroll(delta);
                 true
             }
             _ => false,

@@ -1,6 +1,6 @@
 use crate::{
     camera::{Camera, CameraUniform, OrthoUniform},
-    DebugUniform, Light, LightUniform, Texture, WgpuBuffer,
+    CacheKey, DebugUniform, Light, LightUniform, Texture, WgpuBuffer,
 };
 
 use super::{CacheStorage, HashCache, TextureManager};
@@ -560,13 +560,13 @@ impl BindGroupManager {
     pub fn bind_group_for(
         &mut self,
         texture_manager: &TextureManager,
-        key: &super::CacheKey,
+        key: &CacheKey,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
         let binding = crate::GPU::get();
         if let Ok(gpu) = binding.read() {
             if !self.bind_groups.contains(&key) {
-                let tex = texture_manager.get(*key)?;
+                let tex = texture_manager.get(key)?;
                 let bind_group: std::sync::Arc<wgpu::BindGroup> = gpu
                     .device()
                     .create_bind_group(&wgpu::BindGroupDescriptor {

@@ -1,90 +1,194 @@
 use crate::{
-    menu_item::{MenuAction, MenuItem},
-    RenderText, Renderer2d,
+    camera::{Camera, OrthoUniform},
+    create_sprite2d_pipeline,
+    menu_container::MenuContainer,
+    menu_element::MenuElement,
+    CacheKey, CacheStorage, EngineError, GlyphonTextRenderer, ModelManager, PipelineManager,
+    RenderBindGroupLayouts, RenderPipelineManager, Renderer2d, WgpuBuffer,
+};
+use winit::{
+    event::WindowEvent,
+    keyboard::{KeyCode, PhysicalKey},
 };
 
 pub struct Menu {
-    pub items: Vec<MenuItem>,
-    pub padding: f32,
-    pub selected_idx: Option<usize>,
-    pub rect_width: f32,
-    pub rect_height: f32,
+    pub ortho_buffer: WgpuBuffer,
+    pub ortho_bind_group: wgpu::BindGroup,
+    pub texture_bind_group: wgpu::BindGroup,
+    pub pipeline_key: CacheKey,
+
+    root: MenuContainer,
     is_visible: bool,
 }
 
 impl Menu {
     pub fn new(
-        entries: Vec<(&str, MenuAction, Box<dyn Fn()>)>,
+        device: &wgpu::Device,
+        texture_bind_group: wgpu::BindGroup,
+        screen_w: u32,
+        screen_h: u32,
         x: f32,
         y: f32,
-        rect_width: f32,
-        rect_height: f32,
+        container_color: [f32; 4],
+        container_uv: [f32; 4],
         padding: f32,
     ) -> Self {
-        let mut items = Vec::with_capacity(entries.len());
-        let mut cur_y = y;
+        let ortho_uniform = OrthoUniform::new(screen_w as f32, screen_h as f32);
+        let ortho_buffer = WgpuBuffer::from_data(
+            device,
+            bytemuck::bytes_of(&ortho_uniform),
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            Some("Menu Ortho Buffer"),
+        );
+        let ortho_bind_group_layout = RenderBindGroupLayouts::ortho_uniform();
+        let ortho_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Menu OrthoBindGroup"),
+            layout: &ortho_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ortho_buffer.get().as_entire_binding(),
+            }],
+        });
 
-        for (label, action, on_click) in entries {
-            items.push(MenuItem {
-                label: label.to_string(),
-                action,
-                x,
-                y: cur_y,
-                w: rect_width,
-                h: rect_height,
-                clicked: None,
-                on_click,
-            });
-            cur_y += rect_height + padding;
-        }
+        let root = MenuContainer::new((x, y), container_color, container_uv, padding);
+        let pipeline_key = CacheKey::from("sprite2d");
 
         Menu {
-            items,
-            padding,
-            rect_width,
-            rect_height,
+            ortho_buffer,
+            ortho_bind_group,
+            texture_bind_group,
+            root,
             is_visible: false,
-            selected_idx: None,
+            pipeline_key,
         }
     }
-
-    pub fn set_rect_size(&mut self, width: f32, height: f32) {
-        self.rect_width = width;
-        self.rect_height = height;
-        if let Some(first) = self.items.first() {
-            let x = first.x;
-            let mut y = first.y;
-            for item in &mut self.items {
-                item.x = x;
-                item.y = y;
-                item.w = width;
-                item.h = height;
-                y += height + self.padding;
-            }
+    pub fn with_elements(
+        device: &wgpu::Device,
+        texture_bind_group: wgpu::BindGroup,
+        screen_w: u32,
+        screen_h: u32,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        uv: [f32; 4],
+        padding: f32,
+        elements: Vec<MenuElement>,
+    ) -> Self {
+        let mut menu = Self::new(
+            device,
+            texture_bind_group,
+            screen_w,
+            screen_h,
+            x,
+            y,
+            color,
+            uv,
+            padding,
+        );
+        for element in elements {
+            menu.add_element(element);
         }
+        menu.root.layout();
+        menu
     }
-
-    pub fn update(
+    pub fn build_pipeline(
         &mut self,
-        mouse_x: f32,
-        mouse_y: f32,
-        mouse_pressed: bool,
-    ) -> Option<MenuAction> {
-        self.selected_idx = None;
-        for (i, item) in self.items.iter().enumerate() {
-            let inside_x = mouse_x >= item.x && mouse_x <= item.x + item.w;
-            let inside_y = mouse_y >= item.y && mouse_y <= item.y + item.h;
-            if inside_x && inside_y {
-                self.selected_idx = Some(i);
-                if mouse_pressed {
-                    return Some(item.action.clone());
+        device: &wgpu::Device,
+        cfg: &wgpu::SurfaceConfiguration,
+        pipeline_manager: &mut RenderPipelineManager,
+    ) -> Result<(), EngineError> {
+        if !pipeline_manager.contains(&self.pipeline_key) {
+            let sprite2d_pipeline = create_sprite2d_pipeline(device, cfg.format)?;
+            pipeline_manager.insert(self.pipeline_key, sprite2d_pipeline.into());
+        }
+        Ok(())
+    }
+    pub fn resize(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        screen_w: f32,
+        screen_h: f32,
+    ) {
+        self.ortho_buffer.write_data(
+            queue,
+            device,
+            &[OrthoUniform::new(screen_w, screen_h)],
+            None,
+        );
+    }
+    pub fn process(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput { event, .. } => match event.physical_key {
+                PhysicalKey::Code(KeyCode::KeyQ) => {
+                    if !event.repeat && event.state.is_pressed() {
+                        match self.is_visible() {
+                            true => {
+                                self.hide();
+                            }
+                            false => {
+                                self.show();
+                            }
+                        }
+                    }
+                    self.is_visible
                 }
-                break;
+
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+    pub fn render<'a>(
+        &'a mut self,
+        rpass: &mut wgpu::RenderPass<'a>,
+        d2: &mut Renderer2d,
+        txt: &mut GlyphonTextRenderer,
+        queue: &wgpu::Queue,
+        pipelines: &PipelineManager,
+    ) {
+        if !self.is_visible {
+            return;
+        }
+        if let Some(pipeline) = pipelines.render.get(&self.pipeline_key) {
+            rpass.set_pipeline(pipeline);
+            rpass.set_bind_group(0, &self.ortho_bind_group, &[]);
+            rpass.set_bind_group(1, &self.texture_bind_group, &[]);
+        }
+
+        self.root.draw(d2, txt);
+        d2.flush(queue, rpass);
+    }
+    pub fn add_element(&mut self, element: MenuElement) {
+        self.root.push_element(element);
+    }
+    pub fn update(&mut self, mouse_position: Option<(f32, f32)>, clicked: (bool, bool)) {
+        for elem in self.root.elements_mut() {
+            match elem {
+                MenuElement::Button(menu_button) => {
+                    menu_button.update(mouse_position, clicked);
+                }
+                _ => (),
             }
         }
-        None
     }
-    pub fn visible(&self) -> bool {
+    pub fn on_click(&mut self, mouse_position: Option<(f32, f32)>) {
+        let Some((mouse_x, mouse_y)) = mouse_position else {
+            return;
+        };
+        for elem in self.root.elements_mut() {
+            match elem {
+                MenuElement::Button(menu_button) => {
+                    if menu_button.contains(mouse_x, mouse_y) {
+                        menu_button.on_click();
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    pub fn is_visible(&self) -> bool {
         self.is_visible
     }
     pub fn show(&mut self) {
@@ -92,34 +196,5 @@ impl Menu {
     }
     pub fn hide(&mut self) {
         self.is_visible = false;
-    }
-    pub fn draw_ui(&self, renderer2d: &mut Renderer2d, render_text: &mut RenderText) {
-        if let Some(first) = self.items.first() {
-            let panel_x = first.x - 10.0;
-            let panel_y = first.y - 10.0;
-            let panel_w = self.rect_width + 20.0;
-            let panel_h = self.items.len() as f32 * self.rect_height
-                + (self.items.len() - 1) as f32 * self.padding
-                + 20.0;
-            renderer2d.draw_filled_rect(panel_x, panel_y, panel_w, panel_h, [0.0, 0.0, 0.0, 0.75]);
-        }
-
-        for (i, item) in self.items.iter().enumerate() {
-            let color = if Some(i) == self.selected_idx {
-                [0.2, 0.5, 0.9, 0.8]
-            } else {
-                [0.1, 0.1, 0.1, 0.8]
-            };
-            renderer2d.draw_filled_rect(item.x, item.y, item.w, item.h, color);
-        }
-
-        for item in &self.items {
-            render_text.queue_text(
-                &item.label,
-                item.x,
-                item.y,
-                glyphon::Color::rgb(255, 255, 255),
-            );
-        }
     }
 }

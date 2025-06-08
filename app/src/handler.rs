@@ -1,5 +1,5 @@
 use crate::state::{AppInnerState, ApplicationState};
-use engine::ApplicationEvent;
+use engine::{camera::Projection, ApplicationEvent};
 use pollster::FutureExt;
 use winit::{
     event::WindowEvent,
@@ -29,7 +29,19 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
             if matches!(event, WindowEvent::CloseRequested) {
                 app.shutdown(event_loop)
             }
-            app.input(&event);
+
+            app.menu.process(&event);
+
+            if app.menu.is_visible() && !app.camera.is_frozen() {
+                app.camera.freeze();
+                app.set_projection(Projection::Orthographic);
+            } else if !app.menu.is_visible() && app.camera.is_frozen() {
+                app.camera.unfreeze();
+                app.set_projection(Projection::FirstPerson);
+            }
+
+            app.camera.process(&event);
+
             match &event {
                 WindowEvent::Resized(size) => app.resize(&size),
                 WindowEvent::KeyboardInput { event, .. } => {
@@ -56,22 +68,9 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                                 let new_speed = (app.world.light().speed() - 0.1).clamp(0.1, 1.5);
                                 app.world.light.set_speed(new_speed);
                             }
-                            PhysicalKey::Code(KeyCode::KeyQ) => match app.menu.visible() {
-                                true => {
-                                    app.menu.hide();
-                                    app.camera.freeze();
-                                }
-                                false => {
-                                    app.menu.show();
-                                    app.camera.unfreeze();
-                                }
-                            },
                             PhysicalKey::Code(KeyCode::KeyM) => app.next_projection(),
                             PhysicalKey::Code(KeyCode::KeyP) => app.next_debug_mode(),
-                            PhysicalKey::Code(KeyCode::KeyL) => {
-                                let free_look = if app.camera.free_look() { false } else { true };
-                                app.camera.set_free_look(free_look)
-                            }
+
                             PhysicalKey::Code(KeyCode::Escape) => app.shutdown(event_loop),
                             _ => {}
                         }

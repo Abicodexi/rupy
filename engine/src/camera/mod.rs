@@ -14,10 +14,12 @@ pub use model::*;
 pub mod projection;
 pub use projection::*;
 use wgpu::BindingType;
+use winit::event::WindowEvent;
 
 use crate::{
-    log_warning, BindGroup, Entity, ModelManager, Position, RenderBindGroupLayouts, Renderable,
-    Rotation, Scale, TextRegion, Velocity, Vertex, VertexInstance, WgpuBuffer, World, GROUND_Y,
+    log_warning, BindGroup, Entity, MaterialManager, ModelManager, PipelineManager, Position,
+    RenderBindGroupLayouts, Renderable, Rotation, Scale, ShaderManager, TextRegion, TextureManager,
+    Velocity, Vertex, VertexInstance, WgpuBuffer, World, GROUND_Y,
 };
 
 use glam::{FloatExt, Mat4, Quat, Vec3};
@@ -41,8 +43,7 @@ pub struct Camera {
 
     // --- helper fields for movement/controls
     forward: Vec3,
-    reach_distance: f32,
-    model: CameraModel, // optional “entity” that the camera “drives”/follows
+    model: CameraModel,
     free_look: bool,
     freeze_movement: bool,
     controls: CameraControls,
@@ -53,28 +54,27 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// When we create a BindGroup for the camera‐uniform, we use this binding descriptor.
     pub const BINDING: BindingType = wgpu::BindingType::Buffer {
         ty: wgpu::BufferBindingType::Uniform,
         has_dynamic_offset: false,
         min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<CameraUniform>() as u64),
     };
 
-    /// Create a brand‐new camera. `speed` and `sensitivity` flow into `CameraControls`.
-    /// - `aspect = width / height`.
-    /// - We default `fovy = 89°`.
-    /// - `znear = 0.1`, `zfar = 100.0` initially.
-    pub fn new(device: &wgpu::Device, aspect: f32, speed: f32, sensitivity: f32) -> Self {
-        // 1) Build an empty CameraUniform on CPU
+    pub fn new(
+        device: &wgpu::Device,
+        screen_w: f32,
+        screen_h: f32,
+        speed: f32,
+        sensitivity: f32,
+    ) -> Self {
+        let aspect = screen_w / screen_h;
         let cam_unif = CameraUniform::new();
-        // 2) Upload it to a GPU Uniform Buffer
         let uniform_buffer = WgpuBuffer::from_data(
             device,
             &[cam_unif],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             Some("camera uniform buffer"),
         );
-        // 3) Create the camera’s bind group (layout is assumed to match CAMERA_BINDING).
         let bind_group = BindGroup::camera(device, &uniform_buffer);
 
         let model = CameraModel::new("goblin.obj", "normal.vert.wgsl", "normal.frag.wgsl");
@@ -85,7 +85,6 @@ impl Camera {
         let fovy = 89.0_f32.to_radians();
         let znear = 0.1;
         let zfar = 100.0;
-        let reach_distance = 2.0;
         let free_look = false;
         let freeze_movement = false;
         let controls = CameraControls::new(speed, sensitivity);
@@ -99,7 +98,6 @@ impl Camera {
             znear,
             zfar,
             forward,
-            reach_distance,
             model,
             free_look,
             freeze_movement,
@@ -109,15 +107,12 @@ impl Camera {
         }
     }
 
-    /// Handle window‐resize: only the aspect ratio changes here
     pub fn resize(&mut self, width: f32, height: f32) {
         self.aspect = width / height;
     }
 
-    /// Fill in any camera controls (WASD, mouse, etc.). Returns `true` if the event
-    /// was consumed by the camera (e.g. mouse‐drag).
-    pub fn process_event(&mut self, event: &winit::event::WindowEvent) -> bool {
-        self.controls.process_event(event)
+    pub fn process(&mut self, event: &WindowEvent) -> bool {
+        CameraControls::process_event(self, event)
     }
 
     pub fn forward(&self) -> Vec3 {
@@ -150,6 +145,9 @@ impl Camera {
     pub fn fovy(&self) -> f32 {
         self.fovy
     }
+    pub fn is_frozen(&self) -> bool {
+        self.freeze_movement
+    }
     pub fn freeze(&mut self) {
         self.freeze_movement = true;
     }
@@ -171,50 +169,76 @@ impl Camera {
     pub fn controller(&self) -> &CameraControls {
         &self.controls
     }
+    pub fn set_projection_far_near(&mut self, projection: &Projection) {
+        if matches!(
+            *projection,
+            Projection::FirstPerson | Projection::ThirdPerson
+        ) {
+            self.set_zfar(100.0);
+            self.set_znear(0.1);
+            return;
+        } else {
+            self.set_zfar(1.0);
+            self.set_znear(-1.0);
+        }
+    }
 
-    /// Once per frame (or when the projection changes), call this to overwrite the GPU uniform buffer.
-    /// It will choose the correct projection matrix (perspective or ortho) internally.
-    pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device, projection: Projection) {
-        // Compute view and projection matrices:
+    pub fn upload(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        projection: Projection,
+        screen_h: f32,
+        screen_w: f32,
+    ) {
         let (view, proj) = {
             let view = Mat4::look_at_rh(self.eye, self.target, self.up);
-            let proj = projection.projection_matrix(self);
+            let proj = projection.matrix(self, screen_w, screen_h);
             (view, proj)
         };
 
-        // Build a CameraUniform on CPU, then write it to the GPU buffer
         let mut unif = CameraUniform::new();
         unif.update(view, proj, self.eye);
 
         self.uniform_buffer.write_data(queue, device, &[unif], None);
     }
 
-    /// Expose the camera’s bind‐group (so that render code can do `rpass.set_bind_group(0, camera.bind_group(), &[])`).
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
     }
-
-    /// Spawn the “camera model” into the `World` if it isn’t already.  This is
-    /// the little entity that represents where the camera is in the scene (e.g. a goblin).
-    pub fn world_spawn(
+    pub fn load_model(
         &mut self,
-        world: &mut World,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         model_manager: &mut ModelManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         surface_config: &wgpu::SurfaceConfiguration,
     ) {
         if self.model.model_key().is_none() && !self.model.model().is_empty() {
+            let bind_group_layouts = &vec![
+                RenderBindGroupLayouts::uniform(),
+                RenderBindGroupLayouts::equirect_dst(),
+                RenderBindGroupLayouts::material_storage(),
+                RenderBindGroupLayouts::normal(),
+            ];
             self.model.load_model(
+                queue,
+                device,
                 model_manager,
+                material_manager,
+                texture_manager,
+                shader_manager,
+                pipeline_manager,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-                vec![
-                    RenderBindGroupLayouts::uniform().clone(),
-                    RenderBindGroupLayouts::equirect_dst().clone(),
-                    RenderBindGroupLayouts::material_storage().clone(),
-                    RenderBindGroupLayouts::normal().clone(),
-                ],
+                bind_group_layouts,
                 surface_config,
             );
         }
+    }
+    pub fn spawn(&mut self, world: &mut World) {
         if let Some(mk) = self.model.model_key() {
             let renderable: Renderable = mk.into();
             let entity = self.model.entity().unwrap_or_else(|| {
@@ -231,17 +255,12 @@ impl Camera {
         }
     }
 
-    /// Update both:
-    ///   1) Camera’s eye/target/up/forward/velocity logic based on the chosen `Projection`.  
-    ///   2) Insert that into the `World` so that, for instance, if the camera is attached to an entity,
-    ///      that entity’s `Rotation` or `Velocity` is updated accordingly.
     pub fn update(&mut self, world: &mut World, projection: &Projection) {
         let model_entity = match self.model.entity() {
             Some(e) => e,
             None => return,
         };
 
-        // 1) Find the player’s world‐position (if this camera is “attached” to that entity).
         let player_pos: Vec3 = world
             .physics
             .positions
@@ -250,7 +269,6 @@ impl Camera {
             .unwrap_or(Position::origin())
             .0;
 
-        // 2) Extract previous velocity (so we can smooth‐blend)
         let prev_vel = world
             .physics
             .velocities
@@ -258,137 +276,135 @@ impl Camera {
             .and_then(|v| *v)
             .unwrap_or(Velocity(Vec3::ZERO))
             .0;
-        
+
         if !self.freeze_movement {
-        match projection {
-            Projection::FirstPerson => {
-                // Tumble camera with yaw/pitch under free‐look
-                let cam_rot = Rotation::from_euler(
-                    self.controls.yaw().to_radians(),
-                    self.controls.pitch().to_radians(),
-                    0.0,
-                )
-                .quat();
-                let forward = cam_rot * -Vec3::Z;
-                self.eye = player_pos + Vec3::Y * 1.6;
-                self.target = self.eye + forward;
-                self.up = Vec3::Y;
+            match projection {
+                Projection::FirstPerson => {
+                    let cam_rot = Rotation::from_euler(
+                        self.controls.yaw().to_radians(),
+                        self.controls.pitch().to_radians(),
+                        0.0,
+                    )
+                    .quat();
+                    let forward = cam_rot * -Vec3::Z;
+                    self.eye = player_pos + Vec3::Y * 1.6;
+                    self.target = self.eye + forward;
+                    self.up = Vec3::Y;
 
-                world.insert_rotation(
-                    model_entity,
-                    Rotation::from(Quat::from_rotation_arc(
-                        Vec3::Z,
-                        (cam_rot * -Vec3::Z).normalize(),
-                    )),
-                );
+                    world.insert_rotation(
+                        model_entity,
+                        Rotation::from(Quat::from_rotation_arc(
+                            Vec3::Z,
+                            (cam_rot * -Vec3::Z).normalize(),
+                        )),
+                    );
+                }
+
+                Projection::Orthographic => {
+                    let ortho_height = self.model.distance().max(10.0);
+                    self.eye = player_pos + Vec3::Y * ortho_height;
+                    self.target = player_pos;
+                    self.up = Vec3::Z;
+
+                    world.insert_rotation(model_entity, Rotation::zero());
+                }
+
+                Projection::ThirdPerson => {
+                    let cam_rot =
+                        Rotation::from_euler(self.controls.yaw().to_radians(), 0.0, 0.0).quat();
+                    let cam_distance = self.model.distance();
+                    let cam_height = self.model.height();
+
+                    let behind = cam_rot * Vec3::Z * cam_distance;
+                    let above = Vec3::Y * cam_height;
+                    self.eye = player_pos + behind + above;
+                    self.target = player_pos + Vec3::Y * 1.0;
+                    self.up = Vec3::Y;
+
+                    world.insert_rotation(
+                        model_entity,
+                        Rotation::from(Quat::from_rotation_arc(
+                            Vec3::Z,
+                            (cam_rot * -Vec3::Z).normalize(),
+                        )),
+                    );
+                }
             }
 
-            Projection::Orthographic => {
-                // “Top‐down” view: camera sits above player on +Y, looking straight at player.
-                let ortho_height = self.model.distance().max(10.0);
-                self.eye = player_pos + Vec3::Y * ortho_height;
-                self.target = player_pos;
-                // Use world +Z as “up” so that screen +Y points toward +Z
-                self.up = Vec3::Z;
+            let mut forward_vec = (self.target - self.eye).normalize_or_zero();
+            if !self.free_look {
+                forward_vec.y = 0.0;
+            }
+            forward_vec = forward_vec.normalize_or_zero();
 
-                // If the camera entity has a model, orient it upright
-                world.insert_rotation(model_entity, Rotation::zero());
+            let right = forward_vec.cross(Vec3::Y).normalize_or_zero();
+
+            let mut displacement = Vec3::ZERO;
+            let inputs = self.controls.inputs();
+            if inputs[W] {
+                displacement += forward_vec;
+            }
+            if inputs[S] {
+                displacement -= forward_vec;
+            }
+            if inputs[A] {
+                displacement -= right;
+            }
+            if inputs[D] {
+                displacement += right;
             }
 
-            Projection::ThirdPerson => {
-                let cam_rot =
-                    Rotation::from_euler(self.controls.yaw().to_radians(), 0.0, 0.0).quat();
-                let cam_distance = self.model.distance();
-                let cam_height = self.model.height();
-
-                let behind = cam_rot * Vec3::Z * cam_distance;
-                let above = Vec3::Y * cam_height;
-                self.eye = player_pos + behind + above;
-                self.target = player_pos + Vec3::Y * 1.0;
-                self.up = Vec3::Y;
-
-                world.insert_rotation(
-                    model_entity,
-                    Rotation::from(Quat::from_rotation_arc(
-                        Vec3::Z,
-                        (cam_rot * -Vec3::Z).normalize(),
-                    )),
-                );
+            if self.free_look {
+                if inputs.len() > 4 && inputs[4] {
+                    displacement += Vec3::Y;
+                }
+                if displacement.length_squared() > 0.0 {
+                    let mv = displacement.normalize() * self.controls.speed();
+                    world.insert_velocity(model_entity, Velocity(mv));
+                } else {
+                    world.insert_velocity(model_entity, Velocity(Vec3::ZERO));
+                }
+                return;
             }
-        }
 
-        let mut forward_vec = (self.target - self.eye).normalize_or_zero();
-        if !self.free_look {
-            forward_vec.y = 0.0;
-        }
-        forward_vec = forward_vec.normalize_or_zero();
-
-        let right = forward_vec.cross(Vec3::Y).normalize_or_zero();
-
-        let mut displacement = Vec3::ZERO;
-        let inputs = self.controls.inputs();
-        if inputs[W] {
-            displacement += forward_vec;
-        }
-        if inputs[S] {
-            displacement -= forward_vec;
-        }
-        if inputs[A] {
-            displacement -= right;
-        }
-        if inputs[D] {
-            displacement += right;
-        }
-
-        if self.free_look {
-            if inputs.len() > 4 && inputs[4] {
-                displacement += Vec3::Y;
-            }
+            let mut velocity = prev_vel;
             if displacement.length_squared() > 0.0 {
                 let mv = displacement.normalize() * self.controls.speed();
-                world.insert_velocity(model_entity, Velocity(mv));
-            } else {
-                world.insert_velocity(model_entity, Velocity(Vec3::ZERO));
+                let blend = 0.2;
+                velocity.x = FloatExt::lerp(prev_vel.x, mv.x, blend);
+                velocity.z = FloatExt::lerp(prev_vel.z, mv.z, blend);
             }
-            return;
-        }
 
-        let mut velocity = prev_vel;
-        if displacement.length_squared() > 0.0 {
-            let mv = displacement.normalize() * self.controls.speed();
-            let blend = 0.2;
-            velocity.x = FloatExt::lerp(prev_vel.x, mv.x, blend);
-            velocity.z = FloatExt::lerp(prev_vel.z, mv.z, blend);
-        }
+            if inputs.len() > 4 && inputs[4] && prev_vel.y.abs() < 0.01 {
+                velocity.y = 5.0;
+            }
 
-        if inputs.len() > 4 && inputs[4] && prev_vel.y.abs() < 0.01 {
-            velocity.y = 5.0;
-        }
-
-        world.insert_velocity(model_entity, Velocity(velocity));
+            world.insert_velocity(model_entity, Velocity(velocity));
         }
     }
 
-    /// Compute (view_proj, inv_proj, inv_view) or return a Frustum for culling.
-    pub fn view_projection_matrix(&self, projection: &Projection) -> (Mat4, Mat4, Mat4) {
+    pub fn view_projection_matrix(
+        &self,
+        projection: &Projection,
+        screen_h: f32,
+        screen_w: f32,
+    ) -> (Mat4, Mat4, Mat4) {
         let view = Mat4::look_at_rh(self.eye, self.target, self.up);
-        let proj = projection.projection_matrix(self);
+        let proj = projection.matrix(self, screen_w, screen_h);
         let inv_view = view.inverse();
         let inv_proj = proj.inverse();
         (proj * view, inv_proj, inv_view)
     }
 
-    pub fn frustum(&self, projection: &Projection) -> Frustum {
-        let (vp, _ip, _iv) = self.view_projection_matrix(projection);
+    pub fn frustum(&self, projection: &Projection, screen_h: f32, screen_w: f32) -> Frustum {
+        let (vp, _ip, _iv) = self.view_projection_matrix(projection, screen_w, screen_h);
         Frustum::from_matrix(vp)
     }
 
-    /// Convenience: read back the `CameraUniform` you’d send to the GPU,
-    /// as if you’d just called `upload(...)`.  Useful for UI or debug text.
-    pub fn uniform(&self, projection: &Projection) -> CameraUniform {
+    pub fn uniform(&self, projection: &Projection, screen_h: f32, screen_w: f32) -> CameraUniform {
         let (view, proj) = {
             let view = Mat4::look_at_rh(self.eye, self.target, self.up);
-            let proj = projection.projection_matrix(self);
+            let proj = projection.matrix(self, screen_w, screen_h);
             (view, proj)
         };
         let mut cu = CameraUniform::new();
@@ -396,7 +412,6 @@ impl Camera {
         cu
     }
 
-    /// If you want to debug‐print the camera’s eye/target, use this:
     pub fn text_region(&mut self, position: [f32; 2]) -> (TextRegion, TextRegion) {
         let camera_info = format!(
             "Eye:  x={:.2} y={:.2} z={:.2}\nTarget:  x={:.2} y={:.2} z={:.2}",
@@ -406,13 +421,8 @@ impl Camera {
         let tr_controls = self.controls.text_region(position);
         (tr_camera, tr_controls)
     }
-
-    pub fn reach_distance(&self) -> f32 {
-        self.reach_distance
-    }
 }
 
-/// Helpers for computing a “look‐at” target from yaw/pitch/distance (if helpful elsewhere)
 pub fn compute_target_from_rotation(eye: Vec3, yaw: f32, pitch: f32, distance: f32) -> Vec3 {
     let yaw = yaw.to_radians();
     let pitch = pitch.to_radians();
@@ -436,10 +446,6 @@ pub fn rotation_to_face(forward: Vec3, up: Vec3) -> Quat {
     Quat::from_mat4(&Mat4::look_at_rh(Vec3::ZERO, f, u).inverse())
 }
 
-/// Ray–sphere intersection helper (unchanged).
-/// Returns `Some(t)` if the ray from `ray_origin` in direction `ray_dir`
-/// hits the sphere (centered at `sphere_center` with radius `sphere_radius`),
-/// giving the nearest positive t; or `None` otherwise.
 pub fn ray_intersects_ray_sphere(
     ray_origin: Vec3,
     ray_dir: Vec3,

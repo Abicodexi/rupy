@@ -217,7 +217,7 @@ impl DebugMode {
         }
         self.rebuild(device, next_mode, camera, light);
     }
-    
+
     fn rebuild(&mut self, device: &wgpu::Device, mode: u32, camera: &Camera, light: &Light) {
         let zfar = camera.zfar();
         let znear = camera.znear();

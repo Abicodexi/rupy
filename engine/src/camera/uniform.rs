@@ -34,9 +34,10 @@ impl CameraUniform {
     ///   - view:    Mat4 look‐at matrix (camera→world)
     ///   - proj:    Mat4 projection matrix (perspective or ortho)
     ///   - cam_pos: camera’s world position
-    pub fn update(&mut self, view: Mat4, proj: Mat4, cam_pos: Vec3) {
-        let vp = proj * view;
-        let inv_proj = proj.inverse();
+    pub fn update<P: Into<Mat4>>(&mut self, view: Mat4, proj: P, cam_pos: Vec3) {
+        let proj_mat: Mat4 = proj.into();
+        let vp = proj_mat * view;
+        let inv_proj = proj_mat.inverse();
         let inv_view = view.inverse();
 
         self.view_proj = vp.to_cols_array_2d();

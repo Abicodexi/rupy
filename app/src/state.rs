@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::app::Rupy;
 use crossbeam::channel::Sender;
-use engine::{ApplicationEvent, EngineError};
+use engine::{ApplicationEvent, EngineError, GPU};
 use winit::event_loop::ActiveEventLoop;
 
 #[allow(dead_code)]
@@ -31,9 +31,16 @@ impl ApplicationState {
     ) -> Result<(), EngineError> {
         match &state.inner {
             AppInnerState::Stopped(tx) => {
-                let run = Rupy::new(event_loop, tx.clone())?;
-                state.inner = AppInnerState::Running(run);
-                Ok(())
+                let binding = GPU::get();
+                let read_res = binding.read();
+                match read_res {
+                    Ok(gpu) => {
+                        let rupy = Rupy::new(event_loop, tx.clone())?;
+                        state.inner = AppInnerState::Running(rupy);
+                        Ok(())
+                    }
+                    Err(e) => Err(EngineError::PoisonError(e.to_string())),
+                }
             }
             _ => Ok(()),
         }

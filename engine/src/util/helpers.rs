@@ -1,5 +1,6 @@
 use crate::{
-    Entity, ModelManager, Position, RenderBindGroupLayouts, Scale, Vertex, VertexInstance, World,
+    BindGroupManager, Entity, MaterialManager, ModelManager, PipelineManager, Position,
+    RenderBindGroupLayouts, Scale, ShaderManager, TextureManager, Vertex, VertexInstance, World,
     GROUND_Y,
 };
 
@@ -27,7 +28,13 @@ impl ScreenCorner {
 }
 
 pub fn debug_scene(
-    model_manager: &mut ModelManager,
+    queue: &wgpu::Queue,
+    device: &wgpu::Device,
+    models: &mut ModelManager,
+    materials: &mut MaterialManager,
+    textures: &mut TextureManager,
+    shaders: &mut ShaderManager,
+    pipelines: &mut PipelineManager,
     world: &mut World,
     surface_config: &wgpu::SurfaceConfiguration,
     depth_stencil: wgpu::DepthStencilState,
@@ -35,16 +42,22 @@ pub fn debug_scene(
     let bossman = world.spawn();
 
     if let Some(model_key) = World::load_object(
-        model_manager,
+        queue,
+        device,
+        models,
+        materials,
+        textures,
+        shaders,
+        pipelines,
         "goblin.obj",
         "normal.vert.wgsl",
         "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        vec![
-            RenderBindGroupLayouts::uniform().clone(),
-            RenderBindGroupLayouts::equirect_dst().clone(),
-            RenderBindGroupLayouts::material_storage().clone(),
-            RenderBindGroupLayouts::normal().clone(),
+        &vec![
+            RenderBindGroupLayouts::uniform(),
+            RenderBindGroupLayouts::equirect_dst(),
+            RenderBindGroupLayouts::material_storage(),
+            RenderBindGroupLayouts::normal(),
         ],
         surface_config,
         wgpu::PrimitiveState {
@@ -71,16 +84,22 @@ pub fn debug_scene(
     let wall_height = 15;
     let wall_y_offset = 0.0;
     if let Some(model_key) = World::load_object(
-        model_manager,
+        queue,
+        device,
+        models,
+        materials,
+        textures,
+        shaders,
+        pipelines,
         "cube.obj",
         "normal.vert.wgsl",
         "normal.frag.wgsl",
         &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        vec![
-            RenderBindGroupLayouts::uniform().clone(),
-            RenderBindGroupLayouts::equirect_dst().clone(),
-            RenderBindGroupLayouts::material_storage().clone(),
-            RenderBindGroupLayouts::normal().clone(),
+        &vec![
+            RenderBindGroupLayouts::uniform(),
+            RenderBindGroupLayouts::equirect_dst(),
+            RenderBindGroupLayouts::material_storage(),
+            RenderBindGroupLayouts::normal(),
         ],
         surface_config,
         wgpu::PrimitiveState {

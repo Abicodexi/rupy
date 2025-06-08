@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
     camera::{Camera, Projection},
-    log_error, CacheKey, EngineError, Entity, Light, Medium, ModelManager, Terrain, Time,
-    WorldProjection,
+    log_error, BindGroupManager, CacheKey, EngineError, Entity, Light, Material, MaterialManager,
+    Medium, ModelManager, PipelineManager, RenderBindGroupLayouts, ShaderManager, Terrain,
+    TextureManager, Time, WorldProjection,
 };
 use glam::Vec3;
 use pollster::FutureExt;
@@ -36,8 +39,6 @@ pub struct World {
     entity_count: usize,
     pub terrain: Terrain,
     pub light: Light,
-    pub tick_rate: f32,
-    pub last_update: f64,
 }
 
 impl World {
@@ -54,7 +55,6 @@ impl World {
         config: &wgpu::SurfaceConfiguration,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Result<Self, EngineError> {
-        let tick_rate = 1.0 / 30.0_f32;
         let projection = WorldProjection::new(
             &queue,
             &device,
@@ -77,8 +77,6 @@ impl World {
             entity_count: 0,
             terrain,
             light,
-            tick_rate,
-            last_update: 0.0,
         })
     }
     pub fn entity_count(&self) -> usize {
@@ -109,19 +107,31 @@ impl World {
         crate::log_debug!("Spawned model entity: {}", entity.0);
     }
     pub fn load_object(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         model_manager: &mut ModelManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         file: &str,
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<CacheKey> {
         match model_manager
-            .load_object_file(
+            .load(
+                queue,
+                device,
+                material_manager,
+                texture_manager,
+                shader_manager,
+                pipeline_manager,
                 file,
                 v_shader,
                 f_shader,
@@ -210,24 +220,20 @@ impl World {
 
     pub fn generate_terrain(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         center: Vec3,
         radius: i32,
-        mediums: Medium,
-        surface_config: &wgpu::SurfaceConfiguration,
-        depth_stencil: &wgpu::DepthStencilState,
-        model_manager: &mut crate::ModelManager,
-    ) {
+        medium: Medium,
+        material: &Arc<Material>,
+    ) -> Result<(), EngineError> {
         let entity = self.spawn();
-        let component = self.terrain.chunks(
-            center,
-            radius,
-            mediums,
-            surface_config,
-            depth_stencil,
-            model_manager,
-        );
+        let component = self
+            .terrain
+            .chunks(queue, device, center, radius, medium, material)?;
 
         self.insert_renderable(entity, component);
+        Ok(())
     }
     pub fn light(&self) -> &Light {
         &self.light
@@ -246,37 +252,31 @@ impl World {
     ) {
         let dt = time.delta_time;
 
-        if self.last_update as f32 >= self.tick_rate {
-            self.projection
-                .compute_projection(queue, device, Some("Equirect Projection Pass"));
-            let view_distance = 1;
-            camera.update(self, projection);
-            let camera_pos = *camera.eye();
+        self.projection
+            .compute_projection(queue, device, Some("Equirect Projection Pass"));
+        let view_distance = 1;
+        camera.update(self, projection);
+        let camera_pos = *camera.eye();
 
-            if let Some(cam_entity) = camera.entity() {
-                if let (Some(cam_pos), Some(boss_pos)) = (
-                    self.physics.positions[cam_entity.0],
-                    self.physics.positions[bossman.0],
-                ) {
-                    let direction = cam_pos.0 - boss_pos.0;
-                    let mut direction_normalized = direction.normalize_or_zero();
-                    let speed = 1.0;
-                    let velocity = direction_normalized * speed;
-                    direction_normalized.y = 0.0;
-                    let rot_to_camera =
-                        glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
-                    self.insert_rotation(bossman, Rotation::from(rot_to_camera));
-                    self.insert_velocity(bossman, Velocity(velocity));
-                }
+        if let Some(cam_entity) = camera.entity() {
+            if let (Some(cam_pos), Some(boss_pos)) = (
+                self.physics.positions[cam_entity.0],
+                self.physics.positions[bossman.0],
+            ) {
+                let direction = cam_pos.0 - boss_pos.0;
+                let mut direction_normalized = direction.normalize_or_zero();
+                let speed = 1.0;
+                let velocity = direction_normalized * speed;
+                direction_normalized.y = 0.0;
+                let rot_to_camera = glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
+                self.insert_rotation(bossman, Rotation::from(rot_to_camera));
+                self.insert_velocity(bossman, Velocity(velocity));
             }
-            self.light.orbit(time.elapsed);
-            self.physics.update(camera, dt, &self.terrain);
-            self.update_transforms();
-            self.terrain.update_streaming(camera_pos, view_distance);
-            self.terrain.update_instance_buffer(queue, device);
-            self.last_update -= dt;
-        } else {
-            self.last_update += dt;
         }
+        self.light.orbit(time.elapsed);
+        self.physics.update(camera, dt, &self.terrain);
+        self.update_transforms();
+        self.terrain.update_streaming(camera_pos, view_distance);
+        self.terrain.update_instance_buffer(queue, device);
     }
 }

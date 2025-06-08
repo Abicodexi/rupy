@@ -3,3 +3,5 @@ pub use loader::*;
 
 pub mod watcher;
 pub use watcher::*;
+
+pub mod service;

@@ -3,10 +3,12 @@ use engine::{
     camera::{Camera, Projection},
     debug_scene, log_info,
     menu::Menu,
-    menu_item::MenuAction,
-    ApplicationEvent, BindGroup, DebugMode, EngineError, Entity, FrameBuffer, Medium, RenderPass,
-    RenderTargetKind, RenderTargetManager, RenderText, Renderer2d, Renderer3d, ScreenCorner,
-    SurfaceExt, TextRegion, Texture, Time, World,
+    menu_button::MenuButton,
+    menu_element::MenuElement,
+    ApplicationEvent, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError, Entity,
+    FrameBuffer, GlyphonTextRenderer, MaterialManager, Medium, ModelManager, PipelineManager,
+    RenderPass, RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner,
+    ShaderManager, SurfaceExt, TextRegion, Texture, TextureManager, Time, World,
 };
 use std::{sync::Arc, time::Instant};
 use winit::{
@@ -17,6 +19,8 @@ use winit::{
 
 #[allow(dead_code)]
 pub struct Rupy {
+    pub queue: Arc<wgpu::Queue>,
+    pub device: Arc<wgpu::Device>,
     pub time: Time,
     pub window: Arc<Window>,
     surface: wgpu::Surface<'static>,
@@ -25,12 +29,16 @@ pub struct Rupy {
     render3d: Renderer3d,
     render2d: Renderer2d,
     render_targets: RenderTargetManager,
-    rendertxt: RenderText,
+    rendertxt: GlyphonTextRenderer,
     pub camera: Camera,
     pub projection: Projection,
     last_shape_time: Instant,
     uniform_bind_group: wgpu::BindGroup,
-    pub model_manager: engine::ModelManager,
+    pub models: ModelManager,
+    pub materials: MaterialManager,
+    pub textures: TextureManager,
+    pub shaders: ShaderManager,
+    pub pipelines: PipelineManager,
     pub bossman: Entity,
     pub debug_mode: DebugMode,
     pub menu: Menu,
@@ -70,23 +78,18 @@ impl Rupy {
 
         let device = gpu.device();
         let queue = gpu.queue();
-        let mut model_manager = engine::ModelManager::new(queue.clone(), device.clone());
+        let mut materials = MaterialManager::new();
+        let mut models = ModelManager::new();
+        let mut textures = TextureManager::new();
+        let mut shaders = ShaderManager::new();
+        let mut pipelines = PipelineManager::new();
 
         surface.configure(&device, &surface_config);
 
         let time = Time::new();
-        let mut render3d = Renderer3d::new();
-        let mut render2d = Renderer2d::new(width, height, &mut model_manager)?;
-        render3d.build_pipelines(
-            device,
-            &surface_config,
-            &mut model_manager.materials.pipelines.render,
-        )?;
-        render2d.build_pipelines(
-            device,
-            &surface_config,
-            &mut model_manager.materials.pipelines.render,
-        )?;
+        let render3d = Renderer3d::new(&device, &surface_config)?;
+        let render2d = Renderer2d::new(&device)?;
+
         let depth_stencil = wgpu::DepthStencilState {
             format: Texture::DEPTH_FORMAT,
             depth_write_enabled: true,
@@ -94,10 +97,10 @@ impl Rupy {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-        let rendertxt = RenderText::new(&device, &queue, surface_config.format);
+        let rendertxt = GlyphonTextRenderer::new(&device, &queue, surface_config.format);
 
         let projection = Projection::FirstPerson;
-        let mut camera = Camera::new(&device, width as f32 / height as f32, 5.0, 0.4);
+        let mut camera = Camera::new(&device, width as f32, height as f32, 5.0, 0.4);
 
         let mut world = World::new(queue, device, &surface_config, Some(depth_stencil.clone()))?;
 
@@ -124,73 +127,88 @@ impl Rupy {
 
         let uniform_bind_group = BindGroup::uniform(&device, camera.buffer(), world.light.buffer());
 
-        let debug_mode = DebugMode::new(
-            device,
-            &mut model_manager.materials.shaders,
-            &camera,
-            &world.light,
-            &surface_config,
-        )?;
+        let debug_mode =
+            DebugMode::new(device, &mut shaders, &camera, &world.light, &surface_config)?;
 
         let bossman = debug_scene(
-            &mut model_manager,
+            &queue,
+            &device,
+            &mut models,
+            &mut materials,
+            &mut textures,
+            &mut shaders,
+            &mut pipelines,
             &mut world,
             &surface_config,
             depth_stencil.clone(),
         );
-        camera.world_spawn(&mut world, &mut model_manager, &surface_config);
-        world.generate_terrain(
-            *camera.eye(),
-            1,
-            Medium::Ground,
+
+        camera.load_model(
+            &queue,
+            &device,
+            &mut models,
+            &mut materials,
+            &mut textures,
+            &mut shaders,
+            &mut pipelines,
             &surface_config,
-            &depth_stencil,
-            &mut model_manager,
         );
+        camera.spawn(&mut world);
 
-        model_manager.materials.build_storage(device);
+        if let Some(material) = materials.get(&CacheKey::from("Material.001")) {
+            world.generate_terrain(&queue, &device, *camera.eye(), 1, Medium::Ground, material)?;
+        }
 
-        let menu = Menu::new(
-            vec![
-                (
-                    "Play",
-                    MenuAction::Play,
-                    Box::new({
-                        let tx = tx.clone();
-                        move || {
-                            tx.send(ApplicationEvent::MenuCallback("Play")).ok();
-                        }
-                    }),
-                ),
-                (
-                    "Options",
-                    MenuAction::Options,
-                    Box::new({
-                        let tx = tx.clone();
-                        move || {
-                            tx.send(ApplicationEvent::MenuCallback("Options")).ok();
-                        }
-                    }),
-                ),
-                (
-                    "Quit",
-                    MenuAction::Quit,
-                    Box::new({
-                        let tx = tx.clone();
-                        move || {
-                            tx.send(ApplicationEvent::MenuCallback("Quit")).ok();
-                        }
-                    }),
-                ),
-            ],
-            200.0, // x
-            200.0, // y
-            420.0,
-            100.0,
-            5.0,
+        let button_uv = [0.0, 0.0, 1.0, 1.0];
+        let container_uv = [0.0, 0.0, 0.0, 0.0];
+        let play_button = MenuElement::Button(MenuButton::new(
+            "Play",
+            (200.0, 120.0),
+            (400.0, 80.0),
+            [1.0, 1.0, 1.0, 0.75],
+            button_uv,
+            [0.8, 0.8, 0.8, 1.0],
+            Box::new(|| println!("Play clicked!")),
+        ));
+        let quit_tx = tx.clone();
+
+        let quit_button = MenuElement::Button(MenuButton::new(
+            "Quit",
+            (200.0, 200.0),
+            (400.0, 80.0),
+            [1.0, 1.0, 1.0, 0.75],
+            button_uv,
+            [0.8, 0.8, 0.8, 1.0],
+            Box::new(move || {
+                quit_tx.send(ApplicationEvent::MenuCallback("Quit")).ok();
+            }),
+        ));
+
+        let diffuse_texture = textures.get_or_load_texture(
+            queue,
+            device,
+            "cube-diffuse.jpg",
+            surface_config.format,
+        )?;
+        let texture_bind_group = BindGroup::texture(device, &diffuse_texture.0);
+
+        let mut menu = Menu::with_elements(
+            &device,
+            texture_bind_group,
+            width,
+            height,
+            200.0,
+            200.0,
+            [1.0, 1.0, 1.0, 0.5],
+            container_uv,
+            20.0,
+            vec![play_button, quit_button],
         );
+        menu.build_pipeline(device, &surface_config, &mut pipelines.render)?;
 
         Ok(Rupy {
+            queue: queue.clone(),
+            device: device.clone(),
             time,
             window,
             surface,
@@ -204,7 +222,11 @@ impl Rupy {
             render_targets,
             last_shape_time: Instant::now(),
             uniform_bind_group,
-            model_manager,
+            materials,
+            textures,
+            shaders,
+            pipelines,
+            models,
             bossman,
             debug_mode,
             menu,
@@ -221,63 +243,31 @@ impl Rupy {
             el.exit();
         }
     }
-    pub fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
-        self.camera.process_event(event)
-    }
 
     pub fn next_projection(&mut self) {
-        if self.projection == Projection::FirstPerson {
-            self.projection = Projection::ThirdPerson;
-            return;
-        }
-        if self.projection == Projection::ThirdPerson {
-            self.projection = Projection::Orthographic;
-            self.camera.set_zfar(1.0);
-            self.camera.set_znear(-1.0);
-            return;
-        };
-        if self.projection == Projection::Orthographic {
-            self.projection = Projection::FirstPerson;
-            self.camera.set_zfar(100.0);
-            self.camera.set_znear(0.1);
-            return;
-        }
+        self.projection = self.projection.next();
+        self.camera.set_projection_far_near(&self.projection);
     }
-    fn dispatch_menu_action(&self, action: MenuAction) {
-        match action {
-            MenuAction::Play => {
-                self.tx.send(ApplicationEvent::MenuCallback("Play")).ok();
-            }
-            MenuAction::Options => {
-                self.tx.send(ApplicationEvent::MenuCallback("Options")).ok();
-            }
-            MenuAction::Quit => {
-                self.tx.send(ApplicationEvent::MenuCallback("Quit")).ok();
-            }
-        }
+    pub fn set_projection(&mut self, projection: Projection) {
+        self.camera.set_projection_far_near(&projection);
+        self.projection = projection;
+    }
+    fn dispatch(&self, event: ApplicationEvent) {
+        self.tx.send(event).ok();
     }
     pub fn next_debug_mode(&mut self) {
         self.debug_mode
-            .next_mode(&self.model_manager.device, &self.camera, self.world.light());
+            .next_mode(&self.device, &self.camera, self.world.light());
     }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
-        self.camera
-            .resize(new_size.width as f32, new_size.height as f32);
-        self.surface.resize(
-            &self.model_manager.device,
-            &mut self.surface_config,
-            *new_size,
-        );
-        self.render2d.resize(
-            &self.model_manager.queue,
-            &self.model_manager.device,
-            new_size.width,
-            new_size.height,
-        );
-
-        self.rendertxt.resize(&self.model_manager.queue, *new_size);
-        self.render_targets
-            .resize(&self.model_manager.device, *new_size);
+        let width = new_size.width.max(1) as f32;
+        let height = new_size.height.max(1) as f32;
+        self.surface
+            .resize(&self.device, &mut self.surface_config, width, height);
+        self.camera.resize(width, height);
+        self.menu.resize(&self.queue, &self.device, width, height);
+        self.rendertxt.resize(&self.queue, width, height);
+        self.render_targets.resize(&self.device, width, height);
     }
 
     fn text_regions(&mut self) -> Vec<TextRegion> {
@@ -293,48 +283,46 @@ impl Rupy {
         self.time.update(Time::MAX_FRAME_TIME);
         while self.time.consume_accumulator(Time::TIME_STEP) {
             self.world.update(
-                &self.model_manager.queue,
-                &self.model_manager.device,
+                &self.queue,
+                &self.device,
                 &self.time,
                 &mut self.camera,
                 &self.projection,
                 self.bossman,
             );
-
+            let screen_size = self.window.inner_size();
             self.render3d.instances.update(
+                &self.device,
                 &self.world,
                 &self.camera,
+                (screen_size.width as f32, screen_size.height as f32),
                 &self.projection,
-                &mut self.model_manager,
+                &mut self.models,
             );
             self.upload();
         }
 
-        if let Some((mouse_x, mouse_y)) = self.camera.controller().last_mouse_pos() {
-            let (mouse_just_pressed_left, ..) = self.camera.controller().mouse_just_pressed();
-            if let Some(action) = self
-                .menu
-                .update(*mouse_x, *mouse_y, mouse_just_pressed_left)
-            {
-                self.dispatch_menu_action(action);
-            }
-        }
+        self.menu.update(
+            self.camera.controller().last_mouse_pos(),
+            self.camera.controller().mouse_just_pressed(),
+        );
 
         self.render();
         self.window.request_redraw();
     }
 
     pub fn upload(&mut self) {
+        let screen_size = self.window.inner_size();
+
         self.camera.upload(
-            &self.model_manager.queue,
-            &self.model_manager.device,
+            &self.queue,
+            &self.device,
             self.projection,
+            screen_size.height as f32,
+            screen_size.width as f32,
         );
-        self.world
-            .upload(&self.model_manager.queue, &self.model_manager.device);
-        self.render3d
-            .instances
-            .upload(&self.model_manager.queue, &self.model_manager.device);
+        self.world.upload(&self.queue, &self.device);
+        self.render3d.instances.upload(&self.queue, &self.device);
     }
 
     pub fn render(&mut self) {
@@ -356,12 +344,11 @@ impl Rupy {
 
         let surface_view = frame.texture.create_view(&Default::default());
 
-        let mut encoder =
-            self.model_manager
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Scene Encoder"),
-                });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Scene Encoder"),
+            });
 
         if let Some(framebuffer) = self.render_targets.get(&RenderTargetKind::Scene) {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -371,7 +358,8 @@ impl Rupy {
                 ..Default::default()
             });
             self.render3d.render(
-                &mut self.model_manager,
+                &mut self.models,
+                &self.materials,
                 &mut rpass,
                 &self.world,
                 &self.uniform_bind_group,
@@ -384,16 +372,15 @@ impl Rupy {
             self.render_targets.get(&RenderTargetKind::Hdr),
         ) {
             self.render3d
-                .hdr(&mut encoder, &self.model_manager, &scene_fb.color(), hdr_fb);
+                .hdr(&self.device, &mut encoder, &scene_fb.color(), hdr_fb);
         }
 
         if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
             self.render3d.final_blit_to_surface(
-                &self.model_manager.device,
+                &self.device,
                 &mut encoder,
                 hdr_fb.color(),
                 &surface_view,
-                &self.model_manager,
             );
         }
 
@@ -414,9 +401,6 @@ impl Rupy {
 
             self.render2d.begin_batch();
 
-            if self.menu.visible() {
-                self.menu.draw_ui(&mut self.render2d, &mut self.rendertxt);
-            }
             for item in self.text_regions() {
                 self.rendertxt.queue_text(
                     &item.text,
@@ -425,16 +409,22 @@ impl Rupy {
                     glyphon::Color::rgb(255, 255, 255),
                 );
             }
-            self.render2d.flush(&mut rpass2d, &self.model_manager);
+            self.menu.render(
+                &mut rpass2d,
+                &mut self.render2d,
+                &mut self.rendertxt,
+                &self.queue,
+                &self.pipelines,
+            );
             self.rendertxt.draw(
-                &self.model_manager.device,
-                &self.model_manager.queue,
+                &self.device,
+                &self.queue,
                 &self.surface_config,
                 &mut rpass2d,
             );
             drop(rpass2d);
         }
-        self.model_manager.queue.submit(Some(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
         frame.present();
     }
 }

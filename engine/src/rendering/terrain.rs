@@ -1,8 +1,11 @@
+use cgmath::num_traits::ToPrimitive;
 use glam::Vec3;
 
 use crate::{
-    chunk::Chunk, CacheKey, Material, MaterialAsset, Mesh, MeshAsset, MeshInstance, Position,
-    RenderBindGroupLayouts, Renderable, Rotation, Scale, Transform, WgpuBuffer, GRAVITY,
+    chunk::Chunk, BindGroupManager, CacheKey, CacheStorage, EngineError, Material, MaterialAsset,
+    MaterialManager, Mesh, MeshAsset, MeshInstance, ModelManager, PipelineManager, Position,
+    RenderBindGroupLayouts, Renderable, Rotation, Scale, ShaderManager, TextureManager, Transform,
+    WgpuBuffer, GRAVITY,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -127,13 +130,14 @@ impl Terrain {
         let mut instances = Vec::new();
 
         for ((cx, cy, cz), _chunk) in &self.chunk_stream {
-            let transform = Transform::from_components(
-                &Position::new(*cx as f32, *cy as f32, *cz as f32),
-                &Rotation::zero(),
-                &Scale::one(),
+            instances.push(
+                Transform::from_components(
+                    &Position::new(*cx as f32, *cy as f32, *cz as f32),
+                    &Rotation::zero(),
+                    &Scale::one(),
+                )
+                .into(),
             );
-            let vertex_instances: VertexInstance = transform.to_vertex_instance(1);
-            instances.push(vertex_instances);
         }
 
         if let Some(instance) = &mut self.instance_buffer {
@@ -198,76 +202,14 @@ impl Terrain {
     }
     pub fn chunks(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         center: Vec3,
         radius: i32,
         medium: Medium,
-        surface_config: &wgpu::SurfaceConfiguration,
-        depth_stencil: &wgpu::DepthStencilState,
-        model_manager: &mut crate::ModelManager,
-    ) -> Renderable {
+        material: &Arc<Material>,
+    ) -> Result<Renderable, EngineError> {
         let terrain_mat = "ground";
-
-        let v_shader = "normal.vert.wgsl";
-        let f_shader = "normal.frag.wgsl";
-
-        let vec3_zero = [0.0; 3];
-        let mat_key = CacheKey::from(terrain_mat);
-        let mat_asset = MaterialAsset {
-            name: terrain_mat.to_string(),
-            key: mat_key,
-            v_shader: v_shader.to_string(),
-            f_shader: f_shader.to_string(),
-            ambient: vec3_zero,
-            diffuse: vec3_zero,
-            specular: vec3_zero,
-            shininess: 32.0,
-            diffuse_texture: Some("cube-diffuse.jpg".to_string()),
-            normal_texture: Some("cube-normal.png".to_string()),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(depth_stencil.clone()),
-            color_target: wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            },
-            bind_group_layouts: vec![
-                RenderBindGroupLayouts::uniform().clone(),
-                RenderBindGroupLayouts::equirect_dst().clone(),
-                RenderBindGroupLayouts::material_storage().clone(),
-                RenderBindGroupLayouts::normal().clone(),
-            ],
-        };
-
-        let (pipeline, bind_group) = mat_asset
-            .load_asset(
-                &model_manager.queue,
-                &model_manager.device,
-                &mut model_manager.materials.textures,
-                &mut model_manager.materials.shaders,
-                &mut model_manager.materials.pipelines,
-                surface_config,
-                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-            )
-            .expect("Failed to load terrain material");
-
-        let mat = if let Some(cached_mat) = model_manager.materials.materials.get(&mat_asset.key) {
-            cached_mat.clone()
-        } else {
-            Arc::new(Material {
-                asset: mat_asset,
-                bind_group,
-                pipeline,
-                idx: model_manager.materials.storage_count as u32,
-            })
-        };
 
         self.mesh_instances.clear();
         for dx in -radius..=radius {
@@ -276,15 +218,10 @@ impl Terrain {
 
                 let chunk = Chunk::flat(pos);
                 let mesh_asset = chunk.build_chunk_mesh();
-                let mesh = Mesh::from_asset(
-                    &model_manager.queue,
-                    &model_manager.device,
-                    mesh_asset,
-                    &format!("chunk_{:?}", pos),
-                );
+                let mesh = Mesh::from_asset(queue, device, mesh_asset, &format!("chunk_{:?}", pos));
                 let mesh_instance = MeshInstance {
                     mesh: Arc::new(mesh),
-                    material: Some(mat.clone()),
+                    material: Some(material.clone()),
                 };
                 self.insert_chunk_stream(chunk, medium);
                 self.mesh_instances.push(mesh_instance);
@@ -292,7 +229,7 @@ impl Terrain {
         }
         let renderable = Renderable::new(terrain_mat.into());
 
-        renderable
+        Ok(renderable)
     }
     pub fn mesh_instances(&self) -> &[MeshInstance] {
         &self.mesh_instances

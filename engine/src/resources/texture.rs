@@ -93,7 +93,7 @@ impl Texture {
     pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        surface_config: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
         img: &image::RgbaImage,
         label: impl Into<String>,
     ) -> Texture {
@@ -111,7 +111,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: surface_config.format,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -297,17 +297,17 @@ impl TextureManager {
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         texture: &str,
-        surface_config: &wgpu::SurfaceConfiguration,
+        format: wgpu::TextureFormat,
     ) -> Result<(Arc<Texture>, CacheKey), EngineError> {
         let base_dir = crate::asset_dir()?.join("textures");
         let cache_key = CacheKey::from(texture.to_string());
-        if let Some(tex) = self.get(cache_key.clone()) {
+        if let Some(tex) = self.get(&cache_key) {
             Ok((tex.clone(), cache_key))
         } else {
             let img = image::open(base_dir.join(texture))
                 .map_err(|e| EngineError::AssetLoadError(e.to_string()))?
                 .to_rgba8();
-            let tex = Texture::from_image(device, queue, surface_config, &img, texture);
+            let tex = Texture::from_image(device, queue, format, &img, texture);
             let arc = Arc::new(tex);
             self.insert(cache_key.clone(), arc.clone());
             Ok((arc, cache_key))
@@ -346,13 +346,113 @@ impl TextureManager {
         }
     }
 
-    /// Retrieve a previously loaded texture
-    pub fn get<K: Into<CacheKey>>(&self, key: K) -> Option<Arc<Texture>> {
-        self.textures.get(&key.into()).cloned()
-    }
-
     /// Unload a texture from the manager (will free when Arc drops)
     pub fn unload<K: Into<CacheKey>>(&mut self, key: K) {
         self.textures.remove(&key.into());
+    }
+}
+
+pub fn fallback_diffuse(
+    queue: &wgpu::Queue,
+    device: &wgpu::Device,
+    textures: &mut crate::TextureManager,
+) -> (Arc<crate::Texture>, crate::CacheKey) {
+    let white_pixel = [255u8, 255, 255, 255];
+
+    let diffuse_cache_key = CacheKey::from("fallback_diffuse_texture");
+    if let Some(cached_diffuse_fallback) = textures.get(&diffuse_cache_key) {
+        (cached_diffuse_fallback.clone(), diffuse_cache_key)
+    } else {
+        let diffuse = crate::Texture::from_desc(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("diffuse_fallback_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        );
+        let texture_arc = Arc::new(diffuse);
+        textures.insert(diffuse_cache_key, texture_arc.clone());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture_arc.texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: wgpu::TextureAspect::All,
+            },
+            &white_pixel,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        (texture_arc, diffuse_cache_key)
+    }
+}
+pub fn fallback_normal(
+    queue: &wgpu::Queue,
+    device: &wgpu::Device,
+    textures: &mut crate::TextureManager,
+) -> (Arc<crate::Texture>, crate::CacheKey) {
+    let flat_normal = [128u8, 128, 255, 255];
+
+    let normal_cache_key = CacheKey::from("fallback_normal_texture");
+    if let Some(cached_normal_fallback) = textures.get(&normal_cache_key) {
+        (cached_normal_fallback.clone(), normal_cache_key)
+    } else {
+        let normal = crate::Texture::from_desc(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("normal_fallback_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        );
+        let texture_arc = Arc::new(normal);
+        textures.insert(normal_cache_key, texture_arc.clone());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture_arc.texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: wgpu::TextureAspect::All,
+            },
+            &flat_normal,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        (texture_arc, normal_cache_key)
     }
 }

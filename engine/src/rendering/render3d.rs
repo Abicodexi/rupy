@@ -2,40 +2,31 @@ use {
     super::{RenderPass, VertexInstance, AABB},
     crate::{
         camera::{self, Frustum, Projection},
-        create_hdr_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, FrameBuffer,
-        ModelManager, RenderPipelineManager, Rotation, Scale, Texture, Transform, WgpuBuffer,
-        World,
+        create_hdr_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError,
+        FrameBuffer, MaterialManager, ModelManager, PipelineManager, Rotation, Scale, Texture,
+        Transform, WgpuBuffer, World,
     },
     glam::{Mat4, Vec3},
-    wgpu::IndexFormat,
+    wgpu::{IndexFormat, RenderPipeline},
 };
 
 #[warn(dead_code)]
 pub struct Renderer3d {
     pub instances: InstanceBuffers,
-    pub hdr_pipeline_key: CacheKey,
+    pub hdr_pipeline: RenderPipeline,
 }
 
 impl Renderer3d {
-    pub fn new() -> Self {
-        let instances: InstanceBuffers = InstanceBuffers::new();
-        let hdr_pipeline_key = crate::CacheKey::from("hdr");
-        Renderer3d {
-            instances,
-            hdr_pipeline_key,
-        }
-    }
-    pub fn build_pipelines(
-        &mut self,
+    pub fn new(
         device: &wgpu::Device,
-        cfg: &wgpu::SurfaceConfiguration,
-        pipeline_manager: &mut RenderPipelineManager,
-    ) -> Result<(), crate::EngineError> {
-        if !pipeline_manager.contains(&self.hdr_pipeline_key) {
-            let hdr_pipeline = create_hdr_pipeline(device, cfg.format)?;
-            pipeline_manager.insert(self.hdr_pipeline_key, hdr_pipeline.into());
-        }
-        Ok(())
+        surface_config: &wgpu::SurfaceConfiguration,
+    ) -> Result<Self, EngineError> {
+        let instances: InstanceBuffers = InstanceBuffers::new();
+        let hdr_pipeline = create_hdr_pipeline(device, surface_config.format)?;
+        Ok(Renderer3d {
+            instances,
+            hdr_pipeline,
+        })
     }
 
     pub fn compute_pass(&self, world: &World, queue: &wgpu::Queue, device: &wgpu::Device) {
@@ -48,64 +39,49 @@ impl Renderer3d {
         encoder: &mut wgpu::CommandEncoder,
         hdr_texture: &Texture,
         surface_view: &wgpu::TextureView,
-        model_manager: &ModelManager,
     ) {
-        if let Some(hdr_pipeline) = model_manager
-            .materials
-            .pipelines
-            .render
-            .get(&CacheKey::from("hdr"))
-        {
-            let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
+        let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
 
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Final Blit to Surface"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Final Blit to Surface"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: surface_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-            pass.set_pipeline(hdr_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        pass.set_pipeline(&self.hdr_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 
     pub fn hdr(
         &self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        model_manager: &ModelManager,
         scene_texture: &Texture,
         hdr_fb: &FrameBuffer,
     ) {
-        if let Some(hdr_pipeline) = model_manager
-            .materials
-            .pipelines
-            .render
-            .get(&CacheKey::from("hdr"))
-        {
-            let bind_group = BindGroup::hdr(&model_manager.device, scene_texture, "hdr input");
+        let bind_group = BindGroup::hdr(device, scene_texture, "hdr input");
 
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("HDR Pass"),
-                color_attachments: &[Some(hdr_fb.color_attachment())],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("HDR Pass"),
+            color_attachments: &[Some(hdr_fb.color_attachment())],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
 
-            pass.set_pipeline(&hdr_pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        pass.set_pipeline(&self.hdr_pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 
@@ -113,6 +89,7 @@ impl RenderPass for Renderer3d {
     fn render(
         &self,
         models: &mut ModelManager,
+        materials: &MaterialManager,
         rpass: &mut wgpu::RenderPass,
         world: &World,
         uniform_bind_group: &wgpu::BindGroup,
@@ -122,7 +99,7 @@ impl RenderPass for Renderer3d {
 
         rpass.set_bind_group(0, uniform_bind_group, &[]);
         rpass.set_bind_group(1, &projection.dst_bind_group, &[]);
-        rpass.set_bind_group(2, &models.materials.storage_bind_group, &[]);
+        rpass.set_bind_group(2, materials.storage().bind_group(), &[]);
 
         rpass.set_pipeline(&projection.dst_pipeline);
         rpass.draw(0..3, 0..1);
@@ -187,12 +164,14 @@ impl InstanceBuffers {
 
     pub fn update(
         &mut self,
+        device: &wgpu::Device,
         world: &World,
         camera: &camera::Camera,
+        screen_size: (f32, f32),
         projection: &Projection,
-        model_manager: &mut ModelManager,
+        models: &ModelManager,
     ) {
-        let frustum = camera.frustum(projection);
+        let frustum = camera.frustum(projection, screen_size.0, screen_size.1);
         self.batch.clear();
 
         let default_scale = Scale::one();
@@ -216,12 +195,13 @@ impl InstanceBuffers {
 
             let transform = Transform::from_components(position, rotation, scale);
 
-            if let Some(model) = model_manager.models.get(&renderable.model_key) {
+            if let Some(model) = models.get(&renderable.model_key) {
                 if !frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix) {
                     continue;
                 }
                 if let Some(material) = &model.instance.material {
-                    let data = transform.to_vertex_instance(material.idx);
+                    let data =
+                        transform.to_vertex_instance(material.storage_id.unwrap_or(0) as u32);
                     self.batch
                         .entry(renderable.model_key)
                         .or_default()
@@ -240,10 +220,10 @@ impl InstanceBuffers {
                 .entry(*key)
                 .or_insert_with(|| InstanceBufferData {
                     buffer: WgpuBuffer::from_data(
-                        &model_manager.device,
+                        device,
                         &byte_data,
                         wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        Some(&format!(" instance buffer {}", key.id())),
+                        Some(&format!("instance buffer {}", key.id())),
                     ),
                     count: instances.len(),
                     capacity: byte_size,

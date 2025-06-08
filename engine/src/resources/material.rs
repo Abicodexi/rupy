@@ -1,11 +1,10 @@
+use super::{BindGroup, HashCache, Texture, TextureManager};
 use crate::{
-    log_debug, log_warning, CacheKey, CacheStorage, EngineError, PipelineManager, Shader,
-    ShaderManager, WgpuBuffer,
+    fallback_diffuse, fallback_normal, log_debug, log_warning, BindGroupManager, CacheKey,
+    CacheStorage, EngineError, PipelineManager, ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
-use wgpu::BufferUsages;
-
-use super::{BindGroup, HashCache, Texture, TextureManager};
+use wgpu::{BindGroupLayout, BufferUsages};
 
 #[derive(Clone, Debug)]
 pub struct MaterialAsset {
@@ -22,7 +21,6 @@ pub struct MaterialAsset {
     pub primitive: wgpu::PrimitiveState,
     pub depth_stencil: Option<wgpu::DepthStencilState>,
     pub color_target: wgpu::ColorTargetState,
-    pub bind_group_layouts: Vec<wgpu::BindGroupLayout>,
 }
 
 #[repr(C)]
@@ -63,7 +61,6 @@ impl From<tobj::Material> for MaterialAsset {
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             },
-            bind_group_layouts: Vec::new(),
         }
     }
 }
@@ -88,7 +85,6 @@ impl From<&tobj::Material> for MaterialAsset {
                 blend: None,
                 write_mask: wgpu::ColorWrites::ALL,
             },
-            bind_group_layouts: Vec::new(),
         }
     }
 }
@@ -106,129 +102,14 @@ impl MaterialAsset {
             _pad3: [0.0; 3],
         }
     }
-    pub fn buffer(&self, queue: &wgpu::Queue, device: &wgpu::Device, idx: u64) -> WgpuBuffer {
-        let binding = [self.data()];
-        let data = bytemuck::cast_slice(&binding);
-        let material_buffer = WgpuBuffer::from_data(
-            device,
-            &data, // &[u8]
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            Some(&format!("{} material storage buffer", self.key.id())),
-        );
-        queue.write_buffer(material_buffer.get(), idx, &data);
-        material_buffer
-    }
-    fn fallback_diffuse(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        textures: &mut crate::TextureManager,
-    ) -> (Arc<crate::Texture>, crate::CacheKey) {
-        let white_pixel = [255u8, 255, 255, 255];
-
-        let diffuse_cache_key = CacheKey::from("fallback_diffuse_texture");
-        if let Some(cached_diffuse_fallback) = textures.get(diffuse_cache_key) {
-            (cached_diffuse_fallback.clone(), diffuse_cache_key)
-        } else {
-            let diffuse = crate::Texture::from_desc(
-                device,
-                &wgpu::TextureDescriptor {
-                    label: Some("diffuse_fallback_texture"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                },
-            );
-            let texture_arc = Arc::new(diffuse);
-            textures.insert(diffuse_cache_key, texture_arc.clone());
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture_arc.texture,
-                    mip_level: 0,
-                    origin: Default::default(),
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &white_pixel,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-            );
-            (texture_arc, diffuse_cache_key)
-        }
-    }
-    fn fallback_normal(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        textures: &mut crate::TextureManager,
-    ) -> (Arc<crate::Texture>, crate::CacheKey) {
-        let flat_normal = [128u8, 128, 255, 255];
-
-        let normal_cache_key = CacheKey::from("fallback_normal_texture");
-        if let Some(cached_normal_fallback) = textures.get(normal_cache_key) {
-            (cached_normal_fallback.clone(), normal_cache_key)
-        } else {
-            let normal = crate::Texture::from_desc(
-                device,
-                &wgpu::TextureDescriptor {
-                    label: Some("normal_fallback_texture"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                },
-            );
-            let texture_arc = Arc::new(normal);
-            textures.insert(normal_cache_key, texture_arc.clone());
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture_arc.texture,
-                    mip_level: 0,
-                    origin: Default::default(),
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &flat_normal,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-            );
-            (texture_arc, normal_cache_key)
-        }
-    }
-    pub fn load_asset(
+    pub fn build(
         &self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_group_layouts: &Vec<&BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<
@@ -241,36 +122,32 @@ impl MaterialAsset {
         let (dt, ..) = self
             .diffuse_texture
             .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration))
-            .unwrap_or_else(|| Ok(Self::fallback_diffuse(queue, device, textures)))?;
+            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration.format))
+            .unwrap_or_else(|| Ok(fallback_diffuse(queue, device, textures)))?;
         let (nt, ..) = self
             .normal_texture
             .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration))
-            .unwrap_or_else(|| Ok(Self::fallback_normal(queue, device, textures)))?;
+            .map(|p| textures.get_or_load_texture(queue, device, p, surface_configuration.format))
+            .unwrap_or_else(|| Ok(fallback_normal(queue, device, textures)))?;
 
         let v_shader = shaders.load(device, &self.v_shader)?;
         let f_shader = shaders.load(device, &self.f_shader)?;
-        let bgl_refs: Vec<&wgpu::BindGroupLayout> = self.bind_group_layouts.iter().collect();
 
-        let bind_group = Arc::new(crate::BindGroup::normal(
-            device,
-            &dt,
-            &nt,
-            format!("{}_texture_binding", &self.name).as_ref(),
-        ));
+        let label = self.name.clone();
+        let cache_key = CacheKey::from(label.clone());
+        let bind_group = BindGroup::normal(device, &dt, &nt, label.as_ref()).into();
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&self.name),
-            bind_group_layouts: &bgl_refs,
+            bind_group_layouts: &bind_group_layouts,
             push_constant_ranges: &[],
         });
 
-        let pipeline_label = format!("{} render pipeline", self.name);
-        let pipeline_cache_key = crate::CacheKey::from(pipeline_label.clone());
+        let pipeline_label = format!("{} render pipeline", label);
 
         let pipeline = pipelines
             .render
-            .get_or_create(pipeline_cache_key, || {
+            .get_or_create(cache_key, || {
                 Arc::new(
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                         label: Some(&pipeline_label),
@@ -310,38 +187,50 @@ pub struct Material {
     pub asset: MaterialAsset,
     pub bind_group: Arc<wgpu::BindGroup>,
     pub pipeline: Arc<wgpu::RenderPipeline>,
-    pub idx: u32,
+    pub storage_id: Option<usize>,
 }
 
 impl Material {
+    pub fn new(
+        asset: MaterialAsset,
+        bind_group: Arc<wgpu::BindGroup>,
+        pipeline: Arc<wgpu::RenderPipeline>,
+    ) -> Self {
+        Self {
+            asset,
+            bind_group,
+            pipeline,
+            storage_id: None,
+        }
+    }
     pub fn from_asset(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: MaterialAsset,
-        idx: u32,
     ) -> Result<Self, EngineError> {
-        let (pipeline, bind_group) = asset.load_asset(
+        let (pipeline, bind_group) = asset.build(
             queue,
             device,
             textures,
             shaders,
             pipelines,
+            bind_group_layouts,
             surface_configuration,
             buffers,
         )?;
 
-        let material = Material {
-            asset: asset.clone(),
+        Ok(Material {
+            asset,
             pipeline,
             bind_group,
-            idx,
-        };
-        Ok(material)
+            storage_id: None,
+        })
     }
     pub fn from_tobj<'a>(
         queue: &wgpu::Queue,
@@ -349,15 +238,14 @@ impl Material {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         mat: &tobj::Material,
-        idx: u32,
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Material, EngineError> {
         let mut asset: MaterialAsset = mat.into();
@@ -366,7 +254,6 @@ impl Material {
         asset.f_shader = f_shader.to_owned();
         asset.primitive = primitive;
         asset.color_target = color_target;
-        asset.bind_group_layouts = bind_group_layouts;
 
         let material = Self::from_asset(
             queue,
@@ -374,130 +261,116 @@ impl Material {
             textures,
             shaders,
             pipelines,
+            bind_group_layouts,
             surface_configuration,
             buffers,
             asset,
-            idx,
         )?;
 
         Ok(material)
     }
-    pub fn from_tobj_vec<'a>(
-        &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        textures: &mut TextureManager,
-        shaders: &mut ShaderManager,
-        pipelines: &mut PipelineManager,
-        mats: &[tobj::Material],
-        base_idx: u32,
-        v_shader: &'a str,
-        f_shader: &'a str,
-        primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
-        surface_configuration: &wgpu::SurfaceConfiguration,
-        buffers: &'a [wgpu::VertexBufferLayout<'a>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
-        depth_stencil: Option<wgpu::DepthStencilState>,
-    ) -> Vec<Material> {
-        let mut idx = base_idx;
-        mats.iter()
-            .filter_map(|m| {
-                match Self::from_tobj(
-                    queue,
-                    device,
-                    textures,
-                    shaders,
-                    pipelines,
-                    m,
-                    idx,
-                    v_shader,
-                    f_shader,
-                    primitive,
-                    color_target.clone(),
-                    surface_configuration,
-                    buffers,
-                    bind_group_layouts.clone(),
-                    depth_stencil.clone(),
-                ) {
-                    Ok(mat) => {
-                        idx += 1;
-                        Some(mat)
-                    }
-                    Err(e) => {
-                        log_warning!("{}: {:?}", m.name, e);
-                        None
-                    }
-                }
-            })
-            .collect()
+}
+
+pub struct MaterialStorage {
+    buffer: Option<WgpuBuffer>,
+    bind_group: Option<wgpu::BindGroup>,
+    storage: HashMap<String, MaterialData>,
+    rebuild: bool,
+    count: usize,
+}
+impl MaterialStorage {
+    pub fn new() -> Self {
+        Self {
+            buffer: None,
+            bind_group: None,
+            storage: HashMap::new(),
+            rebuild: false,
+            count: 0,
+        }
+    }
+    pub fn bind_group(&self) -> Option<&wgpu::BindGroup> {
+        self.bind_group.as_ref()
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
+    pub fn id(&mut self) -> usize {
+        let count = self.count;
+        self.count += 1;
+        count
+    }
+    fn build(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
+        if self.storage.is_empty() {
+            return;
+        }
+
+        let data: Vec<MaterialData> = self.storage.values().cloned().collect();
+        let recreate_bind_group = if self.buffer.is_none() {
+            self.buffer = Some(WgpuBuffer::from_data(
+                device,
+                &data,
+                BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                Some("batched material storage buffer"),
+            ));
+            true
+        } else if self.rebuild {
+            self.buffer
+                .as_mut()
+                .unwrap()
+                .write_data(queue, device, &data, None);
+            true
+        } else {
+            false
+        };
+
+        if recreate_bind_group {
+            self.bind_group = Some(BindGroup::material_storage(
+                device,
+                self.buffer.as_ref().unwrap(),
+                Some("batched material storage buffer"),
+            ));
+        }
+
+        self.rebuild = false;
+        self.count = data.len();
+        log_debug!("Storage rebuilt");
+    }
+    fn insert(&mut self, queue: &wgpu::Queue, device: &wgpu::Device, material: &mut Material) {
+        material.storage_id = Some(self.id());
+        self.rebuild = self
+            .storage
+            .insert(material.asset.name.clone(), material.asset.data())
+            .is_none();
+        self.build(queue, device);
     }
 }
 
 pub struct MaterialManager {
-    pub textures: TextureManager,
-    pub pipelines: PipelineManager,
-    pub shaders: ShaderManager,
-    pub materials: HashCache<Arc<Material>>,
-    pub storage_buffer: WgpuBuffer,
-    pub storage_bind_group: wgpu::BindGroup,
-    pub storage: HashMap<String, MaterialData>,
-    pub storage_rebuild: bool,
-    pub storage_count: usize,
+    materials: HashCache<Arc<Material>>,
+    storage: MaterialStorage,
 }
 
 impl MaterialManager {
-    pub fn new(device: &wgpu::Device) -> Self {
-        let mat_data = [MaterialData::default()];
-        let data: &[u8] = bytemuck::cast_slice(&mat_data);
-        let storage_buffer = WgpuBuffer::from_data(
-            device,
-            data,
-            BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            Some(&format!("batched material storage buffer")),
-        );
-        let storage_bind_group = BindGroup::material_storage(
-            device,
-            &storage_buffer,
-            Some(&format!("batched material storage buffer")),
-        );
+    pub fn new() -> Self {
+        let storage = MaterialStorage::new();
         Self {
-            textures: TextureManager::new(),
-            pipelines: PipelineManager::new(),
-            shaders: ShaderManager::new(),
             materials: HashCache::new(),
-            storage_buffer,
-            storage_bind_group,
-            storage: HashMap::new(),
-            storage_rebuild: false,
-            storage_count: 0,
+            storage,
         }
     }
-
-    pub fn create_storage_idx(&mut self) -> u32 {
-        let count = self.storage_count;
-        self.storage_count += 1;
-        count as u32
+    pub fn storage(&self) -> &MaterialStorage {
+        &self.storage
     }
-    pub fn build_storage(&mut self, device: &wgpu::Device) {
-        let label = "storage buffer";
-        let usage = BufferUsages::STORAGE | BufferUsages::COPY_DST;
-        let data: Vec<MaterialData> = self.storage.values().map(|m| m.clone()).collect();
-        if !data.is_empty() {
-            let storage = WgpuBuffer::from_data(device, &data, usage, Some(label));
-            let binding = BindGroup::material_storage(device, &storage, Some(label));
-            self.storage_bind_group = binding;
-            self.storage_buffer = storage;
-            self.storage_rebuild = false;
-            self.storage_count = data.len();
-            log_debug!("Storage rebuilt");
-        }
-    }
-    pub fn update_storage(&mut self, material: &Material) {
-        self.storage_rebuild = self
-            .storage
-            .insert(material.asset.name.clone(), material.asset.data())
-            .is_none();
+    fn insert(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        mut material: Material,
+    ) -> Arc<Material> {
+        let key = material.asset.key;
+        self.storage.insert(queue, device, &mut material);
+        self.materials.insert(key, material.into());
+        self.materials.get(&key).unwrap().clone()
     }
 
     pub fn load_tobj<'a>(
@@ -507,103 +380,50 @@ impl MaterialManager {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         mat: &tobj::Material,
-        mat_id: usize,
         v_shader: &'a str,
         f_shader: &'a str,
-        primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        primitive: &wgpu::PrimitiveState,
+        color_target: &wgpu::ColorTargetState,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
-        depth_stencil: Option<wgpu::DepthStencilState>,
+        depth_stencil: &Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
-        let m_key = CacheKey::from(format!("{}{}", mat.name.clone(), mat_id));
-        if let Some(mat) = self.materials.get(&m_key) {
+        if let Some(mat) = self.materials.get(&CacheKey::from(format!("{}", mat.name))) {
             return Ok(mat.clone());
         }
-        let idx = self.create_storage_idx();
         let material = Material::from_tobj(
             queue,
             device,
             textures,
             shaders,
             pipelines,
+            bind_group_layouts,
             mat,
-            idx,
             v_shader,
             f_shader,
-            primitive,
-            color_target,
+            primitive.clone(),
+            color_target.clone(),
             surface_configuration,
             buffers,
-            bind_group_layouts,
-            depth_stencil,
+            depth_stencil.clone(),
         )?;
 
-        let material = Arc::new(material);
-        self.materials.insert(m_key, material.clone());
-        self.update_storage(&material);
+        let material = self.insert(queue, device, material);
 
         Ok(material)
     }
-    pub fn load_tobj_vec<'a>(
-        &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        textures: &mut TextureManager,
-        shaders: &mut ShaderManager,
-        pipelines: &mut PipelineManager,
-        mats: Vec<&tobj::Material>,
-        v_shader: &'a str,
-        f_shader: &'a str,
-        primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
-        surface_configuration: &wgpu::SurfaceConfiguration,
-        buffers: &'a [wgpu::VertexBufferLayout<'a>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
-        depth_stencil: Option<wgpu::DepthStencilState>,
-    ) -> Result<Vec<Arc<Material>>, EngineError> {
-        let mut materials = Vec::new();
 
-        for mat in mats {
-            let m_key = CacheKey::from(mat.name.clone());
-            if let Some(mat) = self.materials.get(&m_key) {
-                materials.push(mat.clone());
-                continue;
-            }
-            let idx = self.create_storage_idx();
-
-            let material = Material::from_tobj(
-                queue,
-                device,
-                textures,
-                shaders,
-                pipelines,
-                mat,
-                idx,
-                v_shader,
-                f_shader,
-                primitive,
-                color_target.clone(),
-                surface_configuration,
-                buffers,
-                bind_group_layouts.clone(),
-                depth_stencil.clone(),
-            )?;
-
-            let material = Arc::new(material);
-            self.materials.insert(m_key, material.clone());
-            self.update_storage(&material);
-            materials.push(material);
-        }
-        Ok(materials)
-    }
     pub fn load_asset<'a>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        asset: crate::MaterialAsset,
+        textures: &mut TextureManager,
+        shaders: &mut ShaderManager,
+        pipelines: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
+        asset: MaterialAsset,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
@@ -611,26 +431,58 @@ impl MaterialManager {
             return Ok(mat.clone());
         }
 
-        let (pipeline, bind_group) = asset.load_asset(
+        let (pipeline, bind_group) = asset.build(
             queue,
             device,
-            &mut self.textures,
-            &mut self.shaders,
-            &mut self.pipelines,
+            textures,
+            shaders,
+            pipelines,
+            bind_group_layouts,
             surface_configuration,
             buffers,
         )?;
-        let idx = self.create_storage_idx();
 
-        let material = Arc::new(Material {
-            asset: asset.clone(),
-            pipeline,
-            bind_group,
-            idx,
-        });
-        self.materials.insert(asset.key.clone(), material.clone());
-        self.update_storage(&material);
+        let material = self.insert(
+            queue,
+            device,
+            Material {
+                asset,
+                pipeline,
+                bind_group,
+                storage_id: None,
+            },
+        );
 
         Ok(material)
+    }
+}
+impl crate::CacheStorage<std::sync::Arc<Material>> for MaterialManager {
+    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Material>> {
+        self.materials.get(key)
+    }
+    fn contains(&self, key: &crate::CacheKey) -> bool {
+        self.materials.contains_key(key)
+    }
+    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut std::sync::Arc<Material>> {
+        self.materials.get_mut(key)
+    }
+    fn get_or_create<F>(
+        &mut self,
+        key: crate::CacheKey,
+        create_fn: F,
+    ) -> &mut std::sync::Arc<Material>
+    where
+        F: FnOnce() -> std::sync::Arc<Material>,
+    {
+        let start = std::time::Instant::now();
+        let model = self.materials.entry(key).or_insert_with(create_fn);
+        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
+        model
+    }
+    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Material>) {
+        self.materials.insert(key, resource);
+    }
+    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Material>> {
+        self.materials.remove(key)
     }
 }

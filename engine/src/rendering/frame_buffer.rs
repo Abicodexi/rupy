@@ -7,47 +7,16 @@ pub enum RenderTargetKind {
     Custom(&'static str),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct FrameBufferSize(pub u32, u32);
-impl From<winit::dpi::PhysicalSize<u32>> for FrameBufferSize {
-    fn from(value: winit::dpi::PhysicalSize<u32>) -> Self {
-        FrameBufferSize(value.width, value.height)
-    }
-}
-impl From<(u32, u32)> for FrameBufferSize {
-    fn from(value: (u32, u32)) -> Self {
-        FrameBufferSize(value.0, value.1)
-    }
-}
-impl From<wgpu::SurfaceConfiguration> for FrameBufferSize {
-    fn from(value: wgpu::SurfaceConfiguration) -> Self {
-        FrameBufferSize(value.width, value.height)
-    }
-}
-impl From<&wgpu::SurfaceConfiguration> for FrameBufferSize {
-    fn from(value: &wgpu::SurfaceConfiguration) -> Self {
-        FrameBufferSize(value.width, value.height)
-    }
-}
-impl Into<glyphon::Resolution> for FrameBufferSize {
-    fn into(self) -> glyphon::Resolution {
-        glyphon::Resolution {
-            width: self.0,
-            height: self.1,
-        }
-    }
-}
-
 pub struct FrameBuffer {
     color: crate::Texture,
     depth: Option<crate::Texture>,
-    size: FrameBufferSize,
+    size: (u32, u32),
 }
 
 impl FrameBuffer {
     pub fn new_color_only(
         device: &wgpu::Device,
-        size: FrameBufferSize,
+        size: (u32, u32),
         format: wgpu::TextureFormat,
         label: &str,
     ) -> Self {
@@ -76,7 +45,7 @@ impl FrameBuffer {
 
     pub fn new_with_depth(
         device: &wgpu::Device,
-        size: FrameBufferSize,
+        size: (u32, u32),
         color_format: wgpu::TextureFormat,
         depth_format: wgpu::TextureFormat,
         label: &str,
@@ -140,7 +109,8 @@ impl FrameBuffer {
             })
     }
 
-    pub fn resize(&mut self, device: &wgpu::Device, new_size: FrameBufferSize) {
+    pub fn resize(&mut self, device: &wgpu::Device, width: f32, height: f32) {
+        let new_size = (width as u32, height as u32);
         if self.size != new_size {
             let format = self.color.texture.format();
             self.color = crate::Texture::new(

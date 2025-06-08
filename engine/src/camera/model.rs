@@ -1,4 +1,7 @@
-use crate::{CacheKey, CacheStorage, Entity, ModelManager, Texture, World};
+use crate::{
+    BindGroupManager, CacheKey, CacheStorage, Entity, MaterialManager, ModelManager,
+    PipelineManager, ShaderManager, Texture, TextureManager, World,
+};
 
 #[derive(Debug, Default)]
 pub struct CameraModel {
@@ -64,9 +67,15 @@ impl CameraModel {
 
     pub fn load_model(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
         model_manager: &mut ModelManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
     ) {
         let prev_model = if let Some(key) = self.model_key {
@@ -104,7 +113,13 @@ impl CameraModel {
         };
 
         self.model_key = World::load_object(
+            queue,
+            device,
             model_manager,
+            material_manager,
+            texture_manager,
+            shader_manager,
+            pipeline_manager,
             file,
             v_shader,
             f_shader,

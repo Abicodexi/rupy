@@ -1,7 +1,7 @@
-use super::{
-    CacheKey, HashCache, Material, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance,
+use super::{CacheKey, HashCache, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance};
+use crate::{
+    log_info, log_warning, Asset, EngineError, PipelineManager, ShaderManager, TextureManager, AABB,
 };
-use crate::{log_info, log_warning, Asset, EngineError, AABB};
 use std::{collections::HashMap, sync::Arc};
 
 #[derive(Clone, Debug)]
@@ -16,35 +16,33 @@ impl ModelAsset {
         &self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        materials: &mut MaterialManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<(super::MeshInstance, AABB), EngineError> {
-        let (mesh, mat) = &self.asset;
-        let material = if let Some(m) = mat {
-            let idx = materials.create_storage_idx();
-
-            Some(Arc::new(Material::from_asset(
-                queue,
+        let material = if let Some(asset) = &self.asset.1 {
+            let m = material_manager.load_asset(
                 device,
-                &mut materials.textures,
-                &mut materials.shaders,
-                &mut materials.pipelines,
+                queue,
+                texture_manager,
+                shader_manager,
+                pipeline_manager,
+                bind_group_layouts,
+                asset.clone(),
                 surface_configuration,
                 buffers,
-                m.clone(),
-                idx,
-            )?))
+            )?;
+            Some(m)
         } else {
             None
         };
 
-        if let Some(mat) = &material {
-            materials.update_storage(mat.as_ref());
-            materials.build_storage(device);
-        }
-        let aabb = AABB::from_vertices(&mesh.vertices);
-        let mesh = Mesh::from_asset(queue, device, mesh.clone(), &self.name);
+        let aabb = AABB::from_vertices(&self.asset.0.vertices);
+        let mesh = Mesh::from_asset(queue, device, self.asset.0.clone(), &self.name);
         let instance = MeshInstance {
             mesh: Arc::new(mesh),
             material,
@@ -63,13 +61,26 @@ impl Model {
     pub fn from_asset(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        materials: &mut MaterialManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
     ) -> std::result::Result<Self, EngineError> {
-        let (instance, aabb) =
-            asset.load_asset(queue, device, materials, surface_configuration, buffers)?;
+        let (instance, aabb) = asset.load_asset(
+            queue,
+            device,
+            material_manager,
+            texture_manager,
+            shader_manager,
+            pipeline_manager,
+            bind_group_layouts,
+            surface_configuration,
+            buffers,
+        )?;
         Ok(Self {
             name: asset.name,
             instance,
@@ -79,7 +90,10 @@ impl Model {
     pub fn from_tobj(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        materials: &mut MaterialManager,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         model: &tobj::Model,
         material: Option<&tobj::Material>,
         v_shader: &str,
@@ -89,7 +103,7 @@ impl Model {
         primitive: wgpu::PrimitiveState,
         depth_stencil: Option<wgpu::DepthStencilState>,
         color_target: wgpu::ColorTargetState,
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
     ) -> Result<Model, EngineError> {
         let vertices = MeshAsset::compute_vertex(&model);
         let indices = model.mesh.indices.clone();
@@ -101,7 +115,6 @@ impl Model {
                     mat_asset.primitive = primitive;
                     mat_asset.color_target = color_target;
                     mat_asset.depth_stencil = depth_stencil;
-                    mat_asset.bind_group_layouts = bind_group_layouts;
                     mat_asset.v_shader = v_shader.to_string();
                     mat_asset.f_shader = f_shader.to_string();
 
@@ -113,8 +126,17 @@ impl Model {
             }),
             aabb: AABB::default(),
         };
-        let (instance, aabb) =
-            model_asset.load_asset(queue, device, materials, surface_configuration, buffers)?;
+        let (instance, aabb) = model_asset.load_asset(
+            queue,
+            device,
+            material_manager,
+            texture_manager,
+            shader_manager,
+            pipeline_manager,
+            bind_group_layouts,
+            surface_configuration,
+            buffers,
+        )?;
         Ok(Self {
             name: model.name.clone(),
             instance,
@@ -125,26 +147,27 @@ impl Model {
 
 pub struct ModelManager {
     pub models: HashCache<Arc<Model>>,
-    pub materials: MaterialManager,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
 }
 impl ModelManager {
-    pub fn new(queue: Arc<wgpu::Queue>, device: Arc<wgpu::Device>) -> Self {
+    pub fn new() -> Self {
         Self {
             models: HashMap::new(),
-            materials: MaterialManager::new(&device),
-            device,
-            queue,
         }
     }
-    pub async fn load_object_file(
+
+    pub async fn load(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
         file: &str,
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
@@ -186,9 +209,12 @@ impl ModelManager {
             };
 
             let model = Arc::new(Model::from_tobj(
-                &self.queue,
-                &self.device,
-                &mut self.materials,
+                queue,
+                device,
+                material_manager,
+                texture_manager,
+                shader_manager,
+                pipeline_manager,
                 &m,
                 mat,
                 v_shader,
@@ -198,7 +224,7 @@ impl ModelManager {
                 primitive,
                 depth_stencil.clone(),
                 color_target.clone(),
-                bind_group_layouts.clone(),
+                bind_group_layouts,
             )?);
 
             self.models.insert(m_key, model);
@@ -208,6 +234,13 @@ impl ModelManager {
     }
     pub fn load_asset(
         &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
+        bind_group_layouts: &Vec<&wgpu::BindGroupLayout>,
         surface_configuration: &wgpu::SurfaceConfiguration,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
@@ -217,9 +250,13 @@ impl ModelManager {
             return Ok(m.clone());
         }
         let model = Arc::new(Model::from_asset(
-            &self.queue,
-            &self.device,
-            &mut self.materials,
+            queue,
+            device,
+            material_manager,
+            texture_manager,
+            shader_manager,
+            pipeline_manager,
+            bind_group_layouts,
             surface_configuration,
             buffers,
             asset,

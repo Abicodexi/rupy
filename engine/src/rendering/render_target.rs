@@ -13,13 +13,9 @@ impl RenderTargetManager {
         self.targets.insert(kind, fb);
     }
 
-    pub fn resize<S: Into<crate::FrameBufferSize> + std::marker::Copy>(
-        &mut self,
-        device: &wgpu::Device,
-        size: S,
-    ) {
+    pub fn resize(&mut self, device: &wgpu::Device, width: f32, height: f32) {
         for fb in &mut self.targets.values_mut() {
-            fb.resize(device, size.into());
+            fb.resize(device, width, height);
         }
     }
 
