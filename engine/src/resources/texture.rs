@@ -1,4 +1,4 @@
-use crate::{AssetLoader, CacheKey, CacheStorage, EngineError, HashCache};
+use crate::{log_debug, AssetLoader, CacheKey, CacheStorage, EngineError, HashCache};
 use image::codecs::hdr::{HdrDecoder, HdrMetadata};
 use pollster::FutureExt;
 use std::io::Cursor;
@@ -160,9 +160,9 @@ impl Texture {
         device: &wgpu::Device,
         file_name: &str,
     ) -> Result<Texture, EngineError> {
-        let path = &format!("textures/{}", file_name);
-        let file_bytes = AssetLoader::read_bytes(path)?;
-        let texture = Self::from_bytes(device, queue, &file_bytes, path).await?;
+        let path = AssetLoader::resolve("textures").join(file_name);
+        let file_bytes = AssetLoader::bytes(path)?;
+        let texture = Self::from_bytes(device, queue, &file_bytes, file_name).await?;
         Ok(texture)
     }
     pub async fn from_bytes<P: AsRef<std::path::Path>>(
@@ -292,6 +292,19 @@ pub struct TextureManager {
     textures: HashCache<Arc<Texture>>,
 }
 impl TextureManager {
+    pub async fn load_async(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        texture: &str,
+    ) -> Result<(), EngineError> {
+        let tex_key = CacheKey::from(texture);
+        if !self.contains_resource(&tex_key) {
+            let tex = AssetLoader::texture(&queue, &device, texture).await?;
+            self.insert_resource(tex_key, tex.into());
+        }
+        Ok(())
+    }
     pub fn load(
         &mut self,
         queue: &wgpu::Queue,
@@ -299,9 +312,10 @@ impl TextureManager {
         texture: &str,
     ) -> Result<(), EngineError> {
         let tex_key = CacheKey::from(texture);
-        if !self.contains(&tex_key) {
-            let tex = AssetLoader::load_texture_file(&queue, &device, texture).block_on()?;
-            self.insert(tex_key, tex.into());
+        if !self.contains_resource(&tex_key) {
+            let tex = AssetLoader::texture(&queue, &device, texture).block_on()?;
+            self.insert_resource(tex_key, tex.into());
+            log_debug!("Loaded texture: {}", texture);
         }
         Ok(())
     }
@@ -312,43 +326,53 @@ impl TextureManager {
         texture: &str,
         format: wgpu::TextureFormat,
     ) -> Result<(Arc<Texture>, CacheKey), EngineError> {
-        let base_dir = crate::asset_dir()?.join("textures");
         let cache_key = CacheKey::from(texture.to_string());
-        if let Some(tex) = self.get(&cache_key) {
+        if let Some(tex) = self.get_resource(&cache_key) {
             Ok((tex.clone(), cache_key))
         } else {
-            let img = image::open(base_dir.join(texture))
-                .map_err(|e| EngineError::AssetLoadError(e.to_string()))?
-                .to_rgba8();
-            let tex = Texture::from_image(device, queue, format, &img, texture);
+            let path = AssetLoader::resolve("textures").join(texture);
+            let tex = Texture::from_image(
+                device,
+                queue,
+                format,
+                &AssetLoader::image(path)?.to_rgba8(),
+                texture,
+            );
             let arc = Arc::new(tex);
-            self.insert(cache_key.clone(), arc.clone());
+            self.insert_resource(cache_key.clone(), arc.clone());
             Ok((arc, cache_key))
         }
     }
 }
 impl CacheStorage<Arc<Texture>> for TextureManager {
-    fn get(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
+    fn get_resource(&self, key: &CacheKey) -> Option<&Arc<Texture>> {
         self.textures.get(key)
     }
 
-    fn contains(&self, key: &CacheKey) -> bool {
+    fn contains_resource(&self, key: &CacheKey) -> bool {
         self.textures.contains_key(key)
     }
     fn get_mut(&mut self, key: &CacheKey) -> Option<&mut Arc<Texture>> {
         self.textures.get_mut(key)
     }
-    fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> &mut Arc<Texture>
+    fn get_or_create<F>(&mut self, key: CacheKey, create_fn: F) -> Result<Arc<Texture>, EngineError>
     where
-        F: FnOnce() -> Arc<Texture>,
+        F: FnOnce() -> Result<Arc<Texture>, EngineError>,
     {
-        self.textures.entry(key).or_insert_with(create_fn)
+        self.textures.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: CacheKey, resource: Arc<Texture>) {
+    fn insert_resource(&mut self, key: CacheKey, resource: Arc<Texture>) {
         self.textures.insert(key, resource);
     }
-    fn remove(&mut self, key: &CacheKey) -> Option<std::sync::Arc<Texture>> {
+    fn remove_resource(&mut self, key: &CacheKey) -> Option<std::sync::Arc<Texture>> {
         self.textures.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a Arc<Texture>>
+    where
+        Arc<Texture>: 'a,
+    {
+        self.textures.values()
     }
 }
 
@@ -372,7 +396,7 @@ pub fn fallback_diffuse(
     let white_pixel = [255u8, 255, 255, 255];
 
     let diffuse_cache_key = CacheKey::from("fallback_diffuse_texture");
-    if let Some(cached_diffuse_fallback) = textures.get(&diffuse_cache_key) {
+    if let Some(cached_diffuse_fallback) = textures.get_resource(&diffuse_cache_key) {
         (cached_diffuse_fallback.clone(), diffuse_cache_key)
     } else {
         let diffuse = crate::Texture::from_desc(
@@ -393,7 +417,7 @@ pub fn fallback_diffuse(
             },
         );
         let texture_arc = Arc::new(diffuse);
-        textures.insert(diffuse_cache_key, texture_arc.clone());
+        textures.insert_resource(diffuse_cache_key, texture_arc.clone());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture_arc.texture,
@@ -424,7 +448,7 @@ pub fn fallback_normal(
     let flat_normal = [128u8, 128, 255, 255];
 
     let normal_cache_key = CacheKey::from("fallback_normal_texture");
-    if let Some(cached_normal_fallback) = textures.get(&normal_cache_key) {
+    if let Some(cached_normal_fallback) = textures.get_resource(&normal_cache_key) {
         (cached_normal_fallback.clone(), normal_cache_key)
     } else {
         let normal = crate::Texture::from_desc(
@@ -445,7 +469,7 @@ pub fn fallback_normal(
             },
         );
         let texture_arc = Arc::new(normal);
-        textures.insert(normal_cache_key, texture_arc.clone());
+        textures.insert_resource(normal_cache_key, texture_arc.clone());
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture_arc.texture,

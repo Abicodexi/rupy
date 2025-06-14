@@ -162,3 +162,35 @@ impl Vertex2d {
         ],
     };
 }
+
+#[derive(Debug, Clone)]
+pub struct OwnedVertexBufferLayout {
+    pub array_stride: wgpu::BufferAddress,
+    pub step_mode: wgpu::VertexStepMode,
+    pub attributes: Vec<wgpu::VertexAttribute>,
+}
+
+impl OwnedVertexBufferLayout {
+    pub fn convert_layouts(layouts: &[wgpu::VertexBufferLayout]) -> Vec<OwnedVertexBufferLayout> {
+        layouts
+            .iter()
+            .map(|l| OwnedVertexBufferLayout {
+                array_stride: l.array_stride,
+                step_mode: l.step_mode,
+                attributes: l.attributes.to_vec(),
+            })
+            .collect()
+    }
+    pub fn reconstruct_layouts(
+        layouts: &[OwnedVertexBufferLayout],
+    ) -> Vec<wgpu::VertexBufferLayout> {
+        layouts
+            .iter()
+            .map(|l| wgpu::VertexBufferLayout {
+                array_stride: l.array_stride,
+                step_mode: l.step_mode,
+                attributes: &l.attributes,
+            })
+            .collect()
+    }
+}

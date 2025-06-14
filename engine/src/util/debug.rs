@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use crate::{
-    camera::Camera, BindGroup, EngineError, Light, RenderBindGroupLayouts, ShaderManager, Texture,
-    Vertex, VertexInstance, WgpuBuffer,
+    camera::Camera, AssetService, BindGroup, CacheKey, EngineError, Light, RenderBindGroupLayouts,
+    Texture, Vertex, VertexInstance, WgpuBuffer,
 };
 use bytemuck::{Pod, Zeroable};
 use wgpu::{BufferUsages, RenderPipeline};
@@ -43,8 +45,7 @@ pub struct DebugMode {
 
 impl DebugMode {
     pub fn new(
-        device: &wgpu::Device,
-        shaders: &mut ShaderManager,
+        service: &'static Arc<AssetService>,
         camera: &Camera,
         light: &Light,
         surface_configuration: &wgpu::SurfaceConfiguration,
@@ -62,25 +63,30 @@ impl DebugMode {
             normal_color: [1.0; 3],
         };
         let buffer = WgpuBuffer::from_data(
-            device,
+            service.device(),
             bytemuck::bytes_of(&uniform),
             BufferUsages::UNIFORM,
             Some("debug uniform buffer"),
         );
-        let bind_group = BindGroup::debug(device, camera.buffer(), light.buffer(), &buffer);
-        let shader = shaders.load(device, "debug.wgsl")?;
+        let bind_group =
+            BindGroup::debug(service.device(), camera.buffer(), light.buffer(), &buffer);
+        service.load_shader("debug.wgsl");
+        let shader = service.get_shader(&CacheKey::from("debug.wgsl")).unwrap();
         let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("debug_pipeline_layout"),
-            bind_group_layouts: &[
-                RenderBindGroupLayouts::debug().as_ref(),
-                RenderBindGroupLayouts::equirect_dst().as_ref(),
-                RenderBindGroupLayouts::material_storage().as_ref(),
-                RenderBindGroupLayouts::normal().as_ref(),
-            ],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            service
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("debug_pipeline_layout"),
+                    bind_group_layouts: &[
+                        RenderBindGroupLayouts::debug().as_ref(),
+                        RenderBindGroupLayouts::equirect_dst().as_ref(),
+                        RenderBindGroupLayouts::material_storage().as_ref(),
+                        RenderBindGroupLayouts::normal().as_ref(),
+                    ],
+                    push_constant_ranges: &[],
+                });
 
         let primitive = wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -106,78 +112,89 @@ impl DebugMode {
             bias: wgpu::DepthBiasState::default(),
         };
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("debug_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers,
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(color_target.clone())],
-                compilation_options: Default::default(),
-            }),
-            primitive: primitive,
-            depth_stencil: Some(depth_stencil.clone()),
+        let pipeline = service
+            .device()
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("debug_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(color_target.clone())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: primitive,
+                depth_stencil: Some(depth_stencil.clone()),
 
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
         // normal_lines pipeline
-        let line_shader = shaders.load(device, "normal_lines.wgsl")?;
-        let line_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("normal_line_pipeline_layout"),
-            bind_group_layouts: &[
-                RenderBindGroupLayouts::debug().as_ref(),
-                RenderBindGroupLayouts::equirect_dst().as_ref(),
-                RenderBindGroupLayouts::material_storage().as_ref(),
-                RenderBindGroupLayouts::normal().as_ref(),
-            ],
-            push_constant_ranges: &[],
-        });
+        service.load_shader("normal_lines.wgsl");
+        let line_shader = service
+            .get_shader(&CacheKey::from("normal_lines.wgsl"))
+            .unwrap();
+        let line_pipeline_layout =
+            service
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("normal_line_pipeline_layout"),
+                    bind_group_layouts: &[
+                        RenderBindGroupLayouts::debug().as_ref(),
+                        RenderBindGroupLayouts::equirect_dst().as_ref(),
+                        RenderBindGroupLayouts::material_storage().as_ref(),
+                        RenderBindGroupLayouts::normal().as_ref(),
+                    ],
+                    push_constant_ranges: &[],
+                });
 
-        let normal_line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("normal_line_pipeline"),
-            layout: Some(&line_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &line_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &line_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(color_target)],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(depth_stencil),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let normal_line_pipeline =
+            service
+                .device()
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("normal_line_pipeline"),
+                    layout: Some(&line_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &line_shader,
+                        entry_point: Some("vs_main"),
+                        buffers: &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &line_shader,
+                        entry_point: Some("fs_main"),
+                        targets: &[Some(color_target)],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::LineList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        unclipped_depth: false,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(depth_stencil),
+                    multisample: wgpu::MultisampleState {
+                        count: 1,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview: None,
+                    cache: None,
+                });
 
         Ok(Self {
             buffer,

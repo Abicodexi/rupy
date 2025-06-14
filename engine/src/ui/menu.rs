@@ -1,123 +1,127 @@
 use crate::{
-    camera::OrthoUniform, create_render_pipeline, menu_container::MenuContainer,
-    menu_element::MenuElement, CacheKey, CacheStorage, EngineError, GlyphonTextRenderer,
-    PipelineManager, RenderBindGroupLayouts, RenderPipelineManager, Renderer2d, ShaderManager,
-    Vertex2d, WgpuBuffer,
+    camera::OrthoUniform, container::UiContainer, menu_builder::MenuBuilder,
+    menu_element::MenuElement, AssetService, BindGroup, CacheKey, EngineError, GlyphonTextRenderer,
+    Renderer2d, UiElement, UiEvent, Vertex2d, WgpuBuffer,
 };
+use std::sync::Arc;
 use winit::{
     event::WindowEvent,
     keyboard::{KeyCode, PhysicalKey},
 };
 
 pub struct Menu {
-    pub ortho_buffer: WgpuBuffer,
-    pub ortho_bind_group: wgpu::BindGroup,
-    pub texture_bind_group: wgpu::BindGroup,
-    pub pipeline_key: CacheKey,
-    root: MenuContainer,
+    buffer: WgpuBuffer,
+    bind_group: Arc<wgpu::BindGroup>,
+    texture_bind_group: Arc<wgpu::BindGroup>,
+    pipeline: Arc<wgpu::RenderPipeline>,
+    root: UiContainer,
     is_visible: bool,
 }
 
 impl Menu {
     pub fn new(
-        device: &wgpu::Device,
-        texture_bind_group: wgpu::BindGroup,
+        service: &AssetService,
+        surface_config: &wgpu::SurfaceConfiguration,
+        texture: &str,
         screen_w: u32,
         screen_h: u32,
-        x: f32,
-        y: f32,
-        container_color: [f32; 4],
-        container_uv: [f32; 4],
-        padding: f32,
-    ) -> Self {
+        container: UiContainer,
+    ) -> Result<Self, EngineError> {
+        let root = container;
+
         let ortho_uniform = OrthoUniform::new(screen_w as f32, screen_h as f32);
-        let ortho_buffer = WgpuBuffer::from_data(
-            device,
+        let buffer = WgpuBuffer::from_data(
+            service.device(),
             bytemuck::bytes_of(&ortho_uniform),
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             Some("Menu Ortho Buffer"),
         );
-        let ortho_bind_group_layout = RenderBindGroupLayouts::ortho_uniform();
-        let ortho_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Menu OrthoBindGroup"),
-            layout: &ortho_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: ortho_buffer.get().as_entire_binding(),
-            }],
-        });
 
-        let root = MenuContainer::new((x, y), container_color, container_uv, padding);
-        let pipeline_key = CacheKey::from("sprite2d");
+        let bind_group = service.get_or_create_bind_group("orthographic".into(), || {
+            Ok(BindGroup::ortho_uniform(service.device(), &buffer).into())
+        })?;
 
-        Menu {
-            ortho_buffer,
-            ortho_bind_group,
-            texture_bind_group,
-            root,
-            is_visible: false,
+        let pipeline_name = "sprite2d";
+        let pipeline_key = CacheKey::from(pipeline_name);
+        let pipeline_layout =
+            service
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("{} layout", pipeline_name)),
+                    bind_group_layouts: &[
+                        &service.bind_group_layouts().ortho_uniform,
+                        &service.bind_group_layouts().diffuse,
+                    ],
+                    push_constant_ranges: &[],
+                });
+
+        service.load_texture(texture);
+        let texture_bind_group = if let Some(bg) =
+            service.get_bind_group_for_texture(texture, &service.bind_group_layouts().diffuse)
+        {
+            bg
+        } else {
+            return Err(EngineError::AssetLoadError(format!(
+                "Failed to create menu diffuse texture bind group: {}",
+                texture
+            )));
+        };
+
+        if let Some(pipeline) = service.get_or_load_render_pipeline(
+            "sprite2d.frag.wgsl",
+            "sprite2d.vert.wgsl",
+            pipeline_layout,
+            &[Vertex2d::LAYOUT],
+            surface_config.format,
+            None,
             pipeline_key,
+            format!("{} pipeline", pipeline_name),
+        ) {
+            Ok(Menu {
+                buffer,
+                bind_group,
+                texture_bind_group,
+                root,
+                is_visible: false,
+                pipeline,
+            })
+        } else {
+            Err(EngineError::AssetLoadError(format!(
+                "Failed to build pipeline {}",
+                pipeline_name
+            )))
         }
     }
-    pub fn with_elements(
-        device: &wgpu::Device,
-        texture_bind_group: wgpu::BindGroup,
+
+    pub fn builder(
+        service: Arc<AssetService>,
+        surface_config: &wgpu::SurfaceConfiguration,
         screen_w: u32,
         screen_h: u32,
-        x: f32,
-        y: f32,
-        color: [f32; 4],
-        uv: [f32; 4],
-        padding: f32,
+    ) -> MenuBuilder {
+        MenuBuilder::new(service, surface_config, screen_w, screen_h)
+    }
+    pub fn with_elements(
+        service: &Arc<AssetService>,
+        surface_config: &wgpu::SurfaceConfiguration,
+        texture: &str,
+        screen_w: u32,
+        screen_h: u32,
         elements: Vec<MenuElement>,
-    ) -> Self {
+        container: UiContainer,
+    ) -> Result<Self, EngineError> {
         let mut menu = Self::new(
-            device,
-            texture_bind_group,
+            service,
+            surface_config,
+            texture,
             screen_w,
             screen_h,
-            x,
-            y,
-            color,
-            uv,
-            padding,
-        );
+            container,
+        )?;
         for element in elements {
             menu.add_element(element);
         }
-        menu.root.layout();
-        menu
-    }
-    pub fn build_pipeline(
-        &mut self,
-        device: &wgpu::Device,
-        cfg: &wgpu::SurfaceConfiguration,
-        pipeline_manager: &mut RenderPipelineManager,
-        shaders: &mut ShaderManager,
-        bind_group_layouts: &RenderBindGroupLayouts,
-    ) -> Result<(), EngineError> {
-        if !pipeline_manager.contains(&self.pipeline_key) {
-            let ortho_bind_group_layout = &bind_group_layouts.ortho_uniform;
-            let texture_bind_group_layout = &bind_group_layouts.diffuse;
-            let label = "spride 2d pipeline";
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("{} layout", label)),
-                bind_group_layouts: &[ortho_bind_group_layout, texture_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            let sprite2d_pipeline = create_render_pipeline(
-                device,
-                shaders,
-                "sprite2d.frag.wgsl",
-                "sprite2d.vert.wgsl",
-                pipeline_layout,
-                &[Vertex2d::LAYOUT],
-                cfg.format,
-                label.into(),
-            )?;
-            pipeline_manager.insert(self.pipeline_key, sprite2d_pipeline.into());
-        }
-        Ok(())
+        Ok(menu)
     }
     pub fn resize(
         &mut self,
@@ -126,7 +130,7 @@ impl Menu {
         screen_w: f32,
         screen_h: f32,
     ) {
-        self.ortho_buffer.write_data(
+        self.buffer.write_data(
             queue,
             device,
             &[OrthoUniform::new(screen_w, screen_h)],
@@ -147,13 +151,14 @@ impl Menu {
                             }
                         }
                     }
-                    self.is_visible
+                    {}
                 }
 
-                _ => false,
+                _ => {}
             },
-            _ => false,
+            _ => {}
         }
+        self.is_visible
     }
     pub fn render<'a>(
         &'a mut self,
@@ -161,47 +166,42 @@ impl Menu {
         d2: &mut Renderer2d,
         txt: &mut GlyphonTextRenderer,
         queue: &wgpu::Queue,
-        pipelines: &PipelineManager,
     ) {
         if !self.is_visible {
             return;
         }
-        if let Some(pipeline) = pipelines.render.get(&self.pipeline_key) {
-            rpass.set_pipeline(pipeline);
-            rpass.set_bind_group(0, &self.ortho_bind_group, &[]);
-            rpass.set_bind_group(1, &self.texture_bind_group, &[]);
-        }
+
+        rpass.set_pipeline(&self.pipeline);
+        rpass.set_bind_group(0, self.bind_group.as_ref(), &[]);
+        rpass.set_bind_group(1, self.texture_bind_group.as_ref(), &[]);
 
         self.root.draw(d2, txt);
         d2.flush(queue, rpass);
     }
     pub fn add_element(&mut self, element: MenuElement) {
-        self.root.push_element(element);
-        self.root.layout();
+        self.root.push_element(UiElement::Menu(element));
     }
-    pub fn update(&mut self, mouse_position: Option<(f32, f32)>, clicked: (bool, bool)) {
+
+    pub fn update(
+        &mut self,
+        mouse_position: Option<(f32, f32)>,
+        clicked: (bool, bool),
+    ) -> Vec<UiEvent> {
+        let mut events = Vec::new();
         for elem in self.root.elements_mut() {
             match elem {
-                MenuElement::Button(menu_button) => {
-                    menu_button.update(mouse_position, clicked);
-                }
-            }
-        }
-    }
-    pub fn on_click(&mut self, mouse_position: Option<(f32, f32)>) {
-        let Some((mouse_x, mouse_y)) = mouse_position else {
-            return;
-        };
-        for elem in self.root.elements_mut() {
-            match elem {
-                MenuElement::Button(menu_button) => {
-                    if menu_button.contains(mouse_x, mouse_y) {
-                        menu_button.on_click();
-                        break;
+                UiElement::Menu(menu_element) => {
+                    if let Some(ev) = menu_element.update(mouse_position, clicked) {
+                        events.push(ev);
                     }
                 }
             }
         }
+
+        events
+    }
+    pub fn get_element(&self, id: u32) -> Option<&UiElement> {
+        self.root.get_element(id)
     }
     pub fn is_visible(&self) -> bool {
         self.is_visible

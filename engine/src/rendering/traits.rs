@@ -3,7 +3,7 @@ use crate::{DebugMode, MaterialManager, ModelManager, World};
 pub trait RenderPass {
     fn render(
         &self,
-        models: &mut ModelManager,
+        models: &ModelManager,
         materials: &MaterialManager,
         rpass: &mut wgpu::RenderPass,
         world: &World,

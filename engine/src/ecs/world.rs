@@ -2,15 +2,18 @@ use std::sync::Arc;
 
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
-    camera::{Camera, Projection},
-    log_error, CacheKey, EngineError, Entity, Light, Material, MaterialManager, Medium,
-    ModelManager, PipelineManager, ShaderManager, Terrain, TextureManager, Time, WorldProjection,
+    camera::Camera, log_error, log_info, BindGroupManager, CacheKey, EngineError, Entity, Light,
+    Material, MaterialManager, Medium, ModelManager, PipelineManager, ShaderManager, Terrain,
+    TextureManager, Time, WorldProjection,
 };
 use glam::Vec3;
 use pollster::FutureExt;
 
-pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+fn _start_running() {
+    RUNNING.store(true, std::sync::atomic::Ordering::Relaxed)
+}
 fn _still_running() -> bool {
     RUNNING.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -45,9 +48,13 @@ impl World {
         _still_running()
     }
     pub fn stop() {
+        log_info!("Stopping world");
         _stop_running();
     }
-
+    pub fn start(&self) {
+        log_info!("Starting world with entity count: {}", self.entity_count);
+        _start_running();
+    }
     pub fn new(
         projection: WorldProjection,
         terrain: Terrain,
@@ -100,6 +107,7 @@ impl World {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         file: &str,
         v_shader: &str,
         f_shader: &str,
@@ -118,6 +126,7 @@ impl World {
                 texture_manager,
                 shader_manager,
                 pipeline_manager,
+                bind_group_manager,
                 file,
                 v_shader,
                 f_shader,
@@ -232,8 +241,7 @@ impl World {
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         time: &Time,
-        camera: &mut Camera,
-        projection: &Projection,
+        camera: &Camera,
         bossman: Entity,
     ) {
         let dt = time.delta_time;
@@ -241,8 +249,8 @@ impl World {
         self.projection
             .compute_projection(queue, device, Some("Equirect Projection Pass"));
         let view_distance = 1;
-        camera.update(self, projection);
-        let camera_pos = *camera.eye();
+
+        let camera_pos = camera.eye();
 
         if let Some(cam_entity) = camera.entity() {
             if let (Some(cam_pos), Some(boss_pos)) = (

@@ -1,60 +1,54 @@
 use {
     super::{RenderPass, VertexInstance, AABB},
     crate::{
-        camera::{self, Frustum, Projection},
-        create_render_pipeline, BindGroup, CacheKey, CacheStorage, DebugMode, EngineError,
-        FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation, Scale,
-        ShaderManager, Texture, Transform, Vertex, WgpuBuffer, World,
+        camera::{self, Frustum},
+        create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
+        EngineError, FrameBuffer, MaterialManager, ModelManager, Rotation, Scale, Texture,
+        Transform, WgpuBuffer, World,
     },
     glam::{Mat4, Vec3},
     std::sync::Arc,
-    wgpu::{DepthStencilState, IndexFormat, RenderPipeline},
+    wgpu::{IndexFormat, RenderPipeline},
 };
 
 #[warn(dead_code)]
 pub struct Renderer3d {
     pub instances: InstanceBuffers,
     pub hdr_pipeline: RenderPipeline,
-    pub depth_stencil: Arc<DepthStencilState>,
 }
 
 impl Renderer3d {
     pub fn new(
-        device: &wgpu::Device,
-        shaders: &mut ShaderManager,
-        bind_group_layouts: &RenderBindGroupLayouts,
+        service: &'static Arc<AssetService>,
         surface_config: &wgpu::SurfaceConfiguration,
     ) -> Result<Self, EngineError> {
         let instances: InstanceBuffers = InstanceBuffers::new();
         let v_shader = "hdr.vert.wgsl";
         let f_shader = "hdr.frag.wgsl";
+
         let label = "hdr pipeline";
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(&format!("{} layout", label)),
-            bind_group_layouts: &[&bind_group_layouts.diffuse],
-            push_constant_ranges: &[],
-        });
+        let pipeline_layout =
+            service
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("{} layout", label)),
+                    bind_group_layouts: &[service.bind_group_layouts().diffuse.as_ref()],
+                    push_constant_ranges: &[],
+                });
         let hdr_pipeline = create_render_pipeline(
-            device,
-            shaders,
+            &service,
             f_shader,
             v_shader,
             pipeline_layout,
             &[],
             surface_config.format,
+            None,
             label.to_string(),
         )?;
-        let depth_stencil = Arc::new(wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        });
+
         Ok(Renderer3d {
             instances,
             hdr_pipeline,
-            depth_stencil,
         })
     }
 
@@ -117,7 +111,7 @@ impl Renderer3d {
 impl RenderPass for Renderer3d {
     fn render(
         &self,
-        models: &mut ModelManager,
+        models: &ModelManager,
         materials: &MaterialManager,
         rpass: &mut wgpu::RenderPass,
         world: &World,
@@ -127,7 +121,7 @@ impl RenderPass for Renderer3d {
         let projection = world.projection();
 
         rpass.set_bind_group(0, uniform_bind_group, &[]);
-        rpass.set_bind_group(1, &projection.dst_bind_group, &[]);
+        rpass.set_bind_group(1, projection.dst_bind_group.as_ref(), &[]);
         rpass.set_bind_group(2, materials.storage().bind_group(), &[]);
 
         rpass.set_pipeline(&projection.dst_pipeline);
@@ -170,7 +164,7 @@ impl RenderPass for Renderer3d {
 }
 
 #[derive(Debug)]
-pub struct InstanceBufferData {
+pub struct InstanceBuffer {
     pub buffer: WgpuBuffer,
     pub count: usize,
     pub capacity: usize,
@@ -180,7 +174,7 @@ pub struct InstanceBufferData {
 #[derive(Debug)]
 pub struct InstanceBuffers {
     pub batch: std::collections::HashMap<CacheKey, Vec<VertexInstance>>,
-    pub buffers: std::collections::HashMap<CacheKey, InstanceBufferData>,
+    pub buffers: std::collections::HashMap<CacheKey, InstanceBuffer>,
 }
 
 impl InstanceBuffers {
@@ -196,11 +190,9 @@ impl InstanceBuffers {
         device: &wgpu::Device,
         world: &World,
         camera: &camera::Camera,
-        screen_size: (f32, f32),
-        projection: &Projection,
         models: &ModelManager,
     ) {
-        let frustum = camera.frustum(projection, screen_size.0, screen_size.1);
+        let frustum = camera.frustum();
         self.batch.clear();
 
         let default_scale = Scale::one();
@@ -224,7 +216,7 @@ impl InstanceBuffers {
 
             let transform = Transform::from_components(position, rotation, scale);
 
-            if let Some(model) = models.get(&renderable.model_key) {
+            if let Some(model) = models.get_resource(&renderable.model_key) {
                 if !frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix) {
                     continue;
                 }
@@ -244,20 +236,17 @@ impl InstanceBuffers {
 
             let byte_data = VertexInstance::bytes(instances);
             let byte_size = data.len();
-            let buffer_data = self
-                .buffers
-                .entry(*key)
-                .or_insert_with(|| InstanceBufferData {
-                    buffer: WgpuBuffer::from_data(
-                        device,
-                        &byte_data,
-                        wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        Some(&format!("instance buffer {}", key.id())),
-                    ),
-                    count: instances.len(),
-                    capacity: byte_size,
-                    dirty: false,
-                });
+            let buffer_data = self.buffers.entry(*key).or_insert_with(|| InstanceBuffer {
+                buffer: WgpuBuffer::from_data(
+                    device,
+                    &byte_data,
+                    wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    Some(&format!("instance buffer {}", key.id())),
+                ),
+                count: instances.len(),
+                capacity: byte_size,
+                dirty: false,
+            });
 
             buffer_data.count = instances.len();
             buffer_data.dirty = true;
@@ -289,7 +278,7 @@ impl InstanceBuffers {
                 continue;
             }
 
-            let Some(model) = models.get(model_key) else {
+            let Some(model) = models.get_resource(model_key) else {
                 continue;
             };
             let Some(mat) = &model.instance.material else {

@@ -48,7 +48,7 @@ impl Physics {
 
     /// Physics tick: updates positions/velocities
     pub fn update(&mut self, camera: &Camera, dt: f64, terrain: &Terrain) {
-        let camera_pos = *camera.eye();
+        let camera_pos = camera.eye();
 
         let medium = if camera.free_look() || camera_pos.y > GROUND_Y + 4.0 {
             Medium::Air

@@ -1,7 +1,9 @@
-use crate::{GlyphonTextRenderer, Renderer2d};
-
+use crate::{Dispatch, GlyphonTextRenderer, Renderer2d, UiElements, UiEvent};
+#[derive(Debug, Clone)]
 pub struct MenuButton {
-    pub label: String,
+    id: u32,
+    label: String,
+    action: Dispatch,
     x: f32,
     y: f32,
     color: [f32; 4],
@@ -9,23 +11,54 @@ pub struct MenuButton {
     highlight_color: [f32; 4],
     width: f32,
     height: f32,
-    callback: Box<dyn Fn()>,
     disabled: bool,
     highlight: bool,
 }
+impl UiElements for MenuButton {
+    fn id(&self) -> u32 {
+        self.id
+    }
 
+    fn label(&self) -> &str {
+        &self.label
+    }
+
+    fn get_element(self) -> super::UiElement {
+        super::UiElement::Menu(super::menu_element::MenuElement::Button(self))
+    }
+
+    fn size(&self) -> (f32, f32) {
+        (self.width, self.height)
+    }
+
+    fn position(&self) -> (f32, f32) {
+        (self.x, self.y)
+    }
+
+    fn set_position(&mut self, position: (f32, f32)) {
+        self.x = position.0;
+        self.y = position.1;
+    }
+
+    fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer) {
+        self.draw(renderer, text_renderer);
+    }
+}
 impl MenuButton {
     pub fn new(
+        id: u32,
         label: &str,
+        action: Dispatch,
         position: (f32, f32),
         size: (f32, f32),
         color: [f32; 4],
         uv: [f32; 4],
         highlight_color: [f32; 4],
-        callback: Box<dyn Fn()>,
     ) -> Self {
         Self {
+            id: id,
             label: label.to_string(),
+            action,
             x: position.0,
             y: position.1,
             width: size.0,
@@ -33,11 +66,35 @@ impl MenuButton {
             color,
             uv,
             highlight_color,
-            callback,
-            highlight: false,
             disabled: false,
+            highlight: false,
         }
     }
+
+    pub fn update_event(
+        &mut self,
+        mouse_position: Option<(f32, f32)>,
+        clicked: (bool, bool),
+    ) -> Option<UiEvent> {
+        if self.disabled {
+            self.highlight = false;
+            return None;
+        }
+
+        if let Some((mx, my)) = mouse_position {
+            let over = self.contains(mx, my);
+            self.highlight = over;
+
+            if over && clicked.0 {
+                return Some(UiEvent::ButtonClicked(self.id));
+            }
+        }
+
+        None
+    }
+}
+
+impl MenuButton {
     pub fn width(&self) -> f32 {
         self.width
     }
@@ -49,18 +106,7 @@ impl MenuButton {
         self.x = pos_x;
         self.y = pos_y;
     }
-    pub fn update(&mut self, mouse_position: Option<(f32, f32)>, clicked: (bool, bool)) {
-        if let Some((mouse_x, mouse_y)) = mouse_position {
-            let contains = self.contains(mouse_x, mouse_y);
-            if contains {
-                let (m1_clicked, _m2_clicked) = clicked;
-                if m1_clicked {
-                    self.on_click();
-                }
-            }
-            self.highlight = contains;
-        }
-    }
+
     pub fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer) {
         let color = if !self.highlight {
             self.color
@@ -94,11 +140,7 @@ impl MenuButton {
     pub fn enable(&mut self) {
         self.disabled = false;
     }
-    pub fn set_callback(&mut self, callback: Box<dyn Fn()>) {
-        self.callback = callback;
-    }
-
-    pub fn on_click(&self) {
-        (self.callback)()
+    pub fn action(&self) -> Dispatch {
+        self.action.clone()
     }
 }

@@ -1,4 +1,6 @@
-use crate::AssetLoader;
+use std::sync::Arc;
+
+use crate::{AssetLoader, CacheStorage, EngineError};
 
 pub struct Shader;
 impl Shader {
@@ -36,9 +38,8 @@ impl ShaderManager {
         shader: &str,
     ) -> Result<std::sync::Arc<wgpu::ShaderModule>, crate::EngineError> {
         let cache_key = crate::CacheKey::from(shader);
-        let start = std::time::Instant::now();
 
-        if !crate::CacheStorage::contains(self, &cache_key) {
+        if !self.contains_resource(&cache_key) {
             let path = AssetLoader::base_path().join("shaders").join(shader);
 
             let shader_source = std::fs::read_to_string(&path)?;
@@ -46,19 +47,18 @@ impl ShaderManager {
                 label: Some(shader),
                 source: wgpu::ShaderSource::Wgsl(shader_source.into()),
             });
-            crate::CacheStorage::insert(self, cache_key.clone(), shader_module.into());
+            self.insert_resource(cache_key.clone(), shader_module.into());
         }
-        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
-        Ok(crate::CacheStorage::get(self, &cache_key).unwrap().clone())
+        Ok(self.get_resource(&cache_key).unwrap().clone())
     }
 }
 
 impl crate::CacheStorage<std::sync::Arc<wgpu::ShaderModule>> for ShaderManager {
-    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::ShaderModule>> {
+    fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::ShaderModule>> {
         self.shaders.get(key)
     }
 
-    fn contains(&self, key: &crate::CacheKey) -> bool {
+    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
         self.shaders.contains_key(key)
     }
     fn get_mut(
@@ -71,16 +71,30 @@ impl crate::CacheStorage<std::sync::Arc<wgpu::ShaderModule>> for ShaderManager {
         &mut self,
         key: crate::CacheKey,
         create_fn: F,
-    ) -> &mut std::sync::Arc<wgpu::ShaderModule>
+    ) -> Result<Arc<wgpu::ShaderModule>, EngineError>
     where
-        F: FnOnce() -> std::sync::Arc<wgpu::ShaderModule>,
+        F: FnOnce() -> Result<Arc<wgpu::ShaderModule>, EngineError>,
     {
-        self.shaders.entry(key).or_insert_with(create_fn)
+        self.shaders.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::ShaderModule>) {
+    fn insert_resource(
+        &mut self,
+        key: crate::CacheKey,
+        resource: std::sync::Arc<wgpu::ShaderModule>,
+    ) {
         self.shaders.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::ShaderModule>> {
+    fn remove_resource(
+        &mut self,
+        key: &crate::CacheKey,
+    ) -> Option<std::sync::Arc<wgpu::ShaderModule>> {
         self.shaders.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a std::sync::Arc<wgpu::ShaderModule>>
+    where
+        std::sync::Arc<wgpu::ShaderModule>: 'a,
+    {
+        self.shaders.values()
     }
 }

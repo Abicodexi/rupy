@@ -1,22 +1,31 @@
-use crate::state::{AppInnerState, ApplicationState};
-use engine::{camera::Projection, log_error, ApplicationEvent, World};
-use winit::{
-    event::WindowEvent,
-    event_loop::ActiveEventLoop,
-    keyboard::{KeyCode, PhysicalKey},
-    window::Fullscreen,
+use crate::{
+    app::Rupy,
+    state::{AppInnerState, ApplicationState},
 };
+use engine::{log_error, ApplicationEvent, Dispatch, World};
+use winit::{event::WindowEvent, event_loop::ActiveEventLoop, window::Fullscreen};
 
 impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationState {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if let AppInnerState::Stopped(..) = &self.inner {
-            if let Err(e) = pollster::block_on(ApplicationState::run(self, event_loop)) {
-                log_error!("{}", e.to_string());
-                World::stop();
-                event_loop.exit();
-            } else {
-                event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-            }
+        if let AppInnerState::Stopped(tx, asset_tx, asset_rx) = &self.inner {
+            match Rupy::new(
+                event_loop,
+                tx.to_owned(),
+                asset_tx.to_owned(),
+                asset_rx.to_owned(),
+            ) {
+                Ok(rupy) => {
+                    rupy.dispatch(Dispatch::Event(ApplicationEvent::Start));
+                    ApplicationState::run(self, rupy);
+                    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+                }
+                Err(e) => {
+                    log_error!("{}", e.to_string());
+                    World::stop();
+                    event_loop.exit();
+                    return;
+                }
+            };
         }
     }
 
@@ -27,71 +36,62 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
         event: WindowEvent,
     ) {
         if let AppInnerState::Running(app) = &mut self.inner {
-            if matches!(event, WindowEvent::CloseRequested) {
-                app.shutdown(event_loop)
-            }
-
-            app.menu.process(&event);
-
-            if app.menu.is_visible() && !app.camera.is_frozen() {
-                app.camera.freeze();
-                app.set_projection(Projection::Orthographic);
-            } else if !app.menu.is_visible() && app.camera.is_frozen() {
-                app.camera.unfreeze();
-                app.set_projection(Projection::FirstPerson);
-            }
-
-            app.camera.process(&event);
-
             match &event {
-                WindowEvent::Resized(size) => app.resize(&size),
+                WindowEvent::CloseRequested => return app.shutdown(event_loop),
+                WindowEvent::Resized(size) => return app.resize(size),
                 WindowEvent::KeyboardInput { event, .. } => {
-                    if event.state.is_pressed() && event.repeat == false {
-                        match event.physical_key {
-                            PhysicalKey::Code(KeyCode::Tab) => {
-                                if !app.window.is_resizable() {
-                                    return;
-                                }
-                                if app.window.fullscreen().is_some() {
-                                    app.window.set_cursor_visible(true);
-                                    app.window.set_fullscreen(None);
-                                } else {
-                                    app.window.set_fullscreen(Some(Fullscreen::Borderless(
-                                        app.window.current_monitor(),
-                                    )))
-                                }
-                            }
-                            PhysicalKey::Code(KeyCode::Numpad1) => {
-                                let new_speed = (app.world.light().speed() + 0.1).clamp(0.1, 1.5);
-                                app.world.light.set_speed(new_speed);
-                            }
-                            PhysicalKey::Code(KeyCode::Numpad2) => {
-                                let new_speed = (app.world.light().speed() - 0.1).clamp(0.1, 1.5);
-                                app.world.light.set_speed(new_speed);
-                            }
-                            PhysicalKey::Code(KeyCode::KeyM) => app.next_projection(),
-                            PhysicalKey::Code(KeyCode::KeyP) => app.next_debug_mode(),
-
-                            PhysicalKey::Code(KeyCode::Escape) => app.shutdown(event_loop),
-                            _ => {}
-                        }
+                    if event.state.is_pressed() && !event.repeat {
+                        app.handle_key(event.physical_key);
                     }
                 }
-                WindowEvent::RedrawRequested => app.redraw(),
-
+                WindowEvent::RedrawRequested => return app.redraw(),
                 _ => {}
             }
+
+            if let Some(new_proj) = app.projection.process(&event) {
+                app.set_projection(new_proj);
+            }
+
+            app.handle_menu_toggle(&event);
+            app.camera.process(&event);
         }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: ApplicationEvent) {
         if let AppInnerState::Running(app) = &mut self.inner {
             match event {
-                ApplicationEvent::Shutdown => app.shutdown(event_loop),
-                ApplicationEvent::Projection => app.next_projection(),
-                ApplicationEvent::MenuCallback(callback) => {
-                    if callback == "Quit" {
+                ApplicationEvent::Run => {
+                    if !World::running() {
+                        app.world.start();
+                    }
+                    if app.menu.is_visible() {
                         app.menu.hide();
+                    }
+                }
+                ApplicationEvent::Stop => {
+                    if World::running() {
+                        World::stop()
+                    }
+                    if !app.menu.is_visible() {
+                        app.menu.show();
+                    }
+                }
+                ApplicationEvent::Start => {
+                    if !app.menu.is_visible() {
+                        app.menu.show();
+                    }
+                }
+                ApplicationEvent::Shutdown => app.shutdown(event_loop),
+                ApplicationEvent::ToggleFullscreen => {
+                    if !app.window.is_resizable() {
+                        return;
+                    }
+                    if app.window.fullscreen().is_some() {
+                        app.window.set_cursor_visible(true);
+                        app.window.set_fullscreen(None);
+                    } else {
+                        let fs = Fullscreen::Borderless(app.window.current_monitor());
+                        app.window.set_fullscreen(Some(fs))
                     }
                 }
             }

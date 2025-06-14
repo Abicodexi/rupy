@@ -6,8 +6,7 @@ use engine::{
     event_bus::{EventBusProxy, EventProxy, EventProxyTrait},
     log_error,
     logger::LogFactory,
-    service::AssetService,
-    ApplicationEvent, AssetRequest, EngineError, GPU,
+    ApplicationEvent, AssetRequest, EngineError,
 };
 use state::ApplicationState;
 use std::sync::Arc;
@@ -19,13 +18,6 @@ async fn main() -> Result<(), EngineError> {
     {
         let _ = LogFactory::default().init();
     }
-    GPU::init();
-    let binding = GPU::get();
-    let gpu = match binding.read() {
-        Ok(g) => g,
-        Err(e) => panic!("{}", e.to_string()),
-    };
-
     let (tx, rx): (Sender<ApplicationEvent>, Receiver<ApplicationEvent>) = unbounded();
     let (asset_tx, asset_rx): (Sender<AssetRequest>, Receiver<AssetRequest>) = unbounded();
 
@@ -41,15 +33,10 @@ async fn main() -> Result<(), EngineError> {
 
     let event_bus = EventBusProxy::new(&arc_rx, event_proxy);
 
-    let mut state = ApplicationState::new(arc_tx, arc_asset_tx);
+    let mut state = ApplicationState::new(arc_tx, arc_asset_tx, arc_asset_rx);
 
     event_bus.run_tokio();
 
-    AssetService::spawn_thread(
-        gpu.queue().clone(),
-        gpu.device().clone(),
-        arc_asset_rx.clone(),
-    );
     if let Err(e) = event_loop.run_app(&mut state) {
         log_error!("{}", e);
     }

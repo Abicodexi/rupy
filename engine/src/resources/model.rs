@@ -1,10 +1,9 @@
 use super::{CacheKey, HashCache, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance};
 use crate::{
-    log_info, log_warning, AssetLoader, EngineError, PipelineManager, ShaderManager,
-    TextureManager, AABB,
+    log_debug, log_info, log_warning, AssetLoader, BindGroupManager, EngineError, PipelineManager,
+    ShaderManager, TextureManager, AABB,
 };
 use std::{collections::HashMap, sync::Arc};
-
 #[derive(Clone, Debug)]
 pub struct ModelAsset {
     pub name: String,
@@ -21,6 +20,7 @@ impl ModelAsset {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -32,6 +32,7 @@ impl ModelAsset {
                 texture_manager,
                 shader_manager,
                 pipeline_manager,
+                bind_group_manager,
                 bind_group_layouts,
                 asset.clone(),
                 format,
@@ -66,6 +67,7 @@ impl Model {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -78,6 +80,7 @@ impl Model {
             texture_manager,
             shader_manager,
             pipeline_manager,
+            bind_group_manager,
             bind_group_layouts,
             format,
             buffers,
@@ -95,6 +98,7 @@ impl Model {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         model: &tobj::Model,
         material: Option<&tobj::Material>,
         v_shader: &str,
@@ -134,6 +138,7 @@ impl Model {
             texture_manager,
             shader_manager,
             pipeline_manager,
+            bind_group_manager,
             bind_group_layouts,
             format,
             buffers,
@@ -164,6 +169,7 @@ impl ModelManager {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         file: &str,
         v_shader: &str,
         f_shader: &str,
@@ -174,31 +180,22 @@ impl ModelManager {
         color_target: wgpu::ColorTargetState,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<(), EngineError> {
-        let base_dir = AssetLoader::base_path();
-        let path = base_dir.join("models").join(file);
-        let (models, mat_res) = tobj::load_obj(
-            &path,
-            &tobj::LoadOptions {
-                triangulate: true,
-                single_index: true,
-                ..Default::default()
-            },
-        )?;
-
-        let materials = match mat_res {
+        let path = AssetLoader::resolve("models").join(file);
+        let m_key = CacheKey::from(file);
+        if self.models.contains_key(&m_key) {
+            return Ok(());
+        }
+        let (models, m) = AssetLoader::tobj(path)?;
+        let materials = match m {
             Ok(mats) => mats,
             Err(e) => {
                 log_warning!("{}: {}", file, e);
                 Vec::new()
             }
         };
+        log_debug!("Loaded model: {}", file);
 
         for m in models {
-            let m_key = CacheKey::from(file);
-            if self.models.contains_key(&m_key) {
-                log_info!("Skipping cached model: {}", m.name);
-                continue;
-            }
             let mesh = &m.mesh;
 
             let mat = {
@@ -216,6 +213,7 @@ impl ModelManager {
                 texture_manager,
                 shader_manager,
                 pipeline_manager,
+                bind_group_manager,
                 &m,
                 mat,
                 v_shader,
@@ -229,7 +227,6 @@ impl ModelManager {
             )?);
 
             self.models.insert(m_key, model);
-            log_info!("Cached model: {}", m.name);
         }
         Ok(())
     }
@@ -241,6 +238,7 @@ impl ModelManager {
         texture_manager: &mut TextureManager,
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -257,39 +255,49 @@ impl ModelManager {
             texture_manager,
             shader_manager,
             pipeline_manager,
+            bind_group_manager,
             bind_group_layouts,
             format,
             buffers,
             asset,
         )?);
+        log_debug!("Loaded model asset: {}", model.name);
         self.models.insert(m_key, model.clone());
         Ok(model)
     }
 }
 
 impl crate::CacheStorage<std::sync::Arc<Model>> for ModelManager {
-    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Model>> {
+    fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Model>> {
         self.models.get(key)
     }
-    fn contains(&self, key: &crate::CacheKey) -> bool {
+    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
         self.models.contains_key(key)
     }
     fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut std::sync::Arc<Model>> {
         self.models.get_mut(key)
     }
-    fn get_or_create<F>(&mut self, key: crate::CacheKey, create_fn: F) -> &mut std::sync::Arc<Model>
+    fn get_or_create<F>(
+        &mut self,
+        key: crate::CacheKey,
+        create_fn: F,
+    ) -> Result<Arc<Model>, EngineError>
     where
-        F: FnOnce() -> std::sync::Arc<Model>,
+        F: FnOnce() -> Result<Arc<Model>, EngineError>,
     {
-        let start = std::time::Instant::now();
-        let model = self.models.entry(key).or_insert_with(create_fn);
-        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
-        model
+        self.models.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Model>) {
+    fn insert_resource(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Model>) {
         self.models.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Model>> {
+    fn remove_resource(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Model>> {
         self.models.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a std::sync::Arc<Model>>
+    where
+        std::sync::Arc<Model>: 'a,
+    {
+        self.models.values()
     }
 }

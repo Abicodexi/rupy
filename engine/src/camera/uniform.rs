@@ -1,12 +1,7 @@
 use glam::{Mat4, Vec3};
 
-//
-// --------------
-//  CAMERA UNIFORM
-// --------------
-
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, PartialEq)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub inv_proj: [[f32; 4]; 4],
@@ -26,16 +21,11 @@ impl CameraUniform {
         }
     }
 
-    pub fn update<P: Into<Mat4>>(&mut self, view: Mat4, proj: P, cam_pos: Vec3) {
-        let proj_mat: Mat4 = proj.into();
-        let vp = proj_mat * view;
-        let inv_proj = proj_mat.inverse();
-        let inv_view = view.inverse();
-
+    pub fn update(&mut self, vp: Mat4, inv_proj: Mat4, inv_view: Mat4, position: Vec3) {
         self.view_proj = vp.to_cols_array_2d();
         self.inv_proj = inv_proj.to_cols_array_2d();
         self.inv_view = inv_view.to_cols_array_2d();
-        self.view_pos = cam_pos.to_array();
+        self.view_pos = position.to_array();
     }
 }
 #[repr(C)]

@@ -2,13 +2,22 @@ use crossbeam::channel::Receiver;
 use std::sync::Arc;
 use winit::event_loop::EventLoopProxy;
 
-#[derive(Debug, Clone)]
-pub enum ApplicationEvent {
-    Shutdown,
-    Projection,
-    MenuCallback(&'static str),
-}
+use crate::AssetRequest;
 
+#[derive(Debug, Clone, Copy)]
+pub enum ApplicationEvent {
+    Start,
+    Run,
+    Stop,
+    Shutdown,
+    ToggleFullscreen,
+}
+#[derive(Debug, Clone)]
+
+pub enum Dispatch {
+    Asset(AssetRequest),
+    Event(ApplicationEvent),
+}
 pub trait EventProxyTrait<T: 'static + std::fmt::Debug> {
     fn send_event(&self, event: T) -> Result<(), winit::event_loop::EventLoopClosed<T>>;
 }

@@ -1,7 +1,4 @@
-use crate::{
-    CacheKey, CacheStorage, Entity, MaterialManager, ModelManager, PipelineManager, ShaderManager,
-    Texture, TextureManager, World,
-};
+use crate::{AssetService, Entity, Texture};
 use std::sync::Arc;
 
 #[derive(Debug, Default)]
@@ -9,7 +6,6 @@ pub struct CameraModel {
     model: String,
     v_shader: String,
     f_shader: String,
-    model_key: Option<CacheKey>,
     entity: Option<Entity>,
     distance: f32,
     height: f32,
@@ -23,7 +19,6 @@ impl CameraModel {
             model: model.to_string(),
             v_shader: v_shader.to_string(),
             f_shader: f_shader.to_string(),
-            model_key: None,
             entity: None,
             distance: 1.0,
             height: 2.0,
@@ -52,11 +47,8 @@ impl CameraModel {
     pub fn set_entity(&mut self, entity: Entity) {
         self.entity = Some(entity)
     }
-    pub fn model_key(&self) -> Option<CacheKey> {
-        self.model_key
-    }
 
-    pub fn update(&mut self, model: &str, v_shader: &str, f_shader: &str) {
+    pub fn configure(&mut self, model: &str, v_shader: &str, f_shader: &str) {
         self.model = model.to_owned();
         self.v_shader = v_shader.to_owned();
         self.f_shader = f_shader.to_owned();
@@ -68,24 +60,10 @@ impl CameraModel {
 
     pub fn load_model(
         &mut self,
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        model_manager: &mut ModelManager,
-        material_manager: &mut MaterialManager,
-        texture_manager: &mut TextureManager,
-        shader_manager: &mut ShaderManager,
-        pipeline_manager: &mut PipelineManager,
-        buffers: &[wgpu::VertexBufferLayout<'_>],
+        service: &AssetService,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
     ) {
-        let prev_model = if let Some(key) = self.model_key {
-            self.model_key = None;
-            model_manager.remove(&key)
-        } else {
-            None
-        };
-
         let file = &self.model;
         let (v_shader, f_shader) = self.shaders();
 
@@ -112,32 +90,14 @@ impl CameraModel {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-
-        self.model_key = World::load_object(
-            queue,
-            device,
-            model_manager,
-            material_manager,
-            texture_manager,
-            shader_manager,
-            pipeline_manager,
-            file,
-            v_shader,
-            f_shader,
-            buffers,
+        service.load_model(
+            file.to_string(),
+            v_shader.to_string(),
+            f_shader.to_string(),
             bind_group_layouts,
-            format,
             primitive,
             color_target,
             Some(depth_stencil),
         );
-
-        if self.model_key.is_none() {
-            if let Some(model) = prev_model {
-                let key = CacheKey::from(model.name.clone());
-                model_manager.insert(key, model);
-                self.model_key = Some(key);
-            }
-        }
     }
 }

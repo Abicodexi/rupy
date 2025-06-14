@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use image::DynamicImage;
+
 use crate::{EngineError, Texture};
 
 pub fn asset_dir() -> Result<std::path::PathBuf, crate::EngineError> {
@@ -19,19 +23,17 @@ impl AssetLoader {
         AssetLoader::base_path().join(rel_path)
     }
 
-    pub fn read_text(rel_path: &str) -> Result<String, EngineError> {
-        let path = AssetLoader::resolve(rel_path);
+    pub fn text(path: PathBuf) -> Result<String, EngineError> {
         std::fs::read_to_string(&path)
             .map_err(|e| EngineError::FileSystemError(format!("{:?}: {}", path, e)))
     }
 
-    pub fn read_bytes(rel_path: &str) -> Result<Vec<u8>, EngineError> {
-        let path = AssetLoader::resolve(rel_path);
+    pub fn bytes(path: PathBuf) -> Result<Vec<u8>, EngineError> {
         let bytes = std::fs::read(path)?;
         Ok(bytes)
     }
-    pub fn read_tobj(
-        rel_path: &str,
+    pub fn tobj(
+        path: PathBuf,
     ) -> Result<
         (
             Vec<tobj::Model>,
@@ -39,8 +41,6 @@ impl AssetLoader {
         ),
         EngineError,
     > {
-        let base_dir = AssetLoader::base_path();
-        let path = base_dir.join("models").join(rel_path);
         match tobj::load_obj(
             path,
             &tobj::LoadOptions {
@@ -53,14 +53,30 @@ impl AssetLoader {
             Err(e) => Err(EngineError::TobjLoadError(e)),
         }
     }
-    pub async fn load_texture_file(
+    pub fn image(path: PathBuf) -> Result<DynamicImage, EngineError> {
+        image::open(path).map_err(|e| EngineError::AssetLoadError(e.to_string()))
+    }
+    pub async fn texture(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         file: &str,
     ) -> Result<Texture, EngineError> {
-        let path = &format!("textures/{}", file);
-        let file_bytes = AssetLoader::read_bytes(path)?;
-        let texture = Texture::from_bytes(device, queue, &file_bytes, path).await?;
+        let path = AssetLoader::resolve("textures").join(file);
+        let file_bytes = AssetLoader::bytes(path)?;
+        let texture = Texture::from_bytes(device, queue, &file_bytes, file).await?;
         Ok(texture)
+    }
+    pub async fn shader(
+        device: &wgpu::Device,
+        file: &str,
+    ) -> Result<wgpu::ShaderModule, EngineError> {
+        let path = AssetLoader::resolve("shaders").join(file);
+
+        let shader_source = std::fs::read_to_string(&path)?;
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(file),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+        Ok(shader_module)
     }
 }

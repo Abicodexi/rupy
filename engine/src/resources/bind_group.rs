@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     camera::{Camera, CameraUniform, OrthoUniform},
-    CacheKey, DebugUniform, Light, LightUniform, Texture, WgpuBuffer,
+    CacheKey, DebugUniform, EngineError, Light, LightUniform, Texture, WgpuBuffer,
 };
 
 use super::{CacheStorage, HashCache, TextureManager};
@@ -560,50 +560,48 @@ impl BindGroupManager {
             bind_groups: HashCache::new(),
         }
     }
-    pub fn bind_group(&self, key: &super::CacheKey) -> Option<&std::sync::Arc<wgpu::BindGroup>> {
-        self.bind_groups.get(key)
-    }
     pub fn bind_group_for(
         &mut self,
-        texture_manager: &TextureManager,
-        key: &CacheKey,
+        device: &wgpu::Device,
+        textures: &TextureManager,
+        texture: &str,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
-        let binding = crate::GPU::get();
-        if let Ok(gpu) = binding.read() {
-            if !self.bind_groups.contains(&key) {
-                let tex = texture_manager.get(key)?;
-                let bind_group: std::sync::Arc<wgpu::BindGroup> = gpu
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("tex_bg:{}", key.id())),
-                        layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&tex.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&tex.sampler),
-                            },
-                        ],
-                    })
-                    .into();
-                self.bind_groups.insert(key.clone(), bind_group);
-            }
+        let texture_key = CacheKey::from(texture);
+        if let Some(bind_group) = self.bind_groups.get(&texture_key) {
+            return Some(bind_group.clone());
         }
-
-        self.bind_groups.get(key).cloned()
+        if let Some(tex) = textures.get_resource(&texture_key) {
+            let bind_group_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&tex.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&tex.sampler),
+                },
+            ];
+            let bind_group: std::sync::Arc<wgpu::BindGroup> = device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(&format!("{} bind group", texture)),
+                    layout,
+                    entries: &bind_group_entries,
+                })
+                .into();
+            self.bind_groups
+                .insert(texture_key.clone(), bind_group.clone());
+        }
+        self.bind_groups.get(&texture_key).cloned()
     }
 }
 
-impl super::CacheStorage<std::sync::Arc<wgpu::BindGroup>> for BindGroupManager {
-    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::BindGroup>> {
+impl CacheStorage<std::sync::Arc<wgpu::BindGroup>> for BindGroupManager {
+    fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<wgpu::BindGroup>> {
         self.bind_groups.get(key)
     }
 
-    fn contains(&self, key: &crate::CacheKey) -> bool {
+    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
         self.bind_groups.contains_key(key)
     }
     fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut std::sync::Arc<wgpu::BindGroup>> {
@@ -613,16 +611,26 @@ impl super::CacheStorage<std::sync::Arc<wgpu::BindGroup>> for BindGroupManager {
         &mut self,
         key: crate::CacheKey,
         create_fn: F,
-    ) -> &mut std::sync::Arc<wgpu::BindGroup>
+    ) -> Result<Arc<wgpu::BindGroup>, EngineError>
     where
-        F: FnOnce() -> std::sync::Arc<wgpu::BindGroup>,
+        F: FnOnce() -> Result<Arc<wgpu::BindGroup>, EngineError>,
     {
-        self.bind_groups.entry(key).or_insert_with(create_fn)
+        self.bind_groups.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::BindGroup>) {
+    fn insert_resource(&mut self, key: crate::CacheKey, resource: std::sync::Arc<wgpu::BindGroup>) {
         self.bind_groups.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<wgpu::BindGroup>> {
+    fn remove_resource(
+        &mut self,
+        key: &crate::CacheKey,
+    ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
         self.bind_groups.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a std::sync::Arc<wgpu::BindGroup>>
+    where
+        std::sync::Arc<wgpu::BindGroup>: 'a,
+    {
+        self.bind_groups.values()
     }
 }

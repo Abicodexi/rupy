@@ -1,6 +1,8 @@
+use crossbeam::channel::Sender;
+
 use crate::{
-    Entity, MaterialManager, ModelManager, PipelineManager, Position, RenderBindGroupLayouts,
-    Scale, ShaderManager, TextureManager, Vertex, VertexInstance, World, GROUND_Y,
+    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Scale, Texture, World,
+    GROUND_Y,
 };
 
 pub enum ScreenCorner {
@@ -27,164 +29,154 @@ impl ScreenCorner {
 }
 
 pub fn debug_scene(
-    queue: &wgpu::Queue,
-    device: &wgpu::Device,
-    models: &mut ModelManager,
-    materials: &mut MaterialManager,
-    textures: &mut TextureManager,
-    shaders: &mut ShaderManager,
-    pipelines: &mut PipelineManager,
+    asset_tx: &Sender<AssetRequest>,
     world: &mut World,
     format: wgpu::TextureFormat,
-    depth_stencil: wgpu::DepthStencilState,
 ) -> Entity {
+    let depth_stencil = wgpu::DepthStencilState {
+        format: Texture::DEPTH_FORMAT,
+        depth_write_enabled: true,
+        depth_compare: wgpu::CompareFunction::LessEqual,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    };
     let bossman = world.spawn();
+    let goblin_obj = "goblin.obj";
+    let goblin_key = CacheKey::from(goblin_obj);
+    asset_tx
+        .send(AssetRequest::LoadModel {
+            file: goblin_obj.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
+            bind_group_layouts: vec![
+                RenderBindGroupLayouts::uniform().clone(),
+                RenderBindGroupLayouts::equirect_dst().clone(),
+                RenderBindGroupLayouts::material_storage().clone(),
+                RenderBindGroupLayouts::normal().clone(),
+            ],
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            color_target: wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            },
+            depth_stencil: Some(depth_stencil.clone()),
+        })
+        .ok();
 
-    if let Some(model_key) = World::load_object(
-        queue,
-        device,
-        models,
-        materials,
-        textures,
-        shaders,
-        pipelines,
-        "goblin.obj",
-        "normal.vert.wgsl",
-        "normal.frag.wgsl",
-        &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        vec![
-            RenderBindGroupLayouts::uniform().clone(),
-            RenderBindGroupLayouts::equirect_dst().clone(),
-            RenderBindGroupLayouts::material_storage().clone(),
-            RenderBindGroupLayouts::normal().clone(),
-        ],
-        format,
-        wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::ALL,
-        },
-        Some(depth_stencil.clone()),
-    ) {
-        world.insert_scale(bossman, Scale::new(10.0, 10.0, 10.0));
-        world.insert_position(bossman, Position::new(4.5, 5.5, 5.0));
-        world.insert_renderable(bossman, model_key.into());
-    }
+    world.insert_scale(bossman, Scale::new(10.0, 10.0, 10.0));
+    world.insert_position(bossman, Position::new(4.5, 5.5, 5.0));
+    world.insert_renderable(bossman, goblin_key.into());
+
     let size = 10;
     let wall_height = 15;
     let wall_y_offset = 0.0;
-    if let Some(model_key) = World::load_object(
-        queue,
-        device,
-        models,
-        materials,
-        textures,
-        shaders,
-        pipelines,
-        "cube.obj",
-        "normal.vert.wgsl",
-        "normal.frag.wgsl",
-        &[Vertex::LAYOUT, VertexInstance::LAYOUT],
-        vec![
-            RenderBindGroupLayouts::uniform().clone(),
-            RenderBindGroupLayouts::equirect_dst().clone(),
-            RenderBindGroupLayouts::material_storage().clone(),
-            RenderBindGroupLayouts::normal().clone(),
-        ],
-        format,
-        wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::ALL,
-        },
-        Some(depth_stencil),
-    ) {
-        let above_ground = GROUND_Y + 1.0;
-        for x in 0..(size + 10) {
-            for z in 0..(size + 10) {
-                let entity = world.spawn();
+    let cube_obj = "cube.obj";
+    let cube_key = CacheKey::from(cube_obj);
+    asset_tx
+        .send(AssetRequest::LoadModel {
+            file: cube_obj.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
+            bind_group_layouts: vec![
+                RenderBindGroupLayouts::uniform().clone(),
+                RenderBindGroupLayouts::equirect_dst().clone(),
+                RenderBindGroupLayouts::material_storage().clone(),
+                RenderBindGroupLayouts::normal().clone(),
+            ],
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            color_target: wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            },
+            depth_stencil: Some(depth_stencil.clone()),
+        })
+        .ok();
 
-                world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-                world.insert_position(
-                    entity,
-                    Position::new(14.0 - x as f32, above_ground, z as f32),
-                );
-                world.insert_renderable(entity, model_key.into());
-            }
+    let above_ground = GROUND_Y + 1.0;
+    for x in 0..(size + 10) {
+        for z in 0..(size + 10) {
+            let entity = world.spawn();
+
+            world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
+            world.insert_position(
+                entity,
+                Position::new(14.0 - x as f32, above_ground, z as f32),
+            );
+            world.insert_renderable(entity, cube_key.into());
         }
+    }
 
-        //  Ceiling
-        for x in 0..size {
-            for z in 0..size {
-                let entity = world.spawn();
-
-                world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
-
-                world.insert_position(
-                    entity,
-                    Position::new(x as f32, (wall_height - 1) as f32 + above_ground, z as f32),
-                );
-                world.insert_renderable(entity, model_key.into());
-            }
-        }
-
-        // Front & Back walls
-
-        for x in 0..size {
-            for y in 0..wall_height {
-                let e1 = world.spawn();
-                world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                world.insert_position(
-                    e1,
-                    Position::new(x as f32, y as f32 + wall_y_offset + above_ground, 0.0),
-                );
-                world.insert_renderable(e1, model_key.into());
-            }
-        }
-
-        //  Left & Right walls
+    //  Ceiling
+    for x in 0..size {
         for z in 0..size {
-            for y in 0..wall_height {
-                // left wall
-                let e1 = world.spawn();
-                world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
-                world.insert_position(
-                    e1,
-                    Position::new(0.0, y as f32 + wall_y_offset + above_ground, z as f32),
-                );
-                world.insert_renderable(e1, model_key.into());
+            let entity = world.spawn();
 
-                // right wall
-                let e2 = world.spawn();
-                world.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
-                world.insert_position(
-                    e2,
-                    Position::new(
-                        (size - 1) as f32,
-                        y as f32 + wall_y_offset + above_ground,
-                        z as f32,
-                    ),
-                );
-                world.insert_renderable(e2, model_key.into());
-            }
+            world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
+
+            world.insert_position(
+                entity,
+                Position::new(x as f32, (wall_height - 1) as f32 + above_ground, z as f32),
+            );
+            world.insert_renderable(entity, cube_key.into());
+        }
+    }
+
+    // Front & Back walls
+
+    for x in 0..size {
+        for y in 0..wall_height {
+            let e1 = world.spawn();
+            world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+            world.insert_position(
+                e1,
+                Position::new(x as f32, y as f32 + wall_y_offset + above_ground, 0.0),
+            );
+            world.insert_renderable(e1, cube_key.into());
+        }
+    }
+
+    //  Left & Right walls
+    for z in 0..size {
+        for y in 0..wall_height {
+            // left wall
+            let e1 = world.spawn();
+            world.insert_scale(e1, Scale::new(0.5, 0.5, 0.5));
+            world.insert_position(
+                e1,
+                Position::new(0.0, y as f32 + wall_y_offset + above_ground, z as f32),
+            );
+            world.insert_renderable(e1, cube_key.into());
+
+            // right wall
+            let e2 = world.spawn();
+            world.insert_scale(e2, Scale::new(0.5, 0.5, 0.5));
+            world.insert_position(
+                e2,
+                Position::new(
+                    (size - 1) as f32,
+                    y as f32 + wall_y_offset + above_ground,
+                    z as f32,
+                ),
+            );
+            world.insert_renderable(e2, cube_key.into());
         }
     }
     bossman

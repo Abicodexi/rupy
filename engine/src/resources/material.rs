@@ -1,7 +1,7 @@
 use super::{BindGroup, HashCache, Texture, TextureManager};
 use crate::{
-    fallback_diffuse, fallback_normal, log_debug, CacheKey, CacheStorage, EngineError,
-    PipelineManager, ShaderManager, WgpuBuffer,
+    fallback_diffuse, fallback_normal, log_debug, BindGroupManager, CacheKey, CacheStorage,
+    EngineError, PipelineManager, ShaderManager, WgpuBuffer,
 };
 use std::{collections::HashMap, sync::Arc};
 use wgpu::BufferUsages;
@@ -109,6 +109,7 @@ impl MaterialAsset {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -135,12 +136,18 @@ impl MaterialAsset {
 
         let label = self.name.clone();
         let cache_key = CacheKey::from(label.clone());
-        let bind_group = BindGroup::normal(device, &dt, &nt, label.as_ref()).into();
-        let bgl_refs: Vec<&wgpu::BindGroupLayout> =
-            bind_group_layouts.iter().map(|arc| arc.as_ref()).collect();
+
+        let bind_group = bind_groups
+            .get_or_create(cache_key, || {
+                Ok(BindGroup::normal(device, &dt, &nt, label.as_ref()).into())
+            })?
+            .clone();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&self.name),
-            bind_group_layouts: bgl_refs.as_ref(),
+            bind_group_layouts: &bind_group_layouts
+                .iter()
+                .map(|bgl| bgl.as_ref())
+                .collect::<Vec<_>>(),
             push_constant_ranges: &[],
         });
 
@@ -149,8 +156,8 @@ impl MaterialAsset {
         let pipeline = pipelines
             .render
             .get_or_create(cache_key, || {
-                Arc::new(
-                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                Ok(Arc::new(device.create_render_pipeline(
+                    &wgpu::RenderPipelineDescriptor {
                         label: Some(&pipeline_label),
                         layout: Some(&pipeline_layout),
                         vertex: wgpu::VertexState {
@@ -175,9 +182,9 @@ impl MaterialAsset {
                         },
                         multiview: None,
                         cache: None,
-                    }),
-                )
-            })
+                    },
+                )))
+            })?
             .clone();
 
         Ok((pipeline, bind_group))
@@ -210,6 +217,7 @@ impl Material {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
@@ -221,6 +229,7 @@ impl Material {
             textures,
             shaders,
             pipelines,
+            bind_groups,
             bind_group_layouts,
             format,
             buffers,
@@ -239,6 +248,7 @@ impl Material {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         mat: tobj::Material,
         v_shader: &'a str,
@@ -262,6 +272,7 @@ impl Material {
             textures,
             shaders,
             pipelines,
+            bind_groups,
             bind_group_layouts,
             format,
             buffers,
@@ -374,13 +385,14 @@ impl MaterialManager {
         self.materials.get(&key).unwrap().clone()
     }
 
-    pub fn load_tobj<'a>(
+    pub fn load_tobj_sync<'a>(
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         mat: tobj::Material,
         v_shader: &'a str,
@@ -400,6 +412,7 @@ impl MaterialManager {
             textures,
             shaders,
             pipelines,
+            bind_groups,
             bind_group_layouts,
             mat,
             v_shader,
@@ -415,7 +428,49 @@ impl MaterialManager {
 
         Ok(material)
     }
+    pub async fn load_tobj_async<'a>(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        textures: &mut TextureManager,
+        shaders: &mut ShaderManager,
+        pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        mat: tobj::Material,
+        v_shader: &'a str,
+        f_shader: &'a str,
+        primitive: wgpu::PrimitiveState,
+        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
+        buffers: &'a [wgpu::VertexBufferLayout<'a>],
+        depth_stencil: Option<wgpu::DepthStencilState>,
+    ) -> Result<Arc<Material>, EngineError> {
+        if let Some(mat) = self.materials.get(&CacheKey::from(format!("{}", mat.name))) {
+            return Ok(mat.clone());
+        }
+        let material = Material::from_tobj(
+            queue,
+            device,
+            textures,
+            shaders,
+            pipelines,
+            bind_groups,
+            bind_group_layouts,
+            mat,
+            v_shader,
+            f_shader,
+            primitive.clone(),
+            color_target.clone(),
+            format,
+            buffers,
+            depth_stencil.clone(),
+        )?;
 
+        let material = self.insert(queue, device, material);
+
+        Ok(material)
+    }
     pub fn load_asset<'a>(
         &mut self,
         device: &wgpu::Device,
@@ -423,6 +478,7 @@ impl MaterialManager {
         textures: &mut TextureManager,
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
         format: wgpu::TextureFormat,
@@ -438,6 +494,49 @@ impl MaterialManager {
             textures,
             shaders,
             pipelines,
+            bind_groups,
+            bind_group_layouts,
+            format,
+            buffers,
+        )?;
+
+        let material = self.insert(
+            queue,
+            device,
+            Material {
+                asset,
+                pipeline,
+                bind_group,
+                storage_id: None,
+            },
+        );
+
+        Ok(material)
+    }
+    pub async fn load_asset_async<'a>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        textures: &mut TextureManager,
+        shaders: &mut ShaderManager,
+        pipelines: &mut PipelineManager,
+        bind_groups: &mut BindGroupManager,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        asset: MaterialAsset,
+        format: wgpu::TextureFormat,
+        buffers: &'a [wgpu::VertexBufferLayout<'a>],
+    ) -> Result<Arc<Material>, EngineError> {
+        if let Some(mat) = self.materials.get(&asset.key) {
+            return Ok(mat.clone());
+        }
+
+        let (pipeline, bind_group) = asset.build(
+            queue,
+            device,
+            textures,
+            shaders,
+            pipelines,
+            bind_groups,
             bind_group_layouts,
             format,
             buffers,
@@ -458,10 +557,10 @@ impl MaterialManager {
     }
 }
 impl crate::CacheStorage<std::sync::Arc<Material>> for MaterialManager {
-    fn get(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Material>> {
+    fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Material>> {
         self.materials.get(key)
     }
-    fn contains(&self, key: &crate::CacheKey) -> bool {
+    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
         self.materials.contains_key(key)
     }
     fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut std::sync::Arc<Material>> {
@@ -471,19 +570,23 @@ impl crate::CacheStorage<std::sync::Arc<Material>> for MaterialManager {
         &mut self,
         key: crate::CacheKey,
         create_fn: F,
-    ) -> &mut std::sync::Arc<Material>
+    ) -> Result<Arc<Material>, EngineError>
     where
-        F: FnOnce() -> std::sync::Arc<Material>,
+        F: FnOnce() -> Result<Arc<Material>, EngineError>,
     {
-        let start = std::time::Instant::now();
-        let model = self.materials.entry(key).or_insert_with(create_fn);
-        crate::log_debug!("Loaded in {:.2?}", start.elapsed());
-        model
+        self.materials.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Material>) {
+    fn insert_resource(&mut self, key: crate::CacheKey, resource: std::sync::Arc<Material>) {
         self.materials.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Material>> {
+    fn remove_resource(&mut self, key: &crate::CacheKey) -> Option<std::sync::Arc<Material>> {
         self.materials.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a std::sync::Arc<Material>>
+    where
+        std::sync::Arc<Material>: 'a,
+    {
+        self.materials.values()
     }
 }

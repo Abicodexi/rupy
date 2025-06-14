@@ -1,4 +1,8 @@
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
+
+use crate::EngineError;
 
 /// Wrapper around WGPU buffers
 #[derive(Debug)]
@@ -102,7 +106,7 @@ impl WgpuBuffer {
     }
 }
 
-pub type WgpuBufferCacheType = crate::HashCache<WgpuBuffer>;
+pub type WgpuBufferCacheType = crate::HashCache<Arc<WgpuBuffer>>;
 pub struct WgpuBufferManager {
     inner: WgpuBufferCacheType,
 }
@@ -115,26 +119,37 @@ impl WgpuBufferManager {
     }
 }
 
-impl crate::CacheStorage<WgpuBuffer> for WgpuBufferManager {
-    fn get(&self, key: &crate::CacheKey) -> Option<&WgpuBuffer> {
+impl crate::CacheStorage<Arc<WgpuBuffer>> for WgpuBufferManager {
+    fn get_resource(&self, key: &crate::CacheKey) -> Option<&Arc<WgpuBuffer>> {
         self.inner.get(key)
     }
-    fn contains(&self, key: &crate::CacheKey) -> bool {
+    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
         self.inner.contains_key(key)
     }
-    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut WgpuBuffer> {
+    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut Arc<WgpuBuffer>> {
         self.inner.get_mut(key)
     }
-    fn get_or_create<F>(&mut self, key: crate::CacheKey, create_fn: F) -> &mut WgpuBuffer
+    fn get_or_create<F>(
+        &mut self,
+        key: crate::CacheKey,
+        create_fn: F,
+    ) -> Result<Arc<WgpuBuffer>, EngineError>
     where
-        F: FnOnce() -> WgpuBuffer,
+        F: FnOnce() -> Result<Arc<WgpuBuffer>, EngineError>,
     {
-        self.inner.entry(key).or_insert_with(create_fn)
+        self.inner.get_or_create(key, create_fn)
     }
-    fn insert(&mut self, key: crate::CacheKey, resource: WgpuBuffer) {
+    fn insert_resource(&mut self, key: crate::CacheKey, resource: Arc<WgpuBuffer>) {
         self.inner.insert(key, resource);
     }
-    fn remove(&mut self, key: &crate::CacheKey) -> Option<WgpuBuffer> {
+    fn remove_resource(&mut self, key: &crate::CacheKey) -> Option<Arc<WgpuBuffer>> {
         self.inner.remove(key)
+    }
+
+    fn all<'a>(&'a self) -> impl Iterator<Item = &'a Arc<WgpuBuffer>>
+    where
+        WgpuBuffer: 'a,
+    {
+        self.inner.values()
     }
 }

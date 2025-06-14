@@ -1,64 +1,17 @@
-use cgmath::num_traits::ToPrimitive;
-use glam::Vec3;
-
+use super::{InstanceBuffer, VertexInstance, CHUNK_SIZE};
 use crate::{
-    chunk::Chunk, BindGroupManager, CacheKey, CacheStorage, EngineError, Material, MaterialAsset,
-    MaterialManager, Mesh, MeshAsset, MeshInstance, ModelManager, PipelineManager, Position,
-    RenderBindGroupLayouts, Renderable, Rotation, Scale, ShaderManager, TextureManager, Transform,
-    WgpuBuffer, GRAVITY,
+    chunk::Chunk, EngineError, Material, Medium, MediumProperties, Mesh, MeshAsset, MeshInstance,
+    Position, Renderable, Rotation, Scale, Transform, WgpuBuffer,
 };
+use glam::Vec3;
 use std::{collections::HashMap, sync::Arc};
 
-use super::{InstanceBufferData, Vertex, VertexInstance, CHUNK_SIZE};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Medium {
-    Air,
-    Water,
-    Ground,
-    Vacuum,
-}
-#[derive(Debug, Clone, Copy)]
-pub struct MediumProperties {
-    pub gravity: Vec3,
-    pub drag: f32,
-}
-
-impl Medium {
-    pub fn properties(self) -> MediumProperties {
-        match self {
-            Medium::Air => MediumProperties {
-                gravity: Vec3::new(0.0, GRAVITY, 0.0),
-                drag: 0.1,
-            },
-            Medium::Water => MediumProperties {
-                gravity: Vec3::new(0.0, GRAVITY + 7.81, 0.0),
-                drag: 0.2,
-            },
-            Medium::Ground => MediumProperties {
-                gravity: Vec3::new(0.0, GRAVITY, 0.0),
-                drag: 0.01,
-            },
-            Medium::Vacuum => MediumProperties {
-                gravity: Vec3::ZERO,
-                drag: 0.9,
-            },
-        }
-    }
-    pub fn is_solid(self) -> bool {
-        matches!(self, Medium::Ground)
-    }
-
-    pub fn is_fluid(self) -> bool {
-        matches!(self, Medium::Air | Medium::Water)
-    }
-}
 #[derive(Debug)]
 pub struct Terrain {
     chunk_stream: HashMap<(i32, i32, i32), (Chunk, Medium)>,
     default_medium: Medium,
     mesh_instances: Vec<MeshInstance>,
-    instance_buffer: Option<InstanceBufferData>,
+    instance_buffer: Option<InstanceBuffer>,
     last_stream_center: Option<(i32, i32)>,
 }
 
@@ -123,7 +76,7 @@ impl Terrain {
             }
         }
     }
-    pub fn instance_buffer(&self) -> Option<&InstanceBufferData> {
+    pub fn instance_buffer(&self) -> Option<&InstanceBuffer> {
         self.instance_buffer.as_ref()
     }
     pub fn update_instance_buffer(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
@@ -151,7 +104,7 @@ impl Terrain {
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some("terrain_instance_buffer"),
             );
-            self.instance_buffer = Some(InstanceBufferData {
+            self.instance_buffer = Some(InstanceBuffer {
                 buffer,
                 count: instances.len(),
                 capacity: byte_data.len(),
