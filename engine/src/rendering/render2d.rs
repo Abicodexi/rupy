@@ -1,4 +1,4 @@
-use crate::{EngineError, Vertex2d, WgpuBuffer};
+use crate::{log_info, EngineError, Vertex2d, WgpuBuffer};
 
 pub struct Renderer2d {
     pub max_sprites: usize,
@@ -59,33 +59,14 @@ impl Renderer2d {
         h: f32,
         uv_rect: [f32; 4],
         color: [f32; 4],
+        texture_index: i32,
     ) {
-        if self.staging_vertices.len() + 4 > self.max_sprites * 4 {
-            return; // too many quads
-        }
-
         let (u0, v0, u1, v1) = (uv_rect[0], uv_rect[1], uv_rect[2], uv_rect[3]);
         let verts = [
-            Vertex2d {
-                position: [x, y],
-                tex_coords: [u0, v0],
-                color,
-            },
-            Vertex2d {
-                position: [x, y + h],
-                tex_coords: [u0, v1],
-                color,
-            },
-            Vertex2d {
-                position: [x + w, y + h],
-                tex_coords: [u1, v1],
-                color,
-            },
-            Vertex2d {
-                position: [x + w, y],
-                tex_coords: [u1, v0],
-                color,
-            },
+            Vertex2d::new([x, y], [u0, v0], color, texture_index),
+            Vertex2d::new([x, y + h], [u0, v1], color, texture_index),
+            Vertex2d::new([x + w, y + h], [u1, v1], color, texture_index),
+            Vertex2d::new([x + w, y], [u1, v0], color, texture_index),
         ];
 
         self.staging_vertices.extend_from_slice(&verts);
@@ -119,11 +100,21 @@ impl Renderer2d {
         h: f32,
         color: [f32; 4],
         uv: [f32; 4],
+        texture_index: i32,
     ) {
-        self.push_quad(x, y, w, h, uv, color);
+        self.push_quad(x, y, w, h, uv, color, texture_index);
     }
 
-    pub fn draw_image(&mut self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4], uv: [f32; 4]) {
-        self.push_quad(x, y, w, h, uv, color);
+    pub fn draw_image(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [f32; 4],
+        uv: [f32; 4],
+        texture_index: i32,
+    ) {
+        self.push_quad(x, y, w, h, uv, color, texture_index);
     }
 }

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::{
     camera::{Camera, CameraUniform, OrthoUniform},
-    CacheKey, DebugUniform, EngineError, Light, LightUniform, Texture, WgpuBuffer,
+    log_error, AssetService, CacheKey, DebugUniform, EngineError, Light, LightUniform, Texture,
+    WgpuBuffer,
 };
 
 use super::{CacheStorage, HashCache, TextureManager};
@@ -35,72 +36,55 @@ fn create_layout(
 }
 
 pub struct RenderBindGroupLayouts {
-    pub device: std::sync::Arc<wgpu::Device>,
-    pub diffuse: Arc<wgpu::BindGroupLayout>,
-    pub light: Arc<wgpu::BindGroupLayout>,
-    pub camera: Arc<wgpu::BindGroupLayout>,
-    pub equirect_src: Arc<wgpu::BindGroupLayout>,
-    pub equirect_dst: Arc<wgpu::BindGroupLayout>,
-    pub uniform: Arc<wgpu::BindGroupLayout>,
-    pub normal: Arc<wgpu::BindGroupLayout>,
-    pub material_storage: Arc<wgpu::BindGroupLayout>,
-    pub debug: Arc<wgpu::BindGroupLayout>,
-    pub sprite_2d: Arc<wgpu::BindGroupLayout>,
-    pub ortho_uniform: Arc<wgpu::BindGroupLayout>,
+    diffuse: Arc<wgpu::BindGroupLayout>,
+    light: Arc<wgpu::BindGroupLayout>,
+    camera: Arc<wgpu::BindGroupLayout>,
+    equirect_src: Arc<wgpu::BindGroupLayout>,
+    equirect_dst: Arc<wgpu::BindGroupLayout>,
+    uniform: Arc<wgpu::BindGroupLayout>,
+    normal: Arc<wgpu::BindGroupLayout>,
+    material_storage: Arc<wgpu::BindGroupLayout>,
+    debug: Arc<wgpu::BindGroupLayout>,
+    sprite_2d_array: Arc<wgpu::BindGroupLayout>,
+    ortho_uniform: Arc<wgpu::BindGroupLayout>,
 }
-static LAYOUTS: once_cell::sync::OnceCell<Arc<RenderBindGroupLayouts>> =
-    once_cell::sync::OnceCell::new();
 
 impl RenderBindGroupLayouts {
-    pub fn get<'a>() -> &'a Arc<RenderBindGroupLayouts> {
-        if LAYOUTS.get().is_none() {
-            RenderBindGroupLayouts::init();
-        }
-        LAYOUTS
-            .get()
-            .expect("Static layouts must exist at this point")
+    pub fn material_storage(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.material_storage
     }
-    pub fn init() {
-        let binding = crate::GPU::get();
-        let gpu = binding.read().expect("GPU resources not initialized");
-        let layouts = RenderBindGroupLayouts::new(gpu.device().clone());
-        LAYOUTS.set(layouts.into()).ok();
+    pub fn texture(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.diffuse
     }
-    pub fn material_storage() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().material_storage.clone()
+    pub fn light(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.light
     }
-    pub fn texture() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().diffuse.clone()
+    pub fn camera(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.camera
     }
-    pub fn light() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().light.clone()
+    pub fn equirect_src(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.equirect_src
     }
-    pub fn camera() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().camera.clone()
+    pub fn equirect_dst(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.equirect_dst
     }
-    pub fn equirect_src() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().equirect_src.clone()
+    pub fn uniform(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.uniform
     }
-    pub fn equirect_dst() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().equirect_dst.clone()
+    pub fn normal(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.normal
     }
-    pub fn uniform() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().uniform.clone()
+    pub fn debug(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.debug
     }
-    pub fn normal() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().normal.clone()
+    pub fn sprite_2d_array(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.sprite_2d_array
     }
-    pub fn debug() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().debug.clone()
-    }
-    pub fn sprite_2d() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().sprite_2d.clone()
-    }
-    pub fn ortho_uniform() -> Arc<wgpu::BindGroupLayout> {
-        Self::get().ortho_uniform.clone()
+    pub fn ortho_uniform(&self) -> &Arc<wgpu::BindGroupLayout> {
+        &self.ortho_uniform
     }
 
-    fn new(device: std::sync::Arc<wgpu::Device>) -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
         // Diffuse textures (2D)
         let diffuse_defs = &[
             BindingDef {
@@ -273,16 +257,36 @@ impl RenderBindGroupLayouts {
             },
         ];
         let debug = create_layout(&device, Some("debug bind grop layout"), debug_defs);
-
-        let sprite_2d_defs = &[
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("texture array bind group layout"),
+        });
+        let sprite_2d_array_defs = &[
             // binding 0 → a 2D texture‐array (one layer per font page)
             BindingDef {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
                 },
             },
             // binding 1 → a filtering sampler
@@ -292,10 +296,10 @@ impl RenderBindGroupLayouts {
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             },
         ];
-        let sprite_2d = create_layout(
+        let sprite_2d_array = create_layout(
             &device,
             Some("sprite_fonts bind group layout"),
-            sprite_2d_defs,
+            sprite_2d_array_defs,
         );
         let ortho_uniform_defs = &[BindingDef {
             binding: 0,
@@ -314,7 +318,6 @@ impl RenderBindGroupLayouts {
             ortho_uniform_defs,
         );
         RenderBindGroupLayouts {
-            device: device.clone(),
             diffuse: diffuse.into(),
             light: light.into(),
             camera: camera.into(),
@@ -324,7 +327,7 @@ impl RenderBindGroupLayouts {
             normal: normal.into(),
             material_storage: material_storage.into(),
             debug: debug.into(),
-            sprite_2d: sprite_2d.into(),
+            sprite_2d_array: sprite_2d_array.into(),
             ortho_uniform: ortho_uniform.into(),
         }
     }
@@ -335,10 +338,11 @@ pub struct BindGroup;
 impl BindGroup {
     pub fn ortho_uniform(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         ortho_uniform_buffer: &crate::WgpuBuffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &RenderBindGroupLayouts::ortho_uniform(),
+            layout: bind_group_layouts.ortho_uniform(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: ortho_uniform_buffer.get().as_entire_binding(),
@@ -346,10 +350,14 @@ impl BindGroup {
             label: Some("combined UBO bind group"),
         })
     }
-    pub fn equirect_dst(device: &wgpu::Device, dst: &super::Texture) -> wgpu::BindGroup {
+    pub fn equirect_dst(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        dst: &super::Texture,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} projection destination bind group", dst.label)),
-            layout: RenderBindGroupLayouts::equirect_dst().as_ref(),
+            layout: bind_group_layouts.equirect_dst(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -364,11 +372,12 @@ impl BindGroup {
     }
     pub fn equirect_src(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         src: &super::Texture,
         dst: &super::Texture,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: RenderBindGroupLayouts::equirect_src().as_ref(),
+            layout: bind_group_layouts.equirect_src(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -389,20 +398,28 @@ impl BindGroup {
         })
     }
 
-    pub fn camera(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
+    pub fn camera(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        uniform_buffer: &crate::WgpuBuffer,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera uniform bind group"),
-            layout: RenderBindGroupLayouts::camera().as_ref(),
+            layout: bind_group_layouts.camera(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.get().as_entire_binding(),
             }],
         })
     }
-    pub fn light(device: &wgpu::Device, uniform_buffer: &crate::WgpuBuffer) -> wgpu::BindGroup {
+    pub fn light(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        uniform_buffer: &crate::WgpuBuffer,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("light uniform bind group"),
-            layout: RenderBindGroupLayouts::light().as_ref(),
+            layout: bind_group_layouts.light(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform_buffer.get().as_entire_binding(),
@@ -411,11 +428,12 @@ impl BindGroup {
     }
     pub fn uniform(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         camera_uniform_buffer: &crate::WgpuBuffer,
         light_uniform_buffer: &crate::WgpuBuffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: RenderBindGroupLayouts::uniform().as_ref(),
+            layout: bind_group_layouts.uniform(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -429,10 +447,14 @@ impl BindGroup {
             label: Some("combined UBO bind group"),
         })
     }
-    pub fn texture(device: &wgpu::Device, diffuse: &super::Texture) -> wgpu::BindGroup {
+    pub fn texture(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        diffuse: &super::Texture,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group", diffuse.label)),
-            layout: RenderBindGroupLayouts::texture().as_ref(),
+            layout: bind_group_layouts.texture(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -448,13 +470,14 @@ impl BindGroup {
 
     pub fn normal(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         diffuse: &std::sync::Arc<super::Texture>,
         normal: &std::sync::Arc<super::Texture>,
         label: &str,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group layout", label)),
-            layout: RenderBindGroupLayouts::normal().as_ref(),
+            layout: bind_group_layouts.normal(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -475,10 +498,15 @@ impl BindGroup {
             ],
         })
     }
-    pub fn hdr(device: &wgpu::Device, hdr: &super::Texture, label: &str) -> wgpu::BindGroup {
+    pub fn hdr(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        hdr: &super::Texture,
+        label: &str,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{} texture bind group layout", label)),
-            layout: RenderBindGroupLayouts::texture().as_ref(),
+            layout: bind_group_layouts.texture(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -493,12 +521,13 @@ impl BindGroup {
     }
     pub fn material_storage(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         material_buffer: &WgpuBuffer,
         label: Option<&str>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
-            layout: RenderBindGroupLayouts::material_storage().as_ref(),
+            layout: bind_group_layouts.material_storage(),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: material_buffer.get().as_entire_binding(),
@@ -507,12 +536,13 @@ impl BindGroup {
     }
     pub fn debug(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         camera_uniform_buffer: &WgpuBuffer,
         light_uniform_buffer: &WgpuBuffer,
         debug: &WgpuBuffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: RenderBindGroupLayouts::debug().as_ref(),
+            layout: bind_group_layouts.debug(),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -530,10 +560,14 @@ impl BindGroup {
             label: Some("combined UBO+debug bind group"),
         })
     }
-    pub fn sprite2d(device: &wgpu::Device, texture: &super::Texture) -> wgpu::BindGroup {
+    pub fn sprite_2d_array(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+        texture: &super::Texture,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("sprite 2d bind group")),
-            layout: RenderBindGroupLayouts::sprite_2d().as_ref(),
+            layout: bind_group_layouts.sprite_2d_array(),
             entries: &[
                 // binding 0 → texture array view
                 wgpu::BindGroupEntry {
@@ -562,14 +596,24 @@ impl BindGroupManager {
     }
     pub fn bind_group_for(
         &mut self,
+        queue: &wgpu::Queue,
         device: &wgpu::Device,
-        textures: &TextureManager,
+        textures: &mut TextureManager,
         texture: &str,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<std::sync::Arc<wgpu::BindGroup>> {
         let texture_key = CacheKey::from(texture);
         if let Some(bind_group) = self.bind_groups.get(&texture_key) {
             return Some(bind_group.clone());
+        }
+        if !textures.contains_resource(&texture_key) {
+            if let Err(e) = textures.load(queue, device, texture) {
+                log_error!(
+                    "Failed to get bind group for {}, error loading texture: {}",
+                    texture,
+                    e.to_string()
+                );
+            }
         }
         if let Some(tex) = textures.get_resource(&texture_key) {
             let bind_group_entries = [

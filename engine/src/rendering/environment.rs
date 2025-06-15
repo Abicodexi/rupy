@@ -95,10 +95,21 @@ impl WorldProjection {
         };
 
         let dst_bind_group = service.get_or_create_bind_group("projection_dst".into(), || {
-            Ok(BindGroup::equirect_dst(service.device(), &dst_texture).into())
+            Ok(BindGroup::equirect_dst(
+                service.device(),
+                service.bind_group_layouts(),
+                &dst_texture,
+            )
+            .into())
         })?;
         let src_bind_group = service.get_or_create_bind_group("projection_src".into(), || {
-            Ok(BindGroup::equirect_src(service.device(), &src_texture, &dst_texture).into())
+            Ok(BindGroup::equirect_src(
+                service.device(),
+                service.bind_group_layouts(),
+                &src_texture,
+                &dst_texture,
+            )
+            .into())
         })?;
 
         let equirect_src_pipeline_layout =
@@ -106,7 +117,7 @@ impl WorldProjection {
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("Equirect source pipeline layout")),
-                    bind_group_layouts: &[&RenderBindGroupLayouts::equirect_src()],
+                    bind_group_layouts: &[&service.bind_group_layouts().equirect_src()],
                     push_constant_ranges: &[],
                 });
 
@@ -126,8 +137,8 @@ impl WorldProjection {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", dst_shader)),
                     bind_group_layouts: &[
-                        RenderBindGroupLayouts::uniform().as_ref(),
-                        RenderBindGroupLayouts::equirect_dst().as_ref(),
+                        service.bind_group_layouts().uniform().as_ref(),
+                        service.bind_group_layouts().equirect_dst().as_ref(),
                     ],
                     push_constant_ranges: &[],
                 });

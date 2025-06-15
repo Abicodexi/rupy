@@ -37,6 +37,7 @@ impl Camera {
 
     pub fn new(
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         screen_w: f32,
         screen_h: f32,
         speed: f32,
@@ -50,7 +51,7 @@ impl Camera {
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             Some("camera uniform buffer"),
         );
-        let bind_group = BindGroup::camera(device, &uniform_buffer);
+        let bind_group = BindGroup::camera(device, bind_group_layouts, &uniform_buffer);
 
         let model = CameraModel::new("goblin.obj", "normal.vert.wgsl", "normal.frag.wgsl");
         let controls = CameraControls::new(speed, sensitivity);
@@ -168,10 +169,10 @@ impl Camera {
         self.model.load_model(
             service,
             vec![
-                RenderBindGroupLayouts::uniform().clone(),
-                RenderBindGroupLayouts::equirect_dst().clone(),
-                RenderBindGroupLayouts::material_storage().clone(),
-                RenderBindGroupLayouts::normal().clone(),
+                service.bind_group_layouts().uniform().clone(),
+                service.bind_group_layouts().equirect_dst().clone(),
+                service.bind_group_layouts().material_storage().clone(),
+                service.bind_group_layouts().normal().clone(),
             ],
             cfg.format,
         );

@@ -95,7 +95,7 @@ impl Terrain {
 
         if let Some(instance) = &mut self.instance_buffer {
             let byte_data = VertexInstance::bytes(&instances);
-            instance.buffer.write_data(queue, device, &byte_data, None);
+            instance.write_data(queue, device, &byte_data, None);
         } else {
             let byte_data = VertexInstance::bytes(&instances);
             let buffer = WgpuBuffer::from_data(
@@ -104,12 +104,7 @@ impl Terrain {
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 Some("terrain_instance_buffer"),
             );
-            self.instance_buffer = Some(InstanceBuffer {
-                buffer,
-                count: instances.len(),
-                capacity: byte_data.len(),
-                dirty: false,
-            });
+            self.instance_buffer = Some(InstanceBuffer::new(buffer, Some(&instances)));
         }
     }
     pub fn all_meshes(&self) -> impl Iterator<Item = &MeshAsset> {

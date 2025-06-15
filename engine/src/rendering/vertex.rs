@@ -1,3 +1,6 @@
+use std::hash::Hash;
+use std::hash::Hasher;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct Vertex {
@@ -130,13 +133,58 @@ impl VertexInstance {
         data
     }
 }
+impl Hash for VertexInstance {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for row in &self.model {
+            for val in row {
+                val.to_bits().hash(state);
+            }
+        }
 
+        for val in &self.color {
+            val.to_bits().hash(state);
+        }
+
+        for val in &self.uv_offset {
+            val.to_bits().hash(state);
+        }
+
+        for val in &self.normal {
+            val.to_bits().hash(state);
+        }
+
+        for val in &self.tangent {
+            val.to_bits().hash(state);
+        }
+
+        self.material_id.hash(state);
+    }
+}
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex2d {
-    pub position: [f32; 2],   // @location(0)
-    pub tex_coords: [f32; 2], // @location(1)
-    pub color: [f32; 4],      // @location(2)
+    pub position: [f32; 2],
+    pub tex_coords: [f32; 2],
+    pub color: [f32; 4],
+    pub texture_index: i32,
+    _pad: [f32; 3], // Pad to 32 bytes for alignment
+}
+
+impl Vertex2d {
+    pub fn new(
+        position: [f32; 2],
+        tex_coords: [f32; 2],
+        color: [f32; 4],
+        texture_index: i32,
+    ) -> Self {
+        Self {
+            position,
+            tex_coords,
+            color,
+            texture_index,
+            _pad: [0.0; 3],
+        }
+    }
 }
 
 impl Vertex2d {
@@ -158,6 +206,11 @@ impl Vertex2d {
                 offset: 16,
                 shader_location: 2,
                 format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: 32,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Sint32,
             },
         ],
     };

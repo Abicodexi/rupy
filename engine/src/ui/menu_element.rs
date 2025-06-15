@@ -79,4 +79,10 @@ impl UiElements for MenuElement {
             MenuElement::Button(menu_button) => menu_button.draw(renderer, text_renderer),
         }
     }
+
+    fn texture(&self) -> &Option<String> {
+        match self {
+            MenuElement::Button(menu_button) => menu_button.texture(),
+        }
+    }
 }

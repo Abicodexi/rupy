@@ -1,5 +1,7 @@
 use glam::{Mat4, Vec3};
 
+use crate::AABB;
+
 #[derive(Copy, Clone, Debug)]
 pub struct Plane {
     pub normal: Vec3,
@@ -59,5 +61,27 @@ impl Frustum {
         self.planes
             .iter()
             .all(|plane| plane.distance(center) >= -radius)
+    }
+    pub fn frustum_cull_aabb(&self, aabb: &AABB, model_matrix: &Mat4) -> bool {
+        let corners = [
+            Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z),
+            Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
+            Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
+            Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
+            Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z),
+            Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z),
+            Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z),
+            Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z),
+        ];
+
+        for plane in &self.planes {
+            if corners
+                .iter()
+                .all(|corner| plane.distance(model_matrix.transform_point3(*corner)) < 0.0)
+            {
+                return false;
+            }
+        }
+        true
     }
 }

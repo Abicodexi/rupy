@@ -2,18 +2,15 @@ use std::sync::Arc;
 
 use crate::{
     container::UiContainer, menu::Menu, menu_button::MenuButton, menu_element::MenuElement,
-    AssetService, Dispatch, EngineError,
+    AssetLoader, AssetService, BindGroup, Dispatch, EngineError, Texture, UiElements,
 };
 
 pub struct MenuBuilder {
-    service: Arc<AssetService>,
     surface_config: wgpu::SurfaceConfiguration,
     screen_w: u32,
     screen_h: u32,
-    container: UiContainer,
-
     texture: Option<String>,
-
+    container: UiContainer,
     x: f32,
     y: f32,
     padding: f32,
@@ -22,29 +19,18 @@ pub struct MenuBuilder {
 }
 
 impl MenuBuilder {
-    pub fn new(
-        service: Arc<AssetService>,
-        surface_config: &wgpu::SurfaceConfiguration,
-        screen_w: u32,
-        screen_h: u32,
-    ) -> Self {
+    pub fn new(surface_config: &wgpu::SurfaceConfiguration, screen_w: u32, screen_h: u32) -> Self {
         Self {
-            service,
             surface_config: surface_config.clone(),
             screen_w,
             screen_h,
             container: UiContainer::default(),
-            texture: None,
             x: 0.0,
             y: 0.0,
+            texture: None,
             padding: 0.0,
             elements: Vec::new(),
         }
-    }
-
-    pub fn with_texture(mut self, path: &str) -> Self {
-        self.texture = Some(path.to_string());
-        self
     }
 
     pub fn with_position(mut self, x: f32, y: f32) -> Self {
@@ -58,9 +44,8 @@ impl MenuBuilder {
         self.padding = p;
         self
     }
-    pub fn with_container_style(mut self, color: [f32; 4], uv: [f32; 4]) -> Self {
-        self.container.set_color(color);
-        self.container.set_uv(uv);
+    pub fn with_texture(mut self, texture: &str) -> Self {
+        self.texture = Some(texture.to_string());
         self
     }
     pub fn with_button(
@@ -71,20 +56,17 @@ impl MenuBuilder {
         color: [f32; 4],
         uv: [f32; 4],
         highlight_color: [f32; 4],
+        texture: Option<&str>,
     ) -> Self {
-        let id = self
-            .elements
-            .iter()
-            .filter(|el| match el {
-                MenuElement::Button(..) => true,
-            })
-            .count();
+        let id = self.elements.len();
         let btn = MenuButton::new(
             id as u32,
             label,
             action,
             (0.0, 0.0),
             size,
+            texture,
+            id as i32,
             color,
             uv,
             highlight_color,
@@ -93,23 +75,35 @@ impl MenuBuilder {
         self
     }
 
-    pub fn build(self) -> Result<Menu, EngineError> {
-        let tex = self
-            .texture
-            .as_deref()
-            .ok_or_else(|| EngineError::AssetLoadError("no texture set".into()))?;
-
+    pub fn build(self, service: &AssetService) -> Result<Menu, EngineError> {
         let mut menu = Menu::new(
-            &self.service,
+            service,
             &self.surface_config,
-            tex,
             self.screen_w,
             self.screen_h,
             self.container,
         )?;
+        let mut images: Vec<image::RgbaImage> = Vec::new();
         for elem in self.elements {
+            if let Some(tex) = elem.texture() {
+                let path = AssetLoader::resolve("textures").join(tex);
+                let img_rgba = AssetLoader::image(path)?.to_rgba8();
+                images.push(img_rgba);
+            }
             menu.add_element(elem);
         }
+
+        let array_tex = Texture::from_image_array(
+            service.device(),
+            service.queue(),
+            &images,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            "ui_texture_array",
+        );
+        let array_tex_bg =
+            BindGroup::sprite_2d_array(service.device(), service.bind_group_layouts(), &array_tex);
+
+        menu.set_texture_bind_group(array_tex_bg);
         Ok(menu)
     }
 }

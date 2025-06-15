@@ -6,6 +6,8 @@ pub struct MenuButton {
     action: Dispatch,
     x: f32,
     y: f32,
+    texture: Option<String>,
+    texture_index: i32,
     color: [f32; 4],
     uv: [f32; 4],
     highlight_color: [f32; 4],
@@ -43,6 +45,10 @@ impl UiElements for MenuButton {
     fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer) {
         self.draw(renderer, text_renderer);
     }
+
+    fn texture(&self) -> &Option<String> {
+        &self.texture
+    }
 }
 impl MenuButton {
     pub fn new(
@@ -51,6 +57,8 @@ impl MenuButton {
         action: Dispatch,
         position: (f32, f32),
         size: (f32, f32),
+        texture: Option<&str>,
+        texture_index: i32,
         color: [f32; 4],
         uv: [f32; 4],
         highlight_color: [f32; 4],
@@ -64,6 +72,12 @@ impl MenuButton {
             width: size.0,
             height: size.1,
             color,
+            texture: if let Some(tex) = texture {
+                Some(tex.to_string())
+            } else {
+                None
+            },
+            texture_index,
             uv,
             highlight_color,
             disabled: false,
@@ -101,6 +115,9 @@ impl MenuButton {
     pub fn height(&self) -> f32 {
         self.height
     }
+    pub fn texture(&self) -> &Option<String> {
+        &self.texture
+    }
     pub fn set_position(&mut self, position: (f32, f32)) {
         let (pos_x, pos_y) = position;
         self.x = pos_x;
@@ -114,7 +131,15 @@ impl MenuButton {
             self.highlight_color
         };
 
-        renderer.draw_filled_rect(self.x, self.y, self.width, self.height, color, self.uv);
+        renderer.draw_filled_rect(
+            self.x,
+            self.y,
+            self.width,
+            self.height,
+            color,
+            self.uv,
+            self.texture_index,
+        );
         let center_x = self.x + (self.width - (self.label.len() as f32 * 10.0)) * 0.5;
         let center_y = self.y + (self.height) * 0.5;
 

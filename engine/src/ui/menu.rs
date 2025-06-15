@@ -1,7 +1,7 @@
 use crate::{
-    camera::OrthoUniform, container::UiContainer, menu_builder::MenuBuilder,
+    camera::OrthoUniform, container::UiContainer, log_info, menu_builder::MenuBuilder,
     menu_element::MenuElement, AssetService, BindGroup, CacheKey, EngineError, GlyphonTextRenderer,
-    Renderer2d, UiElement, UiEvent, Vertex2d, WgpuBuffer,
+    Renderer2d, UiElement, UiElements, UiEvent, Vertex2d, WgpuBuffer,
 };
 use std::sync::Arc;
 use winit::{
@@ -12,7 +12,7 @@ use winit::{
 pub struct Menu {
     buffer: WgpuBuffer,
     bind_group: Arc<wgpu::BindGroup>,
-    texture_bind_group: Arc<wgpu::BindGroup>,
+    texture_bind_group: Option<Arc<wgpu::BindGroup>>,
     pipeline: Arc<wgpu::RenderPipeline>,
     root: UiContainer,
     is_visible: bool,
@@ -22,7 +22,6 @@ impl Menu {
     pub fn new(
         service: &AssetService,
         surface_config: &wgpu::SurfaceConfiguration,
-        texture: &str,
         screen_w: u32,
         screen_h: u32,
         container: UiContainer,
@@ -38,7 +37,10 @@ impl Menu {
         );
 
         let bind_group = service.get_or_create_bind_group("orthographic".into(), || {
-            Ok(BindGroup::ortho_uniform(service.device(), &buffer).into())
+            Ok(
+                BindGroup::ortho_uniform(service.device(), service.bind_group_layouts(), &buffer)
+                    .into(),
+            )
         })?;
 
         let pipeline_name = "sprite2d";
@@ -49,23 +51,11 @@ impl Menu {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", pipeline_name)),
                     bind_group_layouts: &[
-                        &service.bind_group_layouts().ortho_uniform,
-                        &service.bind_group_layouts().diffuse,
+                        service.bind_group_layouts().ortho_uniform(),
+                        service.bind_group_layouts().sprite_2d_array(),
                     ],
                     push_constant_ranges: &[],
                 });
-
-        service.load_texture(texture);
-        let texture_bind_group = if let Some(bg) =
-            service.get_bind_group_for_texture(texture, &service.bind_group_layouts().diffuse)
-        {
-            bg
-        } else {
-            return Err(EngineError::AssetLoadError(format!(
-                "Failed to create menu diffuse texture bind group: {}",
-                texture
-            )));
-        };
 
         if let Some(pipeline) = service.get_or_load_render_pipeline(
             "sprite2d.frag.wgsl",
@@ -80,10 +70,10 @@ impl Menu {
             Ok(Menu {
                 buffer,
                 bind_group,
-                texture_bind_group,
                 root,
                 is_visible: false,
                 pipeline,
+                texture_bind_group: None,
             })
         } else {
             Err(EngineError::AssetLoadError(format!(
@@ -94,30 +84,21 @@ impl Menu {
     }
 
     pub fn builder(
-        service: Arc<AssetService>,
         surface_config: &wgpu::SurfaceConfiguration,
         screen_w: u32,
         screen_h: u32,
     ) -> MenuBuilder {
-        MenuBuilder::new(service, surface_config, screen_w, screen_h)
+        MenuBuilder::new(surface_config, screen_w, screen_h)
     }
     pub fn with_elements(
         service: &Arc<AssetService>,
         surface_config: &wgpu::SurfaceConfiguration,
-        texture: &str,
         screen_w: u32,
         screen_h: u32,
         elements: Vec<MenuElement>,
         container: UiContainer,
     ) -> Result<Self, EngineError> {
-        let mut menu = Self::new(
-            service,
-            surface_config,
-            texture,
-            screen_w,
-            screen_h,
-            container,
-        )?;
+        let mut menu = Self::new(service, surface_config, screen_w, screen_h, container)?;
         for element in elements {
             menu.add_element(element);
         }
@@ -162,10 +143,10 @@ impl Menu {
     }
     pub fn render<'a>(
         &'a mut self,
+        service: &AssetService,
         rpass: &mut wgpu::RenderPass<'a>,
         d2: &mut Renderer2d,
         txt: &mut GlyphonTextRenderer,
-        queue: &wgpu::Queue,
     ) {
         if !self.is_visible {
             return;
@@ -173,10 +154,23 @@ impl Menu {
 
         rpass.set_pipeline(&self.pipeline);
         rpass.set_bind_group(0, self.bind_group.as_ref(), &[]);
-        rpass.set_bind_group(1, self.texture_bind_group.as_ref(), &[]);
 
-        self.root.draw(d2, txt);
-        d2.flush(queue, rpass);
+        if let Some(arr_tex_bg) = &self.texture_bind_group {
+            rpass.set_bind_group(1, arr_tex_bg.as_ref(), &[]);
+        }
+
+        for elem in self.root.elements() {
+            elem.draw(d2, txt);
+        }
+
+        d2.flush(service.queue(), rpass);
+    }
+
+    pub fn set_texture_bind_group(&mut self, bind_group: wgpu::BindGroup) {
+        self.texture_bind_group = Some(bind_group.into());
+    }
+    pub fn texture_bind_group(&self) -> Option<&Arc<wgpu::BindGroup>> {
+        self.texture_bind_group.as_ref()
     }
     pub fn add_element(&mut self, element: MenuElement) {
         self.root.push_element(UiElement::Menu(element));

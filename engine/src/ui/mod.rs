@@ -31,6 +31,7 @@ pub trait UiElements {
     fn label(&self) -> &str;
     fn size(&self) -> (f32, f32);
     fn position(&self) -> (f32, f32);
+    fn texture(&self) -> &Option<String>;
     fn set_position(&mut self, position: (f32, f32));
     fn get_element(self) -> UiElement;
     fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer);
@@ -76,6 +77,12 @@ impl UiElements for UiElement {
     fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer) {
         match self {
             UiElement::Menu(menu_element) => menu_element.draw(renderer, text_renderer),
+        }
+    }
+
+    fn texture(&self) -> &Option<String> {
+        match self {
+            UiElement::Menu(menu_element) => menu_element.texture(),
         }
     }
 }

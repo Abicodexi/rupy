@@ -57,11 +57,12 @@ impl AssetService {
         shaders: ShaderManager,
         pipelines: PipelineManager,
     ) -> Self {
+        let bind_group_layouts = RenderBindGroupLayouts::new(&device);
         Self {
             queue,
             device,
             bind_groups: Arc::new(RwLock::new(bind_groups)),
-            bind_group_layouts: RenderBindGroupLayouts::get().clone(),
+            bind_group_layouts: bind_group_layouts.into(),
             materials: Arc::new(RwLock::new(materials)),
             models: Arc::new(RwLock::new(models)),
             textures: Arc::new(RwLock::new(textures)),
@@ -365,10 +366,10 @@ impl AssetService {
         texture: &str,
         layout: &wgpu::BindGroupLayout,
     ) -> Option<Arc<wgpu::BindGroup>> {
-        if let (Ok(textures), Ok(mut bind_groups)) =
-            (self.textures.read(), self.bind_groups.write())
+        if let (Ok(mut textures), Ok(mut bind_groups)) =
+            (self.textures.write(), self.bind_groups.write())
         {
-            bind_groups.bind_group_for(&self.device, &textures, texture, layout)
+            bind_groups.bind_group_for(&self.queue, &self.device, &mut textures, texture, layout)
         } else {
             None
         }
@@ -376,6 +377,7 @@ impl AssetService {
 
     pub fn load_material(
         &self,
+
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         mat: tobj::Material,
         v_shader: String,
@@ -407,6 +409,7 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
+                self.bind_group_layouts(),
                 bind_group_layouts,
                 mat,
                 &v_shader,
@@ -425,6 +428,7 @@ impl AssetService {
     }
     pub async fn load_material_async(
         &self,
+
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         mat: tobj::Material,
         v_shader: String,
@@ -457,6 +461,7 @@ impl AssetService {
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
+                    self.bind_group_layouts(),
                     bind_group_layouts,
                     mat,
                     &v_shader,
@@ -477,6 +482,8 @@ impl AssetService {
     }
     pub fn load_material_asset(
         &self,
+        buffers: &[wgpu::VertexBufferLayout<'_>],
+        layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
         format: wgpu::TextureFormat,
@@ -503,10 +510,11 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
+                layouts,
                 bind_group_layouts,
                 asset,
                 format,
-                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                buffers,
             ) {
                 log_error!("{}", e.to_string());
             } else {
@@ -519,6 +527,7 @@ impl AssetService {
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
         format: wgpu::TextureFormat,
+        buffers: &[VertexBufferLayout<'_>],
     ) {
         let asset_name = asset.name.clone();
 
@@ -537,16 +546,17 @@ impl AssetService {
         ) {
             if let Err(e) = materials
                 .load_asset_async(
-                    self.device.as_ref(),
-                    self.queue.as_ref(),
+                    self.device(),
+                    self.queue(),
                     &mut textures,
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
+                    self.bind_group_layouts(),
                     bind_group_layouts,
                     asset,
                     format,
-                    &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                    buffers,
                 )
                 .await
             {
@@ -589,6 +599,7 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
+                self.bind_group_layouts(),
                 &file,
                 &v_shader,
                 &f_shader,
@@ -637,6 +648,7 @@ impl AssetService {
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
+                    self.bind_group_layouts(),
                     &file,
                     &v_shader,
                     &f_shader,
@@ -658,6 +670,7 @@ impl AssetService {
         bind_group_layouts: Vec<Arc<BindGroupLayout>>,
         asset: ModelAsset,
         format: TextureFormat,
+        buffers: &[VertexBufferLayout<'_>],
     ) {
         if let (
             Ok(mut models),
@@ -682,9 +695,10 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
+                self.bind_group_layouts(),
                 bind_group_layouts,
                 format,
-                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                buffers,
                 asset,
             ) {
                 log_error!("{}", e.to_string());
@@ -901,7 +915,14 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                 asset,
                 format,
             } => {
-                service.load_material_asset(bind_group_layouts, asset, format);
+                let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
+                service.load_material_asset(
+                    buffers,
+                    service.bind_group_layouts(),
+                    bind_group_layouts,
+                    asset,
+                    format,
+                );
             }
             AssetRequest::LoadModel {
                 file,
@@ -927,7 +948,8 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                 format,
                 asset,
             } => {
-                service.load_model_asset(bind_group_layouts, asset, format);
+                let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
+                service.load_model_asset(bind_group_layouts, asset, format, buffers);
             }
         }
     }

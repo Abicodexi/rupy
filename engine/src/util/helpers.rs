@@ -30,6 +30,7 @@ impl ScreenCorner {
 
 pub fn debug_scene(
     asset_tx: &Sender<AssetRequest>,
+    bind_group_layouts: &RenderBindGroupLayouts,
     world: &mut World,
     format: wgpu::TextureFormat,
 ) -> Entity {
@@ -49,10 +50,10 @@ pub fn debug_scene(
             v_shader: "normal.vert.wgsl".to_string(),
             f_shader: "normal.frag.wgsl".to_string(),
             bind_group_layouts: vec![
-                RenderBindGroupLayouts::uniform().clone(),
-                RenderBindGroupLayouts::equirect_dst().clone(),
-                RenderBindGroupLayouts::material_storage().clone(),
-                RenderBindGroupLayouts::normal().clone(),
+                bind_group_layouts.uniform().clone(),
+                bind_group_layouts.equirect_dst().clone(),
+                bind_group_layouts.material_storage().clone(),
+                bind_group_layouts.normal().clone(),
             ],
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -87,10 +88,10 @@ pub fn debug_scene(
             v_shader: "normal.vert.wgsl".to_string(),
             f_shader: "normal.frag.wgsl".to_string(),
             bind_group_layouts: vec![
-                RenderBindGroupLayouts::uniform().clone(),
-                RenderBindGroupLayouts::equirect_dst().clone(),
-                RenderBindGroupLayouts::material_storage().clone(),
-                RenderBindGroupLayouts::normal().clone(),
+                bind_group_layouts.uniform().clone(),
+                bind_group_layouts.equirect_dst().clone(),
+                bind_group_layouts.material_storage().clone(),
+                bind_group_layouts.normal().clone(),
             ],
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,

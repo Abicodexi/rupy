@@ -3,8 +3,8 @@ use std::sync::Arc;
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
     camera::Camera, log_error, log_info, BindGroupManager, CacheKey, EngineError, Entity, Light,
-    Material, MaterialManager, Medium, ModelManager, PipelineManager, ShaderManager, Terrain,
-    TextureManager, Time, WorldProjection,
+    Material, MaterialManager, Medium, ModelManager, PipelineManager, RenderBindGroupLayouts,
+    ShaderManager, Terrain, TextureManager, Time, WorldProjection,
 };
 use glam::Vec3;
 use pollster::FutureExt;
@@ -41,6 +41,7 @@ pub struct World {
     entity_count: usize,
     pub terrain: Terrain,
     pub light: Light,
+    dirty: bool,
 }
 
 impl World {
@@ -70,6 +71,7 @@ impl World {
             entity_count: 0,
             terrain,
             light,
+            dirty: false,
         })
     }
     pub fn entity_count(&self) -> usize {
@@ -108,6 +110,7 @@ impl World {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
+        layouts: &RenderBindGroupLayouts,
         file: &str,
         v_shader: &str,
         f_shader: &str,
@@ -127,6 +130,7 @@ impl World {
                 shader_manager,
                 pipeline_manager,
                 bind_group_manager,
+                layouts,
                 file,
                 v_shader,
                 f_shader,
@@ -233,8 +237,14 @@ impl World {
     pub fn light(&self) -> &Light {
         &self.light
     }
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
-        self.light.upload(queue, device);
+        if self.dirty {
+            self.light.upload(queue, device);
+            self.dirty = false;
+        }
     }
     pub fn update(
         &mut self,
@@ -272,5 +282,6 @@ impl World {
         self.update_transforms();
         self.terrain.update_streaming(camera_pos, view_distance);
         self.terrain.update_instance_buffer(queue, device);
+        self.dirty = true;
     }
 }

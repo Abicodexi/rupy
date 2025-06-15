@@ -20,9 +20,9 @@ impl CameraModel {
             v_shader: v_shader.to_string(),
             f_shader: f_shader.to_string(),
             entity: None,
-            distance: 1.0,
-            height: 2.0,
-            target_height: 2.0,
+            distance: 3.0,
+            height: 1.0,
+            target_height: 1.0,
             shoulder_offset: 0.0,
         }
     }

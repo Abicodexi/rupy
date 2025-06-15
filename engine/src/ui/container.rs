@@ -3,25 +3,22 @@ pub struct UiContainer {
     elements: Vec<UiElement>,
     x: f32,
     y: f32,
-    color: [f32; 4],
-    uv: [f32; 4],
     padding: f32,
     layout_width: f32,
     layout_height: f32,
 }
 impl Default for UiContainer {
     fn default() -> Self {
-        UiContainer::new((0.0, 0.0), [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], 0.0)
+        UiContainer::new((0.0, 0.0), 0.0)
     }
 }
 impl UiContainer {
-    pub fn new(position: (f32, f32), color: [f32; 4], uv: [f32; 4], padding: f32) -> Self {
+    pub fn new(position: (f32, f32), padding: f32) -> Self {
         Self {
             elements: Vec::new(),
             x: position.0,
             y: position.1,
-            color,
-            uv,
+
             padding,
             layout_width: 0.0,
             layout_height: 0.0,
@@ -56,29 +53,11 @@ impl UiContainer {
         self.layout_width = max_width + 20.0;
     }
 
-    pub fn draw(&self, renderer: &mut Renderer2d, text_renderer: &mut GlyphonTextRenderer) {
-        renderer.draw_filled_rect(
-            self.x,
-            self.y,
-            self.layout_width,
-            self.layout_height,
-            self.color,
-            self.uv,
-        );
-        for elem in &self.elements {
-            elem.draw(renderer, text_renderer);
-        }
-    }
     pub fn set_position(&mut self, position: (f32, f32)) {
         self.x = position.0;
         self.y = position.1;
     }
-    pub fn set_color(&mut self, color: [f32; 4]) {
-        self.color = color;
-    }
-    pub fn set_uv(&mut self, uv: [f32; 4]) {
-        self.uv = uv;
-    }
+
     pub fn elements(&self) -> &Vec<UiElement> {
         &self.elements
     }

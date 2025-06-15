@@ -45,10 +45,13 @@ impl Light {
         ),
     };
 
-    pub fn new(device: &wgpu::Device) -> Result<Self, crate::EngineError> {
+    pub fn new(
+        device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+    ) -> Result<Self, crate::EngineError> {
         let position: cgmath::Vector3<f32> = Self::CENTER.into();
         let color: cgmath::Vector3<f32> = [1.0, 1.0, 1.0].into();
-        let bind_group_layout = RenderBindGroupLayouts::light();
+        let bind_group_layout = bind_group_layouts.light();
         let uniform_buffer = WgpuBuffer::from_data(
             device,
             &[LightUniform::new()],

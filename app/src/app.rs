@@ -6,10 +6,9 @@ use engine::{
     menu::Menu,
     menu_element::MenuElement,
     ApplicationEvent, AssetRequest, AssetService, BindGroup, CacheKey, DebugMode, Dispatch,
-    EngineError, Entity, FrameBuffer, GlyphonTextRenderer, Light, Medium, Position,
-    RenderBindGroupLayouts, RenderPass, RenderTargetKind, RenderTargetManager, Renderer2d,
-    Renderer3d, ScreenCorner, SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent, Velocity,
-    World, WorldProjection, GPU,
+    EngineError, Entity, FrameBuffer, GlyphonTextRenderer, Light, Medium, Position, RenderPass,
+    RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner, SurfaceExt,
+    Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World, WorldProjection, GPU,
 };
 use glam::Vec3;
 use std::sync::Arc;
@@ -75,8 +74,6 @@ impl Rupy {
             (surface, surface_config, gpu)
         };
 
-        RenderBindGroupLayouts::init();
-
         AssetService::spawn_thread(gpu.queue().clone(), gpu.device().clone(), asset_rx);
 
         let service = asset_service();
@@ -88,7 +85,14 @@ impl Rupy {
         let rendertxt = GlyphonTextRenderer::new(device, service.queue(), surface_config.format);
 
         let projection = Projection::FirstPerson;
-        let mut camera = Camera::new(device, width as f32, height as f32, 5.0, 0.4);
+        let mut camera = Camera::new(
+            device,
+            service.bind_group_layouts(),
+            width as f32,
+            height as f32,
+            5.0,
+            0.4,
+        );
 
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
@@ -123,22 +127,31 @@ impl Rupy {
         )?;
 
         let terrain = Terrain::new(Medium::Ground);
-        let light = Light::new(service.device())?;
+        let light = Light::new(service.device(), service.bind_group_layouts())?;
 
         let uniform_bind_group = service.get_or_create_bind_group("uniform".into(), || {
-            Ok(BindGroup::uniform(device, camera.buffer(), light.buffer()).into())
+            Ok(BindGroup::uniform(
+                device,
+                service.bind_group_layouts(),
+                camera.buffer(),
+                light.buffer(),
+            )
+            .into())
         })?;
 
         let mut world = World::new(world_projection, terrain, light)?;
         let debug_mode = DebugMode::new(service, &camera, &world.light, &surface_config)?;
 
-        let bossman = debug_scene(&asset_tx, &mut world, surface_config.format);
+        let bossman = debug_scene(
+            &asset_tx,
+            service.bind_group_layouts(),
+            &mut world,
+            surface_config.format,
+        );
 
-        let menu = Menu::builder(service.clone(), &surface_config, width, height)
-            .with_texture("cube-diffuse.jpg")
+        let menu = Menu::builder(&surface_config, width, height)
             .with_position(200.0, 200.0)
             .with_padding(8.0)
-            .with_container_style([0.1, 0.1, 0.1, 0.9], [0.0, 0.0, 1.0, 1.0])
             .with_button(
                 "Play",
                 Dispatch::Event(ApplicationEvent::Run),
@@ -146,6 +159,7 @@ impl Rupy {
                 [1.0, 1.0, 1.0, 1.0],
                 [0.0, 0.0, 0.5, 0.5],
                 [0.5, 0.5, 1.0, 1.0],
+                Some("cube-diffuse.jpg"),
             )
             .with_button(
                 "Quit",
@@ -154,8 +168,9 @@ impl Rupy {
                 [1.0, 1.0, 1.0, 1.0],
                 [0.5, 0.0, 1.0, 0.5],
                 [1.0, 0.5, 0.5, 1.0],
+                Some("cube-normal.png"),
             )
-            .build()?;
+            .build(&service)?;
 
         camera.load_model(service, &surface_config);
 
@@ -199,7 +214,6 @@ impl Rupy {
         })
     }
     pub fn shutdown(&self, el: &ActiveEventLoop) {
-        log_info!("Shutdown");
         World::stop();
         if let Err(e) = self.asset_tx.send(AssetRequest::Shutdown) {
             log_error!(
@@ -210,6 +224,7 @@ impl Rupy {
         if !el.exiting() {
             el.exit();
         }
+        log_info!("Shutdown");
     }
     pub fn handle_key(&mut self, key: PhysicalKey) {
         match key {
@@ -238,19 +253,23 @@ impl Rupy {
     }
 
     pub fn handle_menu_toggle(&mut self, event: &WindowEvent) {
-        if self.menu.process(event) {
-            if !self.camera.is_frozen() {
-                self.camera.freeze();
-                self.set_projection(Projection::Orthographic);
-            }
-        } else if self.camera.is_frozen() {
+        self.menu.process(event);
+        let visible = self.menu.is_visible();
+        let camera_frozen = self.camera.is_frozen();
+        if visible && !camera_frozen {
+            self.camera.freeze();
+        }
+        if !visible && camera_frozen {
             self.camera.unfreeze();
-            self.set_projection(Projection::FirstPerson);
         }
     }
     pub fn next_debug_mode(&mut self) {
-        self.debug_mode
-            .next_mode(self.service.device(), &self.camera, self.world.light());
+        self.debug_mode.next_mode(
+            self.service.device(),
+            self.service.bind_group_layouts(),
+            &self.camera,
+            self.world.light(),
+        );
     }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
         let width = new_size.width.max(1) as f32;
@@ -349,6 +368,7 @@ impl Rupy {
                 if let Ok(models) = self.service.models() {
                     self.render3d.instances.update(
                         self.service.device(),
+                        self.service.queue(),
                         &self.world,
                         &self.camera,
                         &models,
@@ -429,6 +449,7 @@ impl Rupy {
         ) {
             self.render3d.hdr(
                 self.service.device(),
+                self.service.bind_group_layouts(),
                 &mut encoder,
                 &scene_fb.color(),
                 hdr_fb,
@@ -438,6 +459,7 @@ impl Rupy {
         if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
             self.render3d.final_blit_to_surface(
                 self.service.device(),
+                self.service.bind_group_layouts(),
                 &mut encoder,
                 hdr_fb.color(),
                 &surface_view,
@@ -469,10 +491,10 @@ impl Rupy {
             );
         }
         self.menu.render(
+            &self.service,
             &mut rpass2d,
             &mut self.render2d,
             &mut self.rendertxt,
-            self.service.queue(),
         );
         self.rendertxt.draw(
             self.service.device(),

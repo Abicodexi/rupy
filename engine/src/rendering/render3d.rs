@@ -3,11 +3,15 @@ use {
     crate::{
         camera::{self, Frustum},
         create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
-        EngineError, FrameBuffer, MaterialManager, ModelManager, Rotation, Scale, Texture,
-        Transform, WgpuBuffer, World,
+        EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation,
+        Scale, Texture, Transform, WgpuBuffer, World,
     },
     glam::{Mat4, Vec3},
-    std::sync::Arc,
+    rayon::iter::{IntoParallelRefIterator, ParallelIterator},
+    std::{
+        hash::{DefaultHasher, Hash, Hasher},
+        sync::Arc,
+    },
     wgpu::{IndexFormat, RenderPipeline},
 };
 
@@ -32,7 +36,7 @@ impl Renderer3d {
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", label)),
-                    bind_group_layouts: &[service.bind_group_layouts().diffuse.as_ref()],
+                    bind_group_layouts: &[service.bind_group_layouts().texture()],
                     push_constant_ranges: &[],
                 });
         let hdr_pipeline = create_render_pipeline(
@@ -59,11 +63,12 @@ impl Renderer3d {
     pub fn final_blit_to_surface(
         &self,
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
         encoder: &mut wgpu::CommandEncoder,
         hdr_texture: &Texture,
         surface_view: &wgpu::TextureView,
     ) {
-        let bind_group = BindGroup::hdr(&device, hdr_texture, "final blit");
+        let bind_group = BindGroup::hdr(&device, bind_group_layouts, hdr_texture, "final blit");
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Final Blit to Surface"),
@@ -88,11 +93,13 @@ impl Renderer3d {
     pub fn hdr(
         &self,
         device: &wgpu::Device,
+        bind_group_layouts: &RenderBindGroupLayouts,
+
         encoder: &mut wgpu::CommandEncoder,
         scene_texture: &Texture,
         hdr_fb: &FrameBuffer,
     ) {
-        let bind_group = BindGroup::hdr(device, scene_texture, "hdr input");
+        let bind_group = BindGroup::hdr(device, bind_group_layouts, scene_texture, "hdr input");
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("HDR Pass"),
@@ -162,19 +169,46 @@ impl RenderPass for Renderer3d {
         }
     }
 }
-
+fn hash_vertex_instances(instances: &Vec<VertexInstance>) -> u64 {
+    use std::hash::Hash;
+    let mut hasher = DefaultHasher::new();
+    Hash::hash(instances, &mut hasher);
+    let hash = hasher.finish();
+    hash
+}
 #[derive(Debug)]
 pub struct InstanceBuffer {
-    pub buffer: WgpuBuffer,
-    pub count: usize,
-    pub capacity: usize,
-    pub dirty: bool,
+    buffer: WgpuBuffer,
+    count: usize,
+    hash: u64,
+    dirty: bool,
+}
+impl InstanceBuffer {
+    pub fn new(buffer: WgpuBuffer, instances: Option<&Vec<VertexInstance>>) -> Self {
+        Self {
+            buffer,
+            count: instances.unwrap_or(Vec::new().as_ref()).len(),
+            hash: hash_vertex_instances(instances.unwrap_or(Vec::new().as_ref())),
+            dirty: false,
+        }
+    }
+    pub fn write_data<T>(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        data: &[T],
+        offset: Option<u64>,
+    ) where
+        T: bytemuck::Pod,
+    {
+        self.buffer.write_data(queue, device, data, offset);
+    }
 }
 
 #[derive(Debug)]
 pub struct InstanceBuffers {
-    pub batch: std::collections::HashMap<CacheKey, Vec<VertexInstance>>,
-    pub buffers: std::collections::HashMap<CacheKey, InstanceBuffer>,
+    batch: std::collections::HashMap<CacheKey, Vec<VertexInstance>>,
+    buffers: std::collections::HashMap<CacheKey, InstanceBuffer>,
 }
 
 impl InstanceBuffers {
@@ -188,6 +222,7 @@ impl InstanceBuffers {
     pub fn update(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         world: &World,
         camera: &camera::Camera,
         models: &ModelManager,
@@ -202,7 +237,6 @@ impl InstanceBuffers {
             let Some(renderable) = &world.renderables[idx] else {
                 continue;
             };
-
             if !renderable.visible {
                 continue;
             }
@@ -210,14 +244,13 @@ impl InstanceBuffers {
             let Some(position) = &world.physics.positions[idx] else {
                 continue;
             };
-
             let rotation = world.rotations[idx].as_ref().unwrap_or(&default_rotation);
             let scale = world.scales[idx].as_ref().unwrap_or(&default_scale);
 
             let transform = Transform::from_components(position, rotation, scale);
 
             if let Some(model) = models.get_resource(&renderable.model_key) {
-                if !frustum_cull_aabb(&frustum, &model.aabb, &transform.model_matrix) {
+                if !frustum.frustum_cull_aabb(&model.aabb, &transform.model_matrix) {
                     continue;
                 }
                 if let Some(material) = &model.instance.material {
@@ -230,37 +263,61 @@ impl InstanceBuffers {
                 }
             }
         }
+        let updates: Vec<(CacheKey, u64, usize, Vec<u8>)> = if self.batch.len() >= 10 {
+            self.batch
+                .par_iter()
+                .map(|(key, instances)| {
+                    let mut hasher = DefaultHasher::new();
+                    instances.iter().for_each(|i| i.hash(&mut hasher));
+                    let hash = hasher.finish();
+                    let count = instances.len();
+                    let bytes = VertexInstance::bytes(instances);
+                    (*key, hash, count, bytes)
+                })
+                .collect()
+        } else {
+            self.batch
+                .iter()
+                .map(|(key, instances)| {
+                    let mut hasher = DefaultHasher::new();
+                    instances.iter().for_each(|i| i.hash(&mut hasher));
+                    let hash = hasher.finish();
+                    let count = instances.len();
+                    let bytes = VertexInstance::bytes(instances);
+                    (*key, hash, count, bytes)
+                })
+                .collect()
+        };
 
-        for (key, data) in &self.batch {
-            let instances = data;
-
-            let byte_data = VertexInstance::bytes(instances);
-            let byte_size = data.len();
-            let buffer_data = self.buffers.entry(*key).or_insert_with(|| InstanceBuffer {
+        for (key, hash, count, byte_data) in updates {
+            let instance = self.buffers.entry(key).or_insert_with(|| InstanceBuffer {
                 buffer: WgpuBuffer::from_data(
                     device,
                     &byte_data,
                     wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     Some(&format!("instance buffer {}", key.id())),
                 ),
-                count: instances.len(),
-                capacity: byte_size,
-                dirty: false,
+                count,
+                dirty: true,
+                hash,
             });
 
-            buffer_data.count = instances.len();
-            buffer_data.dirty = true;
+            if instance.hash != hash || instance.count != count {
+                instance.dirty = true;
+                instance.hash = hash;
+                instance.count = count;
+                instance.buffer.write_data(queue, device, &byte_data, None);
+            }
         }
     }
 
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
-        for (key, data) in &mut self.buffers {
-            if let Some(instances) = self.batch.get(key) {
-                if data.dirty {
+        for (key, buffer) in &mut self.buffers {
+            if buffer.dirty {
+                if let Some(instances) = self.batch.get(key) {
                     let byte_data = VertexInstance::bytes(instances);
-                    data.buffer.write_data(queue, device, &byte_data, Some(0));
-                    data.dirty = false;
-                    data.count = instances.len();
+                    buffer.buffer.write_data(queue, device, &byte_data, Some(0));
+                    buffer.dirty = false;
                 }
             }
         }
@@ -286,6 +343,7 @@ impl InstanceBuffers {
             };
 
             let mesh = &model.instance.mesh;
+            let count = data.count as u32;
             rpass.set_bind_group(3, mat.bind_group.as_ref(), &[]);
 
             rpass.set_vertex_buffer(0, mesh.vertex_buffer.get().slice(..));
@@ -295,30 +353,12 @@ impl InstanceBuffers {
             if debug.mode() > 0 {
                 rpass.set_bind_group(0, debug.bind_group(), &[]);
                 rpass.set_pipeline(debug.pipeline());
-                rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..count);
             } else {
                 rpass.set_bind_group(0, uniform_bind_group, &[]);
                 rpass.set_pipeline(&mat.pipeline);
-                rpass.draw_indexed(0..mesh.index_count, 0, 0..data.count as u32);
+                rpass.draw_indexed(0..mesh.index_count, 0, 0..count);
             }
         }
     }
-}
-
-pub fn frustum_cull_aabb(frustum: &Frustum, aabb: &AABB, model_matrix: &Mat4) -> bool {
-    let corners = [
-        Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z),
-        Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
-        Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
-        Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
-    ];
-    for plane in frustum.planes.iter() {
-        if corners
-            .iter()
-            .all(|corner| plane.distance(model_matrix.transform_point3(*corner)) < 0.0)
-        {
-            return false;
-        }
-    }
-    return true;
 }
