@@ -1,4 +1,5 @@
 use glam::Vec3;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 use crate::{camera::Camera, Medium, Terrain};
 
@@ -12,8 +13,8 @@ pub const ENTITY_MIN_Y: f32 = GROUND_Y + 2.0;
 
 #[derive(Debug)]
 pub struct Physics {
-    pub positions: Vec<Option<Position>>,
-    pub velocities: Vec<Option<Velocity>>,
+    positions: Vec<Option<Position>>,
+    velocities: Vec<Option<Velocity>>,
 }
 
 impl Physics {
@@ -23,8 +24,19 @@ impl Physics {
             velocities: Vec::new(),
         }
     }
-
-    fn resize(&mut self, size: usize) {
+    pub fn position(&self, entity: Entity) -> Option<&Position> {
+        self.positions.get(entity.0)?.as_ref()
+    }
+    pub fn positions(&self) -> &[Option<Position>] {
+        &self.positions
+    }
+    pub fn velocity(&self, entity: Entity) -> Option<&Velocity> {
+        self.velocities.get(entity.0)?.as_ref()
+    }
+    pub fn velocities(&self) -> &[Option<Velocity>] {
+        &self.velocities
+    }
+    pub fn resize(&mut self, size: usize) {
         self.positions.resize(size, None);
         self.velocities.resize(size, None);
     }
@@ -48,9 +60,10 @@ impl Physics {
 
     /// Physics tick: updates positions/velocities
     pub fn update(&mut self, camera: &Camera, dt: f64, terrain: &Terrain) {
-        let camera_pos = camera.eye();
+        const RAYON_PARALLEL_THRESHOLD: usize = 16384;
 
-        let medium = if camera.free_look() || camera_pos.y > GROUND_Y + 4.0 {
+        let camera_pos = camera.eye();
+        let medium = if camera_pos.y > GROUND_Y + 4.0 {
             Medium::Air
         } else {
             let pos = Vec3 {
@@ -60,29 +73,67 @@ impl Physics {
             };
             terrain.medium_at(pos)
         };
-        let medium_props = medium.properties();
 
+        let medium_props = medium.properties();
         let drag_factor = medium_props.drag.powf(dt as f32);
         let max_fall_speed = -50.0;
 
-        for (pos_opt, vel_opt) in self.positions.iter_mut().zip(&mut self.velocities) {
-            if let (Some(pos), Some(vel)) = (pos_opt, vel_opt) {
-                vel.0.x *= drag_factor;
-                vel.0.z *= drag_factor;
-                if vel.0.x.abs() < 0.01 {
-                    vel.0.x = 0.0;
-                }
-                if vel.0.z.abs() < 0.01 {
-                    vel.0.z = 0.0;
-                }
-                vel.0.y += medium_props.gravity.y * dt as f32;
-                vel.0.y = vel.0.y.max(max_fall_speed);
-                pos.0 += vel.0 * dt as f32;
+        let len = self.velocities.len();
 
-                if pos.0.y < ENTITY_MIN_Y {
-                    pos.0.y = ENTITY_MIN_Y;
-                    if vel.0.y < 0.0 {
-                        vel.0.y = 0.0;
+        let use_parallel = len >= RAYON_PARALLEL_THRESHOLD;
+
+        if use_parallel {
+            self.positions
+                .par_iter_mut()
+                .zip(self.velocities.par_iter_mut())
+                .for_each(|(pos_opt, vel_opt)| {
+                    if let (Some(pos), Some(vel)) = (pos_opt, vel_opt) {
+                        vel.0.x *= drag_factor;
+                        vel.0.z *= drag_factor;
+
+                        if vel.0.x.abs() < 0.01 {
+                            vel.0.x = 0.0;
+                        }
+                        if vel.0.z.abs() < 0.01 {
+                            vel.0.z = 0.0;
+                        }
+
+                        vel.0.y += medium_props.gravity.y * dt as f32;
+                        vel.0.y = vel.0.y.max(max_fall_speed);
+
+                        pos.0 += vel.0 * dt as f32;
+
+                        if pos.0.y < ENTITY_MIN_Y {
+                            pos.0.y = ENTITY_MIN_Y;
+                            if vel.0.y < 0.0 {
+                                vel.0.y = 0.0;
+                            }
+                        }
+                    }
+                });
+        } else {
+            for (pos_opt, vel_opt) in self.positions.iter_mut().zip(&mut self.velocities) {
+                if let (Some(pos), Some(vel)) = (pos_opt, vel_opt) {
+                    vel.0.x *= drag_factor;
+                    vel.0.z *= drag_factor;
+
+                    if vel.0.x.abs() < 0.01 {
+                        vel.0.x = 0.0;
+                    }
+                    if vel.0.z.abs() < 0.01 {
+                        vel.0.z = 0.0;
+                    }
+
+                    vel.0.y += medium_props.gravity.y * dt as f32;
+                    vel.0.y = vel.0.y.max(max_fall_speed);
+
+                    pos.0 += vel.0 * dt as f32;
+
+                    if pos.0.y < ENTITY_MIN_Y {
+                        pos.0.y = ENTITY_MIN_Y;
+                        if vel.0.y < 0.0 {
+                            vel.0.y = 0.0;
+                        }
                     }
                 }
             }

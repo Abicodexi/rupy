@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
-    camera::Camera, log_error, log_info, BindGroupManager, CacheKey, EngineError, Entity, Light,
-    Material, MaterialManager, Medium, ModelManager, PipelineManager, RenderBindGroupLayouts,
-    ShaderManager, Terrain, TextureManager, Time, WorldProjection,
+    camera::Camera, log_error, log_info, BindGroupManager, CacheKey, EngineError, Entity,
+    Environment, Light, Material, MaterialManager, Medium, ModelManager, PipelineManager,
+    RenderBindGroupLayouts, ShaderManager, Terrain, TextureManager, Time,
 };
 use glam::Vec3;
 use pollster::FutureExt;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 
 pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -32,15 +33,14 @@ fn _set_batch_dirty(val: bool) {
 
 #[derive(Debug)]
 pub struct World {
-    pub physics: Physics,
-    pub renderables: Vec<Option<Renderable>>,
-    pub rotations: Vec<Option<Rotation>>,
-    pub scales: Vec<Option<Scale>>,
-    pub transforms: Vec<Option<Transform>>,
-    projection: WorldProjection,
+    physics: Physics,
+    renderables: Vec<Option<Renderable>>,
+    rotations: Vec<Option<Rotation>>,
+    scales: Vec<Option<Scale>>,
+    transforms: Vec<Option<Transform>>,
+    environment: Environment,
     entity_count: usize,
-    pub terrain: Terrain,
-    pub light: Light,
+    terrain: Terrain,
     dirty: bool,
 }
 
@@ -56,34 +56,98 @@ impl World {
         log_info!("Starting world with entity count: {}", self.entity_count);
         _start_running();
     }
-    pub fn new(
-        projection: WorldProjection,
-        terrain: Terrain,
-        light: Light,
-    ) -> Result<Self, EngineError> {
+    pub fn new(environment: Environment, terrain: Terrain) -> Result<Self, EngineError> {
         Ok(Self {
             physics: Physics::new(),
             renderables: Vec::new(),
             rotations: Vec::new(),
             scales: Vec::new(),
             transforms: Vec::new(),
-            projection,
             entity_count: 0,
+            environment,
             terrain,
-            light,
             dirty: false,
         })
     }
     pub fn entity_count(&self) -> usize {
         self.entity_count
     }
-    pub fn set_projection(&mut self, projection: WorldProjection) {
-        self.projection = projection;
-    }
-    pub fn projection(&self) -> &WorldProjection {
-        &self.projection
+    // === Physics ===
+    pub fn physics(&self) -> &Physics {
+        &self.physics
     }
 
+    pub fn physics_mut(&mut self) -> &mut Physics {
+        &mut self.physics
+    }
+
+    // === Transforms ===
+    pub fn transform(&self, entity: Entity) -> Option<&Transform> {
+        self.transforms.get(entity.0)?.as_ref()
+    }
+
+    pub fn transforms(&self) -> &[Option<Transform>] {
+        &self.transforms
+    }
+
+    // === Rotations ===
+    pub fn rotation(&self, entity: Entity) -> Option<&Rotation> {
+        self.rotations.get(entity.0)?.as_ref()
+    }
+    pub fn rotations(&self) -> &[Option<Rotation>] {
+        &self.rotations
+    }
+    pub fn rotation_mut(&mut self, entity: Entity) -> Option<&mut Rotation> {
+        self.rotations.get_mut(entity.0)?.as_mut()
+    }
+
+    // === Scales ===
+    pub fn scale(&self, entity: Entity) -> Option<&Scale> {
+        self.scales.get(entity.0)?.as_ref()
+    }
+    pub fn scales(&self) -> &[Option<Scale>] {
+        &self.scales
+    }
+    pub fn scale_mut(&mut self, entity: Entity) -> Option<&mut Scale> {
+        self.scales.get_mut(entity.0)?.as_mut()
+    }
+
+    // === Positions ===
+    pub fn position(&self, entity: Entity) -> Option<&Position> {
+        self.physics.position(entity)
+    }
+    pub fn positions(&self) -> &[Option<Position>] {
+        &self.physics.positions()
+    }
+    pub fn velocity(&self, entity: Entity) -> Option<&Velocity> {
+        self.physics.velocity(entity)
+    }
+    pub fn velocities(&self) -> &[Option<Velocity>] {
+        &self.physics.velocities()
+    }
+    // === Renderables ===
+    pub fn renderable(&self, entity: Entity) -> Option<&Renderable> {
+        self.renderables.get(entity.0)?.as_ref()
+    }
+
+    pub fn renderables(&self) -> &[Option<Renderable>] {
+        &self.renderables
+    }
+
+    // === Terrain ===
+    pub fn terrain(&self) -> &Terrain {
+        &self.terrain
+    }
+
+    pub fn terrain_mut(&mut self) -> &mut Terrain {
+        &mut self.terrain
+    }
+    pub fn environment(&self) -> &Environment {
+        &self.environment
+    }
+    pub fn environment_mut(&mut self) -> &mut Environment {
+        &mut self.environment
+    }
     pub fn insert_object(
         &mut self,
         renderable: Renderable,
@@ -157,8 +221,7 @@ impl World {
         Entity(id)
     }
     fn resize(&mut self, size: usize) {
-        self.physics.positions.resize(size, None);
-        self.physics.velocities.resize(size, None);
+        self.physics.resize(size);
         self.renderables.resize(size, None);
         self.rotations.resize(size, None);
         self.scales.resize(size, None);
@@ -166,8 +229,8 @@ impl World {
     }
     fn ensure_capacity(&mut self, idx: usize) {
         let needed = idx + 1;
-        if self.physics.positions.len() < needed
-            || self.physics.velocities.len() < needed
+        if self.physics.positions().len() < needed
+            || self.physics.velocities().len() < needed
             || self.rotations.len() < needed
             || self.renderables.len() < needed
             || self.scales.len() < needed
@@ -206,15 +269,18 @@ impl World {
     }
 
     pub fn update_transforms(&mut self) {
-        for i in 0..self.entity_count {
-            if let (Some(pos), Some(rot), Some(scale)) = (
-                self.physics.positions[i].as_ref(),
-                self.rotations[i].as_ref(),
-                self.scales[i].as_ref(),
-            ) {
-                self.transforms[i] = Some(Transform::from_components(pos, rot, scale));
-            }
-        }
+        self.transforms
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, transform)| {
+                if let (Some(pos), Some(rot), Some(scale)) = (
+                    self.physics.positions()[i].as_ref(),
+                    self.rotations[i].as_ref(),
+                    self.scales[i].as_ref(),
+                ) {
+                    *transform = Some(Transform::from_components(pos, rot, scale));
+                }
+            });
     }
 
     pub fn generate_terrain(
@@ -234,15 +300,16 @@ impl World {
         self.insert_renderable(entity, component);
         Ok(())
     }
+
     pub fn light(&self) -> &Light {
-        &self.light
+        self.environment.light()
     }
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
         if self.dirty {
-            self.light.upload(queue, device);
+            self.environment.upload_light(queue, device);
             self.dirty = false;
         }
     }
@@ -255,17 +322,16 @@ impl World {
         bossman: Entity,
     ) {
         let dt = time.delta_time;
+        self.environment.compute_sky_projection(queue, device);
 
-        self.projection
-            .compute_projection(queue, device, Some("Equirect Projection Pass"));
         let view_distance = 1;
 
         let camera_pos = camera.eye();
 
         if let Some(cam_entity) = camera.entity() {
             if let (Some(cam_pos), Some(boss_pos)) = (
-                self.physics.positions[cam_entity.0],
-                self.physics.positions[bossman.0],
+                self.physics.position(cam_entity),
+                self.physics.position(bossman),
             ) {
                 let direction = cam_pos.0 - boss_pos.0;
                 let mut direction_normalized = direction.normalize_or_zero();
@@ -277,7 +343,8 @@ impl World {
                 self.insert_velocity(bossman, Velocity(velocity));
             }
         }
-        self.light.orbit(time.elapsed);
+
+        self.environment.update_light(dt);
         self.physics.update(camera, dt, &self.terrain);
         self.update_transforms();
         self.terrain.update_streaming(camera_pos, view_distance);

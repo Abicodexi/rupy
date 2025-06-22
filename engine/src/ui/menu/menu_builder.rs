@@ -1,7 +1,6 @@
-use std::sync::Arc;
-
 use crate::{
-    container::UiContainer, menu::Menu, menu_button::MenuButton, menu_element::MenuElement,
+    container::UiContainer,
+    menu::{menu_button::MenuButton, menu_element::MenuElement, Menu},
     AssetLoader, AssetService, BindGroup, Dispatch, EngineError, Texture, UiElements,
 };
 

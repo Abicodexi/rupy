@@ -1,11 +1,11 @@
+use crate::{
+    AssetLoader, AssetService, BindGroup, CacheKey, EngineError, Light, Medium, Terrain, Texture,
+    WgpuBuffer,
+};
 use std::sync::Arc;
 
-use crate::{
-    AssetLoader, AssetService, BindGroup, CacheKey, EngineError, RenderBindGroupLayouts, Texture,
-};
-
 #[derive(Debug)]
-pub struct WorldProjection {
+pub struct SkyProjection {
     pub src_texture: Arc<Texture>,
     pub dst_texture: Arc<Texture>,
     pub src_pipeline: Arc<wgpu::ComputePipeline>,
@@ -14,7 +14,7 @@ pub struct WorldProjection {
     pub dst_bind_group: Arc<wgpu::BindGroup>,
 }
 
-impl WorldProjection {
+impl SkyProjection {
     pub const DEST_SIZE: u32 = 1080;
     pub const NUM_WORKGROUPS: u32 = (Self::DEST_SIZE + 15) / 16;
     pub const DEPTH_OR_ARRAY_LAYERS: u32 = 6;
@@ -155,7 +155,7 @@ impl WorldProjection {
             )
             .unwrap();
 
-        Ok(WorldProjection {
+        Ok(SkyProjection {
             src_texture,
             dst_texture,
             dst_pipeline,
@@ -193,19 +193,83 @@ impl WorldProjection {
         rpass.draw(0..3, 0..1);
     }
 }
+
 #[derive(Debug)]
 pub struct Environment {
-    wp: WorldProjection,
+    sky: SkyProjection,
+    terrain: Terrain,
+    light: Light,
 }
 
 impl Environment {
-    pub fn new(wp: WorldProjection) -> Self {
-        Self { wp }
+    pub fn new(
+        service: &AssetService,
+        config: &wgpu::SurfaceConfiguration,
+        src_shader: &str,
+        dst_shader: &str,
+        hdr_texture: &str,
+    ) -> Result<Self, EngineError> {
+        let sky = SkyProjection::new(service, config, src_shader, dst_shader, hdr_texture)?;
+        let light = Light::new(service.device(), service.bind_group_layouts())?;
+        let terrain = Terrain::new(Medium::Ground);
+
+        Ok(Self {
+            sky,
+            light,
+            terrain,
+        })
     }
-    pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
-        self.wp.render(rpass, uniform_bind_group);
+
+    pub fn render_skybox(&self, rpass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
+        self.sky.render(rpass, camera_bind_group);
     }
-    pub fn projection(&self) -> &WorldProjection {
-        &self.wp
+
+    pub fn compute_sky_projection(&self, queue: &wgpu::Queue, device: &wgpu::Device) {
+        self.sky
+            .compute_projection(queue, device, Some("compute sky projection"));
+    }
+
+    pub fn sky_texture(&self) -> &Arc<Texture> {
+        &self.sky.dst_texture
+    }
+
+    pub fn update_light(&mut self, time: f64) {
+        self.light.orbit(time);
+    }
+
+    pub fn upload_light(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
+        self.light.upload(queue, device);
+    }
+
+    pub fn light_bind_group(&self) -> &wgpu::BindGroup {
+        self.light.bind_group()
+    }
+
+    pub fn light_buffer(&self) -> &WgpuBuffer {
+        self.light.buffer()
+    }
+
+    pub fn light(&self) -> &Light {
+        &self.light
+    }
+
+    pub fn light_mut(&mut self) -> &mut Light {
+        &mut self.light
+    }
+
+    pub fn terrain(&self) -> &Terrain {
+        &self.terrain
+    }
+
+    pub fn terrain_mut(&mut self) -> &mut Terrain {
+        &mut self.terrain
+    }
+
+    pub fn sky_projection(&self) -> &SkyProjection {
+        &self.sky
+    }
+
+    pub fn sky_projection_mut(&mut self) -> &mut SkyProjection {
+        &mut self.sky
     }
 }

@@ -1,12 +1,11 @@
 use {
-    super::{RenderPass, VertexInstance, AABB},
+    super::{RenderPass, VertexInstance},
     crate::{
-        camera::{self, Frustum},
+        camera::{self},
         create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
         EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation,
         Scale, Texture, Transform, WgpuBuffer, World,
     },
-    glam::{Mat4, Vec3},
     rayon::iter::{IntoParallelRefIterator, ParallelIterator},
     std::{
         hash::{DefaultHasher, Hash, Hasher},
@@ -57,19 +56,29 @@ impl Renderer3d {
     }
 
     pub fn compute_pass(&self, world: &World, queue: &wgpu::Queue, device: &wgpu::Device) {
-        let projection = world.projection();
-        projection.compute_projection(queue, device, Some("equirect projection compute pass"));
+        world.environment().sky_projection().compute_projection(
+            queue,
+            device,
+            Some("equirect projection compute pass"),
+        );
     }
     pub fn final_blit_to_surface(
         &self,
-        device: &wgpu::Device,
-        bind_group_layouts: &RenderBindGroupLayouts,
+        service: &AssetService,
         encoder: &mut wgpu::CommandEncoder,
         hdr_texture: &Texture,
         surface_view: &wgpu::TextureView,
-    ) {
-        let bind_group = BindGroup::hdr(&device, bind_group_layouts, hdr_texture, "final blit");
-
+    ) -> Result<(), EngineError> {
+        let bind_group_key = CacheKey::from(hdr_texture.label.clone());
+        let bind_group = service.get_or_create_bind_group(bind_group_key, || {
+            Ok(BindGroup::hdr(
+                service.device(),
+                service.bind_group_layouts(),
+                hdr_texture,
+                "final blit",
+            )
+            .into())
+        })?;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Final Blit to Surface"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -86,8 +95,9 @@ impl Renderer3d {
         });
 
         pass.set_pipeline(&self.hdr_pipeline);
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_bind_group(0, bind_group.as_ref(), &[]);
         pass.draw(0..3, 0..1);
+        Ok(())
     }
 
     pub fn hdr(
@@ -125,7 +135,7 @@ impl RenderPass for Renderer3d {
         uniform_bind_group: &wgpu::BindGroup,
         debug_mode: &DebugMode,
     ) {
-        let projection = world.projection();
+        let projection = world.environment().sky_projection();
 
         rpass.set_bind_group(0, uniform_bind_group, &[]);
         rpass.set_bind_group(1, projection.dst_bind_group.as_ref(), &[]);
@@ -138,12 +148,12 @@ impl RenderPass for Renderer3d {
             .draw(rpass, models, debug_mode, uniform_bind_group);
 
         {
-            for instance in world.terrain.mesh_instances() {
+            for instance in world.terrain().mesh_instances() {
                 let Some(mat) = instance.material.as_ref() else {
                     continue;
                 };
 
-                let Some(instance_buffer) = world.terrain.instance_buffer() else {
+                let Some(instance_buffer) = world.terrain().instance_buffer() else {
                     continue;
                 };
 
@@ -234,18 +244,18 @@ impl InstanceBuffers {
         let default_rotation = Rotation::zero();
 
         for idx in 0..world.entity_count() {
-            let Some(renderable) = &world.renderables[idx] else {
+            let Some(renderable) = &world.renderables()[idx] else {
                 continue;
             };
             if !renderable.visible {
                 continue;
             }
 
-            let Some(position) = &world.physics.positions[idx] else {
+            let Some(position) = &world.physics().positions()[idx] else {
                 continue;
             };
-            let rotation = world.rotations[idx].as_ref().unwrap_or(&default_rotation);
-            let scale = world.scales[idx].as_ref().unwrap_or(&default_scale);
+            let rotation = world.rotations()[idx].as_ref().unwrap_or(&default_rotation);
+            let scale = world.scales()[idx].as_ref().unwrap_or(&default_scale);
 
             let transform = Transform::from_components(position, rotation, scale);
 

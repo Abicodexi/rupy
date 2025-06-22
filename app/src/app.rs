@@ -3,12 +3,11 @@ use engine::{
     asset_service,
     camera::{Camera, Projection},
     debug_scene, log_error, log_info, log_warning,
-    menu::Menu,
-    menu_element::MenuElement,
+    menu::{menu_element::MenuElement, Menu},
     ApplicationEvent, AssetRequest, AssetService, BindGroup, CacheKey, DebugMode, Dispatch,
-    EngineError, Entity, FrameBuffer, GlyphonTextRenderer, Light, Medium, Position, RenderPass,
-    RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner, SurfaceExt,
-    Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World, WorldProjection, GPU,
+    EngineError, Entity, Environment, FrameBuffer, GlyphonTextRenderer, Medium, Position,
+    RenderPass, RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner,
+    SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World, GPU,
 };
 use glam::Vec3;
 use std::sync::Arc;
@@ -118,29 +117,27 @@ impl Rupy {
         let render3d = Renderer3d::new(service, &surface_config)?;
         let render2d = Renderer2d::new(device)?;
 
-        let world_projection = WorldProjection::new(
-            &service,
+        let terrain = Terrain::new(Medium::Ground);
+
+        let environment = Environment::new(
+            service,
             &surface_config,
             "equirect_src.wgsl",
             "equirect_dst.wgsl",
             "pure-sky.hdr",
         )?;
 
-        let terrain = Terrain::new(Medium::Ground);
-        let light = Light::new(service.device(), service.bind_group_layouts())?;
-
+        let mut world = World::new(environment, terrain)?;
         let uniform_bind_group = service.get_or_create_bind_group("uniform".into(), || {
             Ok(BindGroup::uniform(
                 device,
                 service.bind_group_layouts(),
                 camera.buffer(),
-                light.buffer(),
+                world.light().buffer(),
             )
             .into())
         })?;
-
-        let mut world = World::new(world_projection, terrain, light)?;
-        let debug_mode = DebugMode::new(service, &camera, &world.light, &surface_config)?;
+        let debug_mode = DebugMode::new(service, &camera, &world.light(), &surface_config)?;
 
         let bossman = debug_scene(
             &asset_tx,
@@ -231,14 +228,6 @@ impl Rupy {
             PhysicalKey::Code(KeyCode::Tab) => {
                 self.dispatch(Dispatch::Event(ApplicationEvent::ToggleFullscreen))
             }
-            PhysicalKey::Code(KeyCode::Numpad1) => {
-                let new_speed = (self.world.light().speed() + 0.1).clamp(0.1, 1.5);
-                self.world.light.set_speed(new_speed);
-            }
-            PhysicalKey::Code(KeyCode::Numpad2) => {
-                let new_speed = (self.world.light().speed() - 0.1).clamp(0.1, 1.5);
-                self.world.light.set_speed(new_speed);
-            }
             PhysicalKey::Code(KeyCode::KeyP) => self.next_debug_mode(),
             PhysicalKey::Code(KeyCode::Escape) => {
                 self.dispatch(Dispatch::Event(ApplicationEvent::Shutdown))
@@ -325,30 +314,19 @@ impl Rupy {
         }
         while self.time.consume_accumulator(Time::TIME_STEP) {
             if World::running() {
-                self.world.update(
-                    self.service.queue(),
-                    self.service.device(),
-                    &self.time,
-                    &self.camera,
-                    self.bossman,
-                );
                 if let Some(cam_ent) = self.camera.entity() {
                     let player_pos: Vec3 = self
                         .world
-                        .physics
-                        .positions
-                        .get(cam_ent.0)
-                        .and_then(|p| *p)
-                        .unwrap_or(Position::origin())
+                        .physics()
+                        .position(cam_ent)
+                        .unwrap_or(&Position::origin())
                         .0;
 
                     let prev_velocity = self
                         .world
-                        .physics
-                        .velocities
-                        .get(cam_ent.0)
-                        .and_then(|v| *v)
-                        .unwrap_or(Velocity(Vec3::ZERO))
+                        .physics()
+                        .velocity(cam_ent)
+                        .unwrap_or(&Velocity(Vec3::ZERO))
                         .0;
                     if let Some(cam_update) = self.camera.update(
                         &self.projection,
@@ -365,6 +343,13 @@ impl Rupy {
                         }
                     }
                 }
+                self.world.update(
+                    self.service.queue(),
+                    self.service.device(),
+                    &self.time,
+                    &self.camera,
+                    self.bossman,
+                );
                 if let Ok(models) = self.service.models() {
                     self.render3d.instances.update(
                         self.service.device(),
@@ -457,13 +442,14 @@ impl Rupy {
         }
 
         if let Some(hdr_fb) = self.render_targets.get(&RenderTargetKind::Hdr) {
-            self.render3d.final_blit_to_surface(
-                self.service.device(),
-                self.service.bind_group_layouts(),
+            if let Err(e) = self.render3d.final_blit_to_surface(
+                &self.service,
                 &mut encoder,
                 hdr_fb.color(),
                 &surface_view,
-            );
+            ) {
+                log_error!("Error rendering final blit to surface: {}", e.to_string());
+            };
         }
 
         let mut rpass2d = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

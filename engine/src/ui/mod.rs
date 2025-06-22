@@ -1,10 +1,7 @@
-use crate::{menu_element::MenuElement, Dispatch, GlyphonTextRenderer, Renderer2d};
+use crate::{menu::menu_element::MenuElement, Dispatch, GlyphonTextRenderer, Renderer2d};
 
 pub mod container;
 pub mod menu;
-pub mod menu_builder;
-pub mod menu_button;
-pub mod menu_element;
 
 #[derive(Debug, Clone)]
 pub enum UiEvent {

@@ -77,7 +77,7 @@ pub fn debug_scene(
     world.insert_position(bossman, Position::new(4.5, 5.5, 5.0));
     world.insert_renderable(bossman, goblin_key.into());
 
-    let size = 10;
+    let size = 40;
     let wall_height = 15;
     let wall_y_offset = 0.0;
     let cube_obj = "cube.obj";
@@ -112,8 +112,8 @@ pub fn debug_scene(
         .ok();
 
     let above_ground = GROUND_Y + 1.0;
-    for x in 0..(size + 10) {
-        for z in 0..(size + 10) {
+    for x in 0..(size + 20) {
+        for z in 0..(size + 20) {
             let entity = world.spawn();
 
             world.insert_scale(entity, Scale::new(0.5, 0.5, 0.5));
