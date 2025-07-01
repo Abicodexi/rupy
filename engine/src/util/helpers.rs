@@ -1,8 +1,8 @@
 use crossbeam::channel::Sender;
 
 use crate::{
-    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Scale, Texture, World,
-    GROUND_Y,
+    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Renderable, Scale, Texture,
+    World, GROUND_Y,
 };
 
 pub enum ScreenCorner {
@@ -72,12 +72,45 @@ pub fn debug_scene(
             depth_stencil: Some(depth_stencil.clone()),
         })
         .ok();
+    let renderable = Renderable::new(vec![
+        CacheKey::from("Cube.001_0"),
+        CacheKey::from("BezierCircle_0"),
+        CacheKey::from("Cylinder.008_0"),
+        CacheKey::from("Cylinder.008_1"),
+        CacheKey::from("Cylinder.003_0"),
+        CacheKey::from("Cylinder.003_1"),
+        CacheKey::from("Cylinder.005_0"),
+        CacheKey::from("Cylinder.005_1"),
+        CacheKey::from("Cylinder.007_0"),
+        CacheKey::from("Cylinder.001_0"),
+        CacheKey::from("Cylinder.004_0"),
+        CacheKey::from("Cube.010_0"),
+        CacheKey::from("Cube.008_0"),
+        CacheKey::from("Cube.006_0"),
+        CacheKey::from("Cube.015_0"),
+        CacheKey::from("Cylinder.006_0"),
+        CacheKey::from("Cylinder.016_0"),
+        CacheKey::from("Cylinder.016_1"),
+        CacheKey::from("Cylinder.002_0"),
+        CacheKey::from("Cylinder.002_1"),
+        CacheKey::from("Cylinder.014_0"),
+        CacheKey::from("Cylinder.014_1"),
+        CacheKey::from("Cube.020_0"),
+        CacheKey::from("Cube.021_0"),
+        CacheKey::from("Cube.022_0"),
+        CacheKey::from("Cylinder.012_0"),
+        CacheKey::from("Cylinder.012_1"),
+        CacheKey::from("Cylinder.011_0"),
+        CacheKey::from("Cube.019_0"),
+    ]);
 
-    world.insert_scale(bossman, Scale::new(10.0, 10.0, 10.0));
+    world.insert_scale(bossman, Scale::new(0.1, 0.1, 0.1));
     world.insert_position(bossman, Position::new(4.5, 5.5, 5.0));
-    world.insert_renderable(bossman, goblin_key.into());
+    // world.insert_renderable(bossman, goblin_key.into());
 
-    let size = 40;
+    world.insert_renderable(bossman, renderable);
+
+    let size = 10;
     let wall_height = 15;
     let wall_y_offset = 0.0;
     let cube_obj = "cube.obj";

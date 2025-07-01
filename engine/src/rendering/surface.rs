@@ -5,8 +5,8 @@ pub trait SurfaceExt {
         &self,
         device: &wgpu::Device,
         config: &mut wgpu::SurfaceConfiguration,
-        width: f32,
-        height: f32,
+        width: u32,
+        height: u32,
     );
 
     /// Configures the surface using the provided device and configuration.
@@ -24,11 +24,11 @@ impl<'a> SurfaceExt for wgpu::Surface<'a> {
         &self,
         device: &wgpu::Device,
         config: &mut wgpu::SurfaceConfiguration,
-        width: f32,
-        height: f32,
+        width: u32,
+        height: u32,
     ) {
-        config.width = width.max(1.0) as u32;
-        config.height = height.max(1.0) as u32;
+        config.width = width.max(1);
+        config.height = height.max(1);
         self.configure(device, config);
     }
 

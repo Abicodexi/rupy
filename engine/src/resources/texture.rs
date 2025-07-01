@@ -324,7 +324,7 @@ impl Texture {
 
         for (layer, img) in images.iter().enumerate() {
             queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d {
@@ -335,7 +335,7 @@ impl Texture {
                     aspect: wgpu::TextureAspect::All,
                 },
                 img,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * width),
                     rows_per_image: Some(height),
@@ -396,6 +396,91 @@ impl TextureManager {
             self.insert_resource(tex_key, tex.into());
         }
         Ok(())
+    }
+    pub fn load_embedded_image(
+        &mut self,
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        image: &gltf::image::Data,
+        label: &str,
+    ) -> Result<Arc<Texture>, EngineError> {
+        let key = CacheKey::from(label.to_string());
+        if let Some(tex) = self.get_resource(&key) {
+            return Ok(tex.clone());
+        }
+
+        let rgba = match image.format {
+            gltf::image::Format::R8G8B8A8 => image.pixels.clone(),
+            gltf::image::Format::R8G8B8 => {
+                // Expand RGB to RGBA
+                image
+                    .pixels
+                    .chunks(3)
+                    .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
+                    .collect()
+            }
+            other => {
+                return Err(EngineError::AssetLoadError(format!(
+                    "Unsupported glTF image format: {:?}",
+                    other
+                )));
+            }
+        };
+
+        let size = wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * image.width),
+                rows_per_image: Some(image.height),
+            },
+            size,
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let texture = Arc::new(Texture {
+            texture,
+            view,
+            sampler,
+            label: label.to_string(),
+        });
+
+        self.insert_resource(key.clone(), texture.clone());
+        Ok(texture)
     }
     pub fn load(
         &mut self,

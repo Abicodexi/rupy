@@ -44,7 +44,11 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                         app.handle_key(event.physical_key);
                     }
                 }
-                WindowEvent::RedrawRequested => return app.redraw(),
+                WindowEvent::RedrawRequested => {
+                    app.update();
+                    app.upload();
+                    app.redraw();
+                }
                 _ => {}
             }
 
@@ -52,8 +56,8 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                 app.set_projection(new_proj);
             }
 
-            app.handle_menu_toggle(&event);
             app.camera.process(&event);
+            app.handle_menu_toggle(&event);
         }
     }
 
@@ -87,11 +91,10 @@ impl winit::application::ApplicationHandler<ApplicationEvent> for ApplicationSta
                         return;
                     }
                     if app.window.fullscreen().is_some() {
-                        app.window.set_cursor_visible(true);
                         app.window.set_fullscreen(None);
                     } else {
                         let fs = Fullscreen::Borderless(app.window.current_monitor());
-                        app.window.set_fullscreen(Some(fs))
+                        app.window.set_fullscreen(Some(fs));
                     }
                 }
             }

@@ -175,7 +175,7 @@ impl Terrain {
                 self.mesh_instances.push(mesh_instance);
             }
         }
-        let renderable = Renderable::new(terrain_mat.into());
+        let renderable = Renderable::new(vec![terrain_mat.into()]);
 
         Ok(renderable)
     }

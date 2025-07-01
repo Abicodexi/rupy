@@ -11,8 +11,10 @@ pub const W: usize = 0;
 pub const A: usize = 1;
 pub const S: usize = 2;
 pub const D: usize = 3;
-pub const J: usize = 4;
-pub const WASDJ: [usize; 5] = [W, A, S, D, J];
+pub const JUMP: usize = 4;
+pub const Q: usize = 5;
+pub const E: usize = 6;
+pub const WASDJ: [usize; 7] = [W, A, S, D, JUMP, Q, E];
 
 #[derive(Debug)]
 struct MouseState {
@@ -51,6 +53,8 @@ pub struct CameraControls {
     back: bool,
     left: bool,
     right: bool,
+    up: bool,
+    down: bool,
     jump: bool,
 
     last_mouse: Option<Vec2>,
@@ -71,6 +75,8 @@ impl CameraControls {
             left: false,
             right: false,
             jump: false,
+            up: false,
+            down: false,
             last_mouse: None,
             mouse_left: MouseState::new(),
             mouse_right: MouseState::new(),
@@ -117,6 +123,14 @@ impl CameraControls {
                     }
                     PhysicalKey::Code(KeyCode::Space) => {
                         self.jump = pressed;
+                        true
+                    }
+                    PhysicalKey::Code(KeyCode::KeyQ) => {
+                        self.down = pressed;
+                        true
+                    }
+                    PhysicalKey::Code(KeyCode::KeyE) => {
+                        self.up = pressed;
                         true
                     }
                     _ => false,
@@ -171,8 +185,16 @@ impl CameraControls {
         }
     }
 
-    pub fn input_flags(&self) -> [bool; 5] {
-        [self.forward, self.left, self.back, self.right, self.jump]
+    pub fn input_flags(&self) -> [bool; 7] {
+        [
+            self.forward,
+            self.left,
+            self.back,
+            self.right,
+            self.jump,
+            self.down,
+            self.up,
+        ]
     }
 
     pub fn reset_mouse(&mut self) {

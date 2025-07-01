@@ -90,6 +90,7 @@ impl CameraModel {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
+
         service.load_model(
             file.to_string(),
             v_shader.to_string(),

@@ -42,41 +42,36 @@ impl MeshAsset {
 
         (vertex_buffer, index_buffer, index_count)
     }
-    pub fn compute_vertex(m: &tobj::Model) -> Vec<Vertex> {
-        use std::iter::repeat;
+    pub fn compute_vertex(
+        positions: &[[f32; 3]],
+        normals: &[[f32; 3]],
+        tex_coords: &[[f32; 2]],
+        indices: &[u32],
+        vertex_colors: Option<&[[f32; 3]]>,
+    ) -> Vec<Vertex> {
+        let num_vertices = positions.len();
+        let mut vertices = Vec::with_capacity(num_vertices);
 
-        let mesh = &m.mesh;
+        // Build initial vertex buffer with placeholder tangents
+        for i in 0..num_vertices {
+            vertices.push(Vertex {
+                position: positions[i],
+                normal: *normals.get(i).unwrap_or(&[0.0, 0.0, 1.0]),
+                tex_coords: *tex_coords.get(i).unwrap_or(&[0.0, 0.0]),
+                tangent: [0.0; 3],
+                color: vertex_colors
+                    .and_then(|c| c.get(i).copied())
+                    .unwrap_or([1.0, 1.0, 1.0]),
+            });
+        }
 
-        let mut vertices: Vec<Vertex> = {
-            let positions = mesh.positions.chunks(3);
-            let uvs = mesh.texcoords.chunks(2).chain(repeat(&[0.0, 0.0][..]));
-            let norms = mesh.normals.chunks(3).chain(repeat(&[0.0, 0.0, 1.0][..]));
-            let cols = mesh
-                .vertex_color
-                .chunks(3)
-                .chain(repeat(&[1.0, 1.0, 1.0][..]));
+        // Initialize tangent accumulators
+        let mut accum_normals = vec![[0.0f32; 3]; num_vertices];
+        let mut accum_tangents = vec![[0.0f32; 3]; num_vertices];
+        let mut accum_bitangents = vec![[0.0f32; 3]; num_vertices];
 
-            positions
-                .zip(uvs)
-                .zip(norms)
-                .zip(cols)
-                .map(|(((pos, uv), nrm), col)| Vertex {
-                    position: [pos[0], pos[1], pos[2]],
-                    tex_coords: [uv[0], uv[1]],
-                    normal: [nrm[0], nrm[1], nrm[2]],
-                    tangent: [0.0; 3],
-                    color: [col[0], col[1], col[2]],
-                })
-                .collect()
-        };
-
-        // Accumulators
-        let mut accum_normals = vec![[0.0f32; 3]; vertices.len()];
-        let mut accum_tangents = vec![[0.0f32; 3]; vertices.len()];
-        let mut accum_bitangents = vec![[0.0f32; 3]; vertices.len()];
-
-        for idx in mesh.indices.chunks(3) {
-            let [i0, i1, i2] = [idx[0] as usize, idx[1] as usize, idx[2] as usize];
+        for tri in indices.chunks_exact(3) {
+            let [i0, i1, i2] = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
 
             let v0 = vertices[i0].position;
             let v1 = vertices[i1].position;
@@ -86,14 +81,13 @@ impl MeshAsset {
             let uv1 = vertices[i1].tex_coords;
             let uv2 = vertices[i2].tex_coords;
 
-            // compute edges & UV deltas
             let edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
             let edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
             let duv1 = [uv1[0] - uv0[0], uv1[1] - uv0[1]];
             let duv2 = [uv2[0] - uv0[0], uv2[1] - uv0[1]];
-            let r = 1.0 / (duv1[0] * duv2[1] - duv1[1] * duv2[0]);
 
-            // tangent & bitangent
+            let r = 1.0 / (duv1[0] * duv2[1] - duv1[1] * duv2[0]).max(1e-6);
+
             let tangent = [
                 r * (duv2[1] * edge1[0] - duv1[1] * edge2[0]),
                 r * (duv2[1] * edge1[1] - duv1[1] * edge2[1]),
@@ -105,54 +99,48 @@ impl MeshAsset {
                 r * (-duv2[0] * edge1[2] + duv1[0] * edge2[2]),
             ];
 
-            // face normal
-            let n_unnorm = [
-                edge1[1] * edge2[2] - edge1[2] * edge2[1],
-                edge1[2] * edge2[0] - edge1[0] * edge2[2],
-                edge1[0] * edge2[1] - edge1[1] * edge2[0],
-            ];
-            let len =
-                (n_unnorm[0] * n_unnorm[0] + n_unnorm[1] * n_unnorm[1] + n_unnorm[2] * n_unnorm[2])
-                    .sqrt()
-                    .max(1e-6);
-            let normal = [n_unnorm[0] / len, n_unnorm[1] / len, n_unnorm[2] / len];
+            let face_normal = {
+                let n = [
+                    edge1[1] * edge2[2] - edge1[2] * edge2[1],
+                    edge1[2] * edge2[0] - edge1[0] * edge2[2],
+                    edge1[0] * edge2[1] - edge1[1] * edge2[0],
+                ];
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
+                [n[0] / len, n[1] / len, n[2] / len]
+            };
 
-            // corners
             for &i in &[i0, i1, i2] {
                 accum_normals[i]
                     .iter_mut()
-                    .zip(normal.iter())
-                    .for_each(|(a, &b)| *a += b);
+                    .zip(face_normal)
+                    .for_each(|(a, b)| *a += b);
                 accum_tangents[i]
                     .iter_mut()
-                    .zip(tangent.iter())
-                    .for_each(|(a, &b)| *a += b);
+                    .zip(tangent)
+                    .for_each(|(a, b)| *a += b);
                 accum_bitangents[i]
                     .iter_mut()
-                    .zip(bitangent.iter())
-                    .for_each(|(a, &b)| *a += b);
+                    .zip(bitangent)
+                    .for_each(|(a, b)| *a += b);
             }
         }
 
-        // Normalize + orthogonalize
+        // Normalize and orthogonalize
         for (i, v) in vertices.iter_mut().enumerate() {
-            // normalize normal
             let n = {
-                let nn = accum_normals[i];
-                let l = (nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2])
-                    .sqrt()
-                    .max(1e-6);
-                [nn[0] / l, nn[1] / l, nn[2] / l]
+                let n = accum_normals[i];
+                let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
+                [n[0] / len, n[1] / len, n[2] / len]
             };
-            // orthogonalize tangent to n, then normalize
+
             let t = {
-                let tt = accum_tangents[i];
-                let dot = n[0] * tt[0] + n[1] * tt[1] + n[2] * tt[2];
-                let ortho = [tt[0] - n[0] * dot, tt[1] - n[1] * dot, tt[2] - n[2] * dot];
-                let l = (ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2])
+                let t = accum_tangents[i];
+                let dot = n[0] * t[0] + n[1] * t[1] + n[2] * t[2];
+                let ortho = [t[0] - n[0] * dot, t[1] - n[1] * dot, t[2] - n[2] * dot];
+                let len = (ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2])
                     .sqrt()
                     .max(1e-6);
-                [ortho[0] / l, ortho[1] / l, ortho[2] / l]
+                [ortho[0] / len, ortho[1] / len, ortho[2] / len]
             };
 
             v.normal = n;

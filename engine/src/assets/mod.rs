@@ -28,7 +28,6 @@ pub enum AssetRequest {
     LoadModelAsset {
         bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
         asset: crate::ModelAsset,
-        format: wgpu::TextureFormat,
     },
     LoadMaterial {
         bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
@@ -42,7 +41,6 @@ pub enum AssetRequest {
     LoadMaterialAsset {
         bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
         asset: crate::MaterialAsset,
-        format: wgpu::TextureFormat,
     },
     LoadRenderPipeline {
         layout: wgpu::PipelineLayout,

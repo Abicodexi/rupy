@@ -401,7 +401,6 @@ impl AssetService {
             self.shaders.write(),
             self.bind_groups.write(),
         ) {
-            let format = color_target.format.clone();
             if let Err(e) = materials.load_tobj_sync(
                 &self.queue,
                 &self.device,
@@ -416,7 +415,6 @@ impl AssetService {
                 &f_shader,
                 primitive,
                 color_target,
-                format,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                 depth_stencil,
             ) {
@@ -452,7 +450,6 @@ impl AssetService {
             self.shaders.write(),
             self.bind_groups.write(),
         ) {
-            let format = color_target.format.clone();
             if let Err(e) = materials
                 .load_tobj_async(
                     &self.queue,
@@ -468,7 +465,6 @@ impl AssetService {
                     &f_shader,
                     primitive,
                     color_target,
-                    format,
                     &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                     depth_stencil,
                 )
@@ -486,7 +482,6 @@ impl AssetService {
         layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
-        format: wgpu::TextureFormat,
     ) {
         let asset_name = asset.name.clone();
 
@@ -513,7 +508,6 @@ impl AssetService {
                 layouts,
                 bind_group_layouts,
                 asset,
-                format,
                 buffers,
             ) {
                 log_error!("{}", e.to_string());
@@ -526,7 +520,6 @@ impl AssetService {
         &self,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
-        format: wgpu::TextureFormat,
         buffers: &[VertexBufferLayout<'_>],
     ) {
         let asset_name = asset.name.clone();
@@ -555,7 +548,6 @@ impl AssetService {
                     self.bind_group_layouts(),
                     bind_group_layouts,
                     asset,
-                    format,
                     buffers,
                 )
                 .await
@@ -591,7 +583,54 @@ impl AssetService {
             self.shaders.write(),
             self.bind_groups.write(),
         ) {
-            if let Err(e) = pollster::FutureExt::block_on(models.load(
+            if let Err(e) = pollster::FutureExt::block_on(models.load_obj(
+                &self.queue,
+                &self.device,
+                &mut materials,
+                &mut textures,
+                &mut shaders,
+                &mut pipelines,
+                &mut bind_groups,
+                self.bind_group_layouts(),
+                &file,
+                &v_shader,
+                &f_shader,
+                &[Vertex::LAYOUT, VertexInstance::LAYOUT],
+                bind_group_layouts,
+                primitive,
+                color_target,
+                depth_stencil,
+            )) {
+                log_error!("{}", e.to_string());
+            }
+        }
+    }
+    pub fn load_gltf(
+        &self,
+        file: String,
+        v_shader: String,
+        f_shader: String,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        primitive: wgpu::PrimitiveState,
+        color_target: wgpu::ColorTargetState,
+        depth_stencil: Option<wgpu::DepthStencilState>,
+    ) {
+        if let (
+            Ok(mut models),
+            Ok(mut materials),
+            Ok(mut textures),
+            Ok(mut pipelines),
+            Ok(mut shaders),
+            Ok(mut bind_groups),
+        ) = (
+            self.models.write(),
+            self.materials.write(),
+            self.textures.write(),
+            self.pipelines.write(),
+            self.shaders.write(),
+            self.bind_groups.write(),
+        ) {
+            if let Err(e) = pollster::FutureExt::block_on(models.load_gltf(
                 &self.queue,
                 &self.device,
                 &mut materials,
@@ -610,7 +649,7 @@ impl AssetService {
                 color_target,
                 depth_stencil,
             )) {
-                log_error!("{}", e.to_string());
+                log_error!("Failed to load glTF: {}", e.to_string());
             }
         }
     }
@@ -640,7 +679,7 @@ impl AssetService {
             self.bind_groups.write(),
         ) {
             if let Err(e) = models
-                .load(
+                .load_obj(
                     &self.queue,
                     &self.device,
                     &mut materials,
@@ -654,7 +693,6 @@ impl AssetService {
                     &f_shader,
                     &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                     bind_group_layouts,
-                    color_target.format,
                     primitive,
                     color_target,
                     depth_stencil,
@@ -669,7 +707,6 @@ impl AssetService {
         &self,
         bind_group_layouts: Vec<Arc<BindGroupLayout>>,
         asset: ModelAsset,
-        format: TextureFormat,
         buffers: &[VertexBufferLayout<'_>],
     ) {
         if let (
@@ -697,7 +734,6 @@ impl AssetService {
                 &mut bind_groups,
                 self.bind_group_layouts(),
                 bind_group_layouts,
-                format,
                 buffers,
                 asset,
             ) {
@@ -913,7 +949,6 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
             AssetRequest::LoadMaterialAsset {
                 bind_group_layouts,
                 asset,
-                format,
             } => {
                 let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
                 service.load_material_asset(
@@ -921,7 +956,6 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                     service.bind_group_layouts(),
                     bind_group_layouts,
                     asset,
-                    format,
                 );
             }
             AssetRequest::LoadModel {
@@ -945,11 +979,10 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
             }
             AssetRequest::LoadModelAsset {
                 bind_group_layouts,
-                format,
                 asset,
             } => {
                 let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
-                service.load_model_asset(bind_group_layouts, asset, format, buffers);
+                service.load_model_asset(bind_group_layouts, asset, buffers);
             }
         }
     }

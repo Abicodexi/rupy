@@ -180,13 +180,12 @@ impl World {
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
-        format: wgpu::TextureFormat,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<CacheKey> {
         match model_manager
-            .load(
+            .load_obj(
                 queue,
                 device,
                 material_manager,
@@ -200,7 +199,6 @@ impl World {
                 f_shader,
                 buffers,
                 bind_group_layouts,
-                format,
                 primitive,
                 color_target,
                 depth_stencil,
@@ -328,21 +326,21 @@ impl World {
 
         let camera_pos = camera.eye();
 
-        if let Some(cam_entity) = camera.entity() {
-            if let (Some(cam_pos), Some(boss_pos)) = (
-                self.physics.position(cam_entity),
-                self.physics.position(bossman),
-            ) {
-                let direction = cam_pos.0 - boss_pos.0;
-                let mut direction_normalized = direction.normalize_or_zero();
-                let speed = 1.0;
-                let velocity = direction_normalized * speed;
-                direction_normalized.y = 0.0;
-                let rot_to_camera = glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
-                self.insert_rotation(bossman, Rotation::from(rot_to_camera));
-                self.insert_velocity(bossman, Velocity(velocity));
-            }
-        }
+        // if let Some(cam_entity) = camera.entity() {
+        //     if let (Some(cam_pos), Some(boss_pos)) = (
+        //         self.physics.position(cam_entity),
+        //         self.physics.position(bossman),
+        //     ) {
+        //         let direction = cam_pos.0 - boss_pos.0;
+        //         let mut direction_normalized = direction.normalize_or_zero();
+        //         let speed = 1.0;
+        //         let velocity = direction_normalized * speed;
+        //         direction_normalized.y = 0.0;
+        //         let rot_to_camera = glam::Quat::from_rotation_arc(Vec3::Z, direction_normalized);
+        //         self.insert_rotation(bossman, Rotation::from(rot_to_camera));
+        //         self.insert_velocity(bossman, Velocity(velocity));
+        //     }
+        // }
 
         self.environment.update_light(dt);
         self.physics.update(camera, dt, &self.terrain);

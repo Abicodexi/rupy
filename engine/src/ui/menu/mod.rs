@@ -127,7 +127,7 @@ impl Menu {
     pub fn process(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } => match event.physical_key {
-                PhysicalKey::Code(KeyCode::KeyQ) => {
+                PhysicalKey::Code(KeyCode::F1) => {
                     if !event.repeat && event.state.is_pressed() {
                         match self.is_visible() {
                             true => {

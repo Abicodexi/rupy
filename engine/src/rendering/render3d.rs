@@ -2,9 +2,9 @@ use {
     super::{RenderPass, VertexInstance},
     crate::{
         camera::{self},
-        create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
-        EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation,
-        Scale, Texture, Transform, WgpuBuffer, World,
+        create_render_pipeline, log_info, AssetService, BindGroup, CacheKey, CacheStorage,
+        DebugMode, EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts,
+        Rotation, Scale, Texture, Transform, WgpuBuffer, World,
     },
     rayon::iter::{IntoParallelRefIterator, ParallelIterator},
     std::{
@@ -259,17 +259,17 @@ impl InstanceBuffers {
 
             let transform = Transform::from_components(position, rotation, scale);
 
-            if let Some(model) = models.get_resource(&renderable.model_key) {
-                if !frustum.frustum_cull_aabb(&model.aabb, &transform.model_matrix) {
-                    continue;
-                }
-                if let Some(material) = &model.instance.material {
-                    let data =
-                        transform.to_vertex_instance(material.storage_id.unwrap_or(0) as u32);
-                    self.batch
-                        .entry(renderable.model_key)
-                        .or_default()
-                        .push(data);
+            for m_key in renderable.model_keys.iter() {
+                if let Some(model) = models.get_resource(&m_key) {
+                    if !frustum.frustum_cull_aabb(&model.aabb, &transform.model_matrix) {
+                        continue;
+                    }
+                    if let Some(material) = &model.instance.material {
+                        let mat_storage_id = material.storage_id.unwrap_or(0) as u32;
+
+                        let data = transform.to_vertex_instance(mat_storage_id);
+                        self.batch.entry(*m_key).or_default().push(data);
+                    }
                 }
             }
         }

@@ -79,7 +79,6 @@ impl Projection {
                 if event.state.is_pressed() && event.repeat == false {
                     match event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyM) => return Some(self.next()),
-
                         _ => {}
                     }
                 }

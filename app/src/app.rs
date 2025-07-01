@@ -137,6 +137,25 @@ impl Rupy {
             )
             .into())
         })?;
+        camera.load_model(service, &surface_config);
+
+        let camera_entity = world.spawn();
+        if let Some((renderable, scale, position)) = camera.spawn(camera_entity) {
+            world.insert_renderable(camera_entity, renderable);
+            world.insert_position(camera_entity, position);
+            world.insert_scale(camera_entity, scale);
+        };
+
+        if let Some(material) = service.get_material(&CacheKey::from("Material.001")) {
+            world.generate_terrain(
+                service.queue(),
+                service.device(),
+                camera.eye(),
+                1,
+                Medium::Ground,
+                &material,
+            )?;
+        }
         let debug_mode = DebugMode::new(service, &camera, &world.light(), &surface_config)?;
 
         let bossman = debug_scene(
@@ -145,7 +164,6 @@ impl Rupy {
             &mut world,
             surface_config.format,
         );
-
         let menu = Menu::builder(&surface_config, width, height)
             .with_position(200.0, 200.0)
             .with_padding(8.0)
@@ -168,27 +186,38 @@ impl Rupy {
                 Some("cube-normal.png"),
             )
             .build(&service)?;
-
-        camera.load_model(service, &surface_config);
-
-        let camera_entity = world.spawn();
-        if let Some((renderable, scale, position)) = camera.spawn(camera_entity) {
-            world.insert_renderable(camera_entity, renderable);
-            world.insert_position(camera_entity, position);
-            world.insert_scale(camera_entity, scale);
-        };
-
-        if let Some(material) = service.get_material(&CacheKey::from("Material.001")) {
-            world.generate_terrain(
-                service.queue(),
-                service.device(),
-                camera.eye(),
-                1,
-                Medium::Ground,
-                &material,
-            )?;
-        }
-
+        service.load_gltf(
+            "immith.glb".to_string(),
+            "normal.vert.wgsl".to_string(),
+            "normal.frag.wgsl".to_string(),
+            vec![
+                service.bind_group_layouts().uniform().clone(),
+                service.bind_group_layouts().equirect_dst().clone(),
+                service.bind_group_layouts().material_storage().clone(),
+                service.bind_group_layouts().normal().clone(),
+            ],
+            wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            wgpu::ColorTargetState {
+                format: surface_config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            },
+            Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+        );
         Ok(Rupy {
             time,
             window,
@@ -243,14 +272,6 @@ impl Rupy {
 
     pub fn handle_menu_toggle(&mut self, event: &WindowEvent) {
         self.menu.process(event);
-        let visible = self.menu.is_visible();
-        let camera_frozen = self.camera.is_frozen();
-        if visible && !camera_frozen {
-            self.camera.freeze();
-        }
-        if !visible && camera_frozen {
-            self.camera.unfreeze();
-        }
     }
     pub fn next_debug_mode(&mut self) {
         self.debug_mode.next_mode(
@@ -261,20 +282,33 @@ impl Rupy {
         );
     }
     pub fn resize(&mut self, new_size: &PhysicalSize<u32>) {
-        let width = new_size.width.max(1) as f32;
-        let height = new_size.height.max(1) as f32;
         self.surface.resize(
             self.service.device(),
             &mut self.surface_config,
-            width,
-            height,
+            new_size.width,
+            new_size.height,
         );
-        self.camera.resize(width, height);
-        self.menu
-            .resize(&self.service.queue(), self.service.device(), width, height);
-        self.rendertxt.resize(self.service.queue(), width, height);
-        self.render_targets
-            .resize(self.service.device(), width, height);
+
+        self.camera.resize(
+            self.surface_config.width as f32,
+            self.surface_config.height as f32,
+        );
+        self.menu.resize(
+            &self.service.queue(),
+            self.service.device(),
+            self.surface_config.width as f32,
+            self.surface_config.height as f32,
+        );
+        self.rendertxt.resize(
+            self.service.queue(),
+            self.surface_config.width as f32,
+            self.surface_config.height as f32,
+        );
+        self.render_targets.resize(
+            self.service.device(),
+            self.surface_config.width as f32,
+            self.surface_config.height as f32,
+        );
     }
 
     fn text_regions(&mut self) -> Vec<TextRegion> {
@@ -285,17 +319,16 @@ impl Rupy {
         ))];
         regions
     }
-
-    pub fn redraw(&mut self) {
+    pub fn update(&mut self) {
         self.time.update(Time::MAX_FRAME_TIME);
-
-        if self.menu.is_visible() {
-            let clicked = self.camera.controller().mouse_pressed();
-            let mouse_pos = if let Some(pos) = self.camera.controller().last_mouse_pos() {
-                Some((pos.x, pos.y))
-            } else {
-                None
-            };
+        let menu_visible = self.menu.is_visible();
+        let clicked = self.camera.controller().mouse_pressed();
+        let mouse_pos = if let Some(pos) = self.camera.controller().last_mouse_pos() {
+            Some((pos.x, pos.y))
+        } else {
+            None
+        };
+        if menu_visible {
             let ui_events = self.menu.update(mouse_pos, clicked);
             for ev in ui_events {
                 match ev {
@@ -350,6 +383,7 @@ impl Rupy {
                     &self.camera,
                     self.bossman,
                 );
+
                 if let Ok(models) = self.service.models() {
                     self.render3d.instances.update(
                         self.service.device(),
@@ -360,22 +394,19 @@ impl Rupy {
                     );
                 }
             }
-
-            self.upload();
         }
-
+    }
+    pub fn redraw(&mut self) {
         self.render();
         self.window.request_redraw();
     }
 
     pub fn upload(&mut self) {
-        self.camera
-            .upload(self.service.queue(), self.service.device());
-        self.world
-            .upload(self.service.queue(), self.service.device());
-        self.render3d
-            .instances
-            .upload(self.service.queue(), self.service.device());
+        let queue = self.service.queue();
+        let device = self.service.device();
+        self.camera.upload(&queue, &device);
+        self.world.upload(queue, device);
+        self.render3d.instances.upload(queue, device);
     }
 
     pub fn render(&mut self) {
@@ -384,6 +415,7 @@ impl Rupy {
             Err(e) => {
                 match e {
                     wgpu::SurfaceError::Outdated => {
+                        log_info!("Surface outdated!");
                         self.resize(&self.window.inner_size());
                         return;
                     }

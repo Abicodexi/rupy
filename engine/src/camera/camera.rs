@@ -1,10 +1,13 @@
 use wgpu::BindingType;
-use winit::event::WindowEvent;
+use winit::{
+    event::{ElementState, WindowEvent},
+    keyboard::{KeyCode, PhysicalKey},
+};
 
 use crate::{
     camera::{CameraControls, CameraModel, CameraTransform, CameraUniform, Frustum, Projection},
-    AssetService, BindGroup, CacheKey, Entity, Position, RenderBindGroupLayouts, Renderable,
-    Rotation, Scale, TextRegion, Velocity, WgpuBuffer,
+    log_info, AssetService, BindGroup, CacheKey, Entity, Position, RenderBindGroupLayouts,
+    Renderable, Rotation, Scale, TextRegion, Velocity, WgpuBuffer,
 };
 
 use glam::{FloatExt, Mat4, Quat, Vec3};
@@ -74,9 +77,24 @@ impl Camera {
     }
 
     pub fn process(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput { event, .. } => match event.physical_key {
+                PhysicalKey::Code(KeyCode::KeyL) => {
+                    if event.state == ElementState::Pressed && !event.repeat {
+                        log_info!("Changing free look: {}", self.free_look);
+                        self.free_look = !self.free_look;
+                    }
+                }
+
+                _ => {}
+            },
+            _ => {}
+        }
         self.controls.process_event(event)
     }
-
+    pub fn mark_dirty(&mut self) {
+        self.transform.mark_dirty(true);
+    }
     pub fn forward(&self) -> Vec3 {
         self.transform.eye
     }
@@ -202,6 +220,7 @@ impl Camera {
             self.controls.pitch().to_radians(),
             &self.model,
         );
+
         self.transform.update_matrices(
             self.fovy(),
             self.aspect(),
@@ -211,12 +230,13 @@ impl Camera {
             screen_h,
             projection,
         );
+        let forward_vec = (self.transform.target - self.transform.eye).normalize_or_zero();
+        let up = Vec3::Y;
+        let right = forward_vec.cross(up).normalize_or_zero();
 
         let rotation = {
-            let forward = (self.transform.target - self.transform.eye).normalize_or_zero();
-            let up = self.transform.up;
             Some(Rotation::from(Quat::from_mat4(
-                &Mat4::look_at_rh(Vec3::ZERO, forward, up).inverse(),
+                &Mat4::look_at_rh(Vec3::ZERO, forward_vec, up).inverse(),
             )))
         };
 
@@ -228,21 +248,27 @@ impl Camera {
             });
         }
 
-        let mut forward_vec = (self.transform.target - self.transform.eye).normalize_or_zero();
-        if !self.free_look {
-            forward_vec.y = 0.0;
-        }
-        forward_vec = forward_vec.normalize_or_zero();
-        let right = forward_vec.cross(Vec3::Y).normalize_or_zero();
-
         let mut displacement = Vec3::ZERO;
         let inputs = self.controls.input_flags();
 
+        let mut effective_forward = forward_vec;
+        if !self.free_look {
+            effective_forward.y = 0.0;
+            effective_forward = effective_forward.normalize_or_zero();
+        } else {
+            if inputs.len() > crate::camera::Q && inputs[crate::camera::Q] {
+                displacement -= up;
+            }
+            if inputs.len() > crate::camera::E && inputs[crate::camera::E] {
+                displacement += up;
+            }
+        }
+
         if inputs[crate::camera::W] {
-            displacement += forward_vec;
+            displacement += effective_forward;
         }
         if inputs[crate::camera::S] {
-            displacement -= forward_vec;
+            displacement -= effective_forward;
         }
         if inputs[crate::camera::A] {
             displacement -= right;
@@ -252,9 +278,6 @@ impl Camera {
         }
 
         let velocity = if self.free_look {
-            if inputs.len() > 4 && inputs[4] {
-                displacement += Vec3::Y;
-            }
             if displacement.length_squared() > 0.0 {
                 Some(Velocity(displacement.normalize() * self.controls.speed()))
             } else {
@@ -268,12 +291,16 @@ impl Camera {
                 new_velocity.z = FloatExt::lerp(previous_velocity.z, mv.z, 0.2);
             }
 
-            if inputs.len() > 4 && inputs[4] && previous_velocity.y.abs() < 0.01 {
+            if inputs.len() > crate::camera::JUMP
+                && inputs[crate::camera::JUMP]
+                && previous_velocity.y.abs() < 0.01
+            {
                 new_velocity.y = 5.0;
             }
 
             Some(Velocity(new_velocity))
         };
+
         let (vp, inv_proj, inv_view) = self.view_projection_matrix(projection, screen_h, screen_w);
         self.update_uniform(vp, inv_proj, inv_view, position);
         self.update_frustum(vp);

@@ -49,4 +49,7 @@ pub enum EngineError {
 
     #[error("TobjLoadError: {0}")]
     TobjLoadError(#[from] tobj::LoadError),
+
+    #[error("GltfError: {0}")]
+    GltfError(#[from] gltf::Error),
 }

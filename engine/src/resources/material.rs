@@ -16,8 +16,8 @@ pub struct MaterialAsset {
     pub diffuse: [f32; 3],
     pub specular: [f32; 3],
     pub shininess: f32,
-    pub diffuse_texture: Option<String>,
-    pub normal_texture: Option<String>,
+    pub diffuse_texture: Option<Arc<Texture>>,
+    pub normal_texture: Option<Arc<Texture>>,
     pub primitive: wgpu::PrimitiveState,
     pub depth_stencil: Option<wgpu::DepthStencilState>,
     pub color_target: wgpu::ColorTargetState,
@@ -41,30 +41,6 @@ impl MaterialData {
     }
 }
 
-impl From<tobj::Material> for MaterialAsset {
-    fn from(value: tobj::Material) -> Self {
-        Self {
-            name: value.name.clone(),
-            key: CacheKey::from(value.name),
-            v_shader: "normal.vert.wgsl".to_string(),
-            f_shader: "normal.frag.wgsl".to_string(),
-            ambient: value.ambient.unwrap_or_default(),
-            diffuse: value.diffuse.unwrap_or_default(),
-            specular: value.specular.unwrap_or_default(),
-            shininess: value.shininess.unwrap_or_default(),
-            diffuse_texture: value.diffuse_texture,
-            normal_texture: value.normal_texture,
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            color_target: wgpu::ColorTargetState {
-                format: Texture::DEFAULT_FORMAT,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            },
-        }
-    }
-}
-
 impl From<&tobj::Material> for MaterialAsset {
     fn from(value: &tobj::Material) -> Self {
         Self {
@@ -76,8 +52,32 @@ impl From<&tobj::Material> for MaterialAsset {
             diffuse: value.diffuse.unwrap_or_default(),
             specular: value.specular.unwrap_or_default(),
             shininess: value.shininess.unwrap_or_default(),
-            diffuse_texture: value.diffuse_texture.clone(),
-            normal_texture: value.normal_texture.clone(),
+            diffuse_texture: None,
+            normal_texture: None,
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            color_target: wgpu::ColorTargetState {
+                format: Texture::DEFAULT_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            },
+        }
+    }
+}
+
+impl From<tobj::Material> for MaterialAsset {
+    fn from(value: tobj::Material) -> Self {
+        Self {
+            name: value.name.clone(),
+            key: CacheKey::from(value.name.as_ref()),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
+            ambient: value.ambient.unwrap_or_default(),
+            diffuse: value.diffuse.unwrap_or_default(),
+            specular: value.specular.unwrap_or_default(),
+            shininess: value.shininess.unwrap_or_default(),
+            diffuse_texture: None,
+            normal_texture: None,
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             color_target: wgpu::ColorTargetState {
@@ -112,25 +112,16 @@ impl MaterialAsset {
         bind_groups: &mut BindGroupManager,
         layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
-        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-    ) -> Result<
-        (
-            std::sync::Arc<wgpu::RenderPipeline>,
-            std::sync::Arc<wgpu::BindGroup>,
-        ),
-        crate::EngineError,
-    > {
-        let (dt, ..) = self
+    ) -> Result<(Arc<wgpu::RenderPipeline>, Arc<wgpu::BindGroup>), EngineError> {
+        let dt = self
             .diffuse_texture
-            .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, format))
-            .unwrap_or_else(|| Ok(fallback_diffuse(queue, device, textures)))?;
-        let (nt, ..) = self
+            .clone()
+            .unwrap_or_else(|| fallback_diffuse(queue, device, textures).0);
+        let nt = self
             .normal_texture
-            .as_ref()
-            .map(|p| textures.get_or_load_texture(queue, device, p, format))
-            .unwrap_or_else(|| Ok(fallback_normal(queue, device, textures)))?;
+            .clone()
+            .unwrap_or_else(|| fallback_normal(queue, device, textures).0);
 
         let v_shader = shaders.load(device, &self.v_shader)?;
         let f_shader = shaders.load(device, &self.f_shader)?;
@@ -143,6 +134,7 @@ impl MaterialAsset {
                 Ok(BindGroup::normal(device, layouts, &dt, &nt, label.as_ref()).into())
             })?
             .clone();
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&self.name),
             bind_group_layouts: &bind_group_layouts
@@ -175,7 +167,6 @@ impl MaterialAsset {
                         }),
                         primitive: self.primitive,
                         depth_stencil: self.depth_stencil.clone(),
-
                         multisample: wgpu::MultisampleState {
                             count: 1,
                             mask: !0,
@@ -221,7 +212,6 @@ impl Material {
         bind_groups: &mut BindGroupManager,
         layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
-        format: wgpu::TextureFormat,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: MaterialAsset,
     ) -> Result<Self, EngineError> {
@@ -234,7 +224,6 @@ impl Material {
             bind_groups,
             layouts,
             bind_group_layouts,
-            format,
             buffers,
         )?;
 
@@ -259,16 +248,38 @@ impl Material {
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
-        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Material, EngineError> {
+        let format = color_target.format.clone();
+        let diffuse_tex = mat.diffuse_texture.as_ref().cloned();
+        let normal_tex = mat.normal_texture.as_ref().cloned();
         let mut asset: MaterialAsset = mat.into();
         asset.depth_stencil = depth_stencil.as_ref().cloned();
         asset.v_shader = v_shader.to_owned();
         asset.f_shader = f_shader.to_owned();
         asset.primitive = primitive;
         asset.color_target = color_target;
+        asset.diffuse_texture = if let Some(dt) = diffuse_tex {
+            Some(
+                textures
+                    .get_or_load_texture(queue, device, &dt, format)
+                    .unwrap_or(fallback_diffuse(queue, device, textures))
+                    .0,
+            )
+        } else {
+            Some(fallback_diffuse(queue, device, textures).0)
+        };
+        asset.normal_texture = if let Some(nt) = normal_tex {
+            Some(
+                textures
+                    .get_or_load_texture(queue, device, &nt, format)
+                    .unwrap_or(fallback_normal(queue, device, textures))
+                    .0,
+            )
+        } else {
+            Some(fallback_normal(queue, device, textures).0)
+        };
 
         let material = Self::from_asset(
             queue,
@@ -279,7 +290,6 @@ impl Material {
             bind_groups,
             layouts,
             bind_group_layouts,
-            format,
             buffers,
             asset,
         )?;
@@ -366,6 +376,7 @@ impl MaterialStorage {
         material: &mut Material,
     ) {
         material.storage_id = Some(self.id());
+
         self.rebuild = self
             .storage
             .insert(material.asset.name.clone(), material.asset.data())
@@ -418,7 +429,6 @@ impl MaterialManager {
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
-        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
@@ -439,7 +449,6 @@ impl MaterialManager {
             f_shader,
             primitive.clone(),
             color_target.clone(),
-            format,
             buffers,
             depth_stencil.clone(),
         )?;
@@ -463,7 +472,6 @@ impl MaterialManager {
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::ColorTargetState,
-        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
@@ -484,7 +492,6 @@ impl MaterialManager {
             f_shader,
             primitive.clone(),
             color_target.clone(),
-            format,
             buffers,
             depth_stencil.clone(),
         )?;
@@ -504,7 +511,6 @@ impl MaterialManager {
         layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
-        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
         if let Some(mat) = self.materials.get(&asset.key) {
@@ -520,7 +526,6 @@ impl MaterialManager {
             bind_groups,
             layouts,
             bind_group_layouts,
-            format,
             buffers,
         )?;
 
@@ -549,7 +554,6 @@ impl MaterialManager {
         layouts: &RenderBindGroupLayouts,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         asset: MaterialAsset,
-        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
         if let Some(mat) = self.materials.get(&asset.key) {
@@ -565,7 +569,6 @@ impl MaterialManager {
             bind_groups,
             layouts,
             bind_group_layouts,
-            format,
             buffers,
         )?;
 

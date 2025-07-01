@@ -44,7 +44,7 @@ impl From<crate::Entity> for CacheKey {
 impl Into<crate::Renderable> for CacheKey {
     fn into(self) -> crate::Renderable {
         crate::Renderable {
-            model_key: self,
+            model_keys: vec![self],
             visible: true,
         }
     }
@@ -52,7 +52,7 @@ impl Into<crate::Renderable> for CacheKey {
 impl Into<crate::Renderable> for &CacheKey {
     fn into(self) -> crate::Renderable {
         crate::Renderable {
-            model_key: self.clone(),
+            model_keys: vec![self.clone()],
             visible: true,
         }
     }

@@ -188,14 +188,14 @@ impl Into<VertexInstance> for Transform {
 
 #[derive(Debug, Clone)]
 pub struct Renderable {
-    pub model_key: CacheKey,
+    pub model_keys: Vec<CacheKey>,
     pub visible: bool,
 }
 
 impl Renderable {
-    pub fn new(key: CacheKey) -> Self {
+    pub fn new(keys: Vec<CacheKey>) -> Self {
         Self {
-            model_key: key,
+            model_keys: keys,
             visible: true,
         }
     }
@@ -204,7 +204,7 @@ impl Renderable {
 impl From<crate::Entity> for Renderable {
     fn from(value: crate::Entity) -> Self {
         Self {
-            model_key: value.into(),
+            model_keys: vec![value.into()],
             visible: true,
         }
     }
@@ -213,7 +213,7 @@ impl From<crate::Entity> for Renderable {
 impl From<&crate::Entity> for Renderable {
     fn from(value: &crate::Entity) -> Self {
         Self {
-            model_key: value.clone().into(),
+            model_keys: vec![value.clone().into()],
             visible: true,
         }
     }
