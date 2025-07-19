@@ -45,7 +45,7 @@ impl From<crate::Entity> for CacheKey {
 }
 
 impl From<CacheKey> for Renderable {
-fn from(value: CacheKey) -> Self {
-    Self::new(vec![value])
-  }  
+    fn from(value: CacheKey) -> Self {
+        Self::new(vec![value])
+    }
 }

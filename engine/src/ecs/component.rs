@@ -211,7 +211,6 @@ impl Renderable {
     ) {
         self.instances.push((position, rotation, scale));
     }
-
 }
 
 impl From<crate::Entity> for Renderable {
@@ -297,8 +296,8 @@ impl<T> ComponentVec<T> {
     }
 }
 
-impl<T> Default for ComponentVec<T>{
+impl<T> Default for ComponentVec<T> {
     fn default() -> Self {
-   Self::new() 
+        Self::new()
     }
-    }
+}

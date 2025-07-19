@@ -14,7 +14,8 @@ impl<'a> GpuBuilder<'a> {
             backends: wgpu::Backends::all(),
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
-            required_features: wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY | wgpu::Features::BGRA8UNORM_STORAGE,
+            required_features: wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY
+                | wgpu::Features::BGRA8UNORM_STORAGE,
             required_limits: wgpu::Limits::downlevel_defaults(),
         }
     }
@@ -76,11 +77,10 @@ impl<'a> GpuBuilder<'a> {
             queue: queue.into(),
         }
     }
-
 }
 
 impl<'a> Default for GpuBuilder<'a> {
-fn default() -> Self {
-    Self::new()
-}
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -1,10 +1,12 @@
+use rayon::prelude::*;
+use std::collections::HashMap;
 use {
     super::{RenderPass, VertexInstance},
     crate::{
         camera::{self},
-        create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage,
-        DebugMode, EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts,
-        Rotation, Scale, Texture, Transform, WgpuBuffer, World,
+        create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
+        EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation,
+        Scale, Texture, Transform, WgpuBuffer, World,
     },
     rayon::iter::{IntoParallelRefIterator, ParallelIterator},
     std::{
@@ -13,8 +15,6 @@ use {
     },
     wgpu::{IndexFormat, RenderPipeline},
 };
-use std::collections::HashMap;
-use rayon::prelude::*;
 
 #[warn(dead_code)]
 pub struct Renderer3d {
@@ -230,28 +230,27 @@ impl InstanceBuffers {
         }
     }
 
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        world: &World,
+        camera: &camera::Camera,
+        models: &ModelManager,
+    ) {
+        let next_batch: HashMap<CacheKey, Vec<VertexInstance>> = HashMap::new();
+        let frustum = camera.frustum();
 
-pub fn update(
-    &mut self,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    world: &World,
-    camera: &camera::Camera,
-    models: &ModelManager,
-) {
+        let default_scale = Scale::one();
+        let default_rotation = Rotation::zero();
 
-    let next_batch: HashMap<CacheKey, Vec<VertexInstance>> = HashMap::new();
-    let frustum = camera.frustum();
-
-    let default_scale = Scale::one();
-    let default_rotation = Rotation::zero();
-
-    // === Parallelize entity collection ===
-    let batched_instances: Vec<(CacheKey, VertexInstance)> =
-        (0..world.entity_count())
+        // === Parallelize entity collection ===
+        let batched_instances: Vec<(CacheKey, VertexInstance)> = (0..world.entity_count())
             .into_par_iter()
             .flat_map_iter(|idx| {
-                let Some(renderable) = &world.renderables()[idx] else { return vec![].into_iter(); };
+                let Some(renderable) = &world.renderables()[idx] else {
+                    return vec![].into_iter();
+                };
                 if !renderable.visible {
                     return vec![].into_iter();
                 }
@@ -259,7 +258,9 @@ pub fn update(
                 let instances = if !renderable.instances.is_empty() {
                     renderable.instances.clone()
                 } else {
-                    let Some(position) = &world.physics().position(crate::Entity{0: idx}) else { return vec![].into_iter(); };
+                    let Some(position) = &world.physics().position(crate::Entity { 0: idx }) else {
+                        return vec![].into_iter();
+                    };
                     let rotation = world.rotations()[idx].as_ref().unwrap_or(&default_rotation);
                     let scale = world.scales()[idx].as_ref().unwrap_or(&default_scale);
                     vec![(**position, Some(*rotation), Some(*scale))]
@@ -268,7 +269,9 @@ pub fn update(
                 let mut local = Vec::new();
 
                 for model_key in &renderable.model_keys {
-                    let Some(model) = models.get_resource(model_key) else { continue };
+                    let Some(model) = models.get_resource(model_key) else {
+                        continue;
+                    };
                     for (position, rotation, scale) in &instances {
                         let rotation = rotation.as_ref().unwrap_or(&default_rotation);
                         let scale = scale.as_ref().unwrap_or(&default_scale);
@@ -290,100 +293,100 @@ pub fn update(
             })
             .collect();
 
-    // === Merge into self.batch ===
-    for (key, instance) in batched_instances {
-        self.batch.entry(key).or_default().push(instance);
-    }
+        // === Merge into self.batch ===
+        for (key, instance) in batched_instances {
+            self.batch.entry(key).or_default().push(instance);
+        }
 
-    // === Continue as normal ===
-    let updates: Vec<(CacheKey, u64, usize, Vec<u8>)> = if self.batch.len() >= 10 {
-        self.batch
-            .par_iter()
-            .map(|(key, instances)| {
-                let mut hasher = DefaultHasher::new();
-                instances.iter().for_each(|i| i.hash(&mut hasher));
-                let hash = hasher.finish();
-                let count = instances.len();
-                let bytes = VertexInstance::bytes(instances);
-                (*key, hash, count, bytes)
-            })
-            .collect()
-    } else {
-        self.batch
-            .iter()
-            .map(|(key, instances)| {
-                let mut hasher = DefaultHasher::new();
-                instances.iter().for_each(|i| i.hash(&mut hasher));
-                let hash = hasher.finish();
-                let count = instances.len();
-                let bytes = VertexInstance::bytes(instances);
-                (*key, hash, count, bytes)
-            })
-            .collect()
-    };
-
-
-    for (key, hash, count, byte_data) in updates {
-        let update_buffer = match self.buffers.get_mut(&key) {
-            Some(instance) => {
-                if instance.hash != hash || instance.count != count {
-                    instance.dirty = true;
-                    instance.hash = hash;
-                    instance.count = count;
-                    instance.buffer.write_data(queue, device, &byte_data, None);
-                }
-                false
-            }
-            None => {
-                self.buffers.insert(key, InstanceBuffer {
-                    buffer: WgpuBuffer::from_data(
-                        device,
-                        &byte_data,
-                        wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                        Some(&format!("instance buffer {}", key.id())),
-                    ),
-                    count,
-                    hash,
-                    dirty: false,
-                });
-                true
-            }
+        // === Continue as normal ===
+        let updates: Vec<(CacheKey, u64, usize, Vec<u8>)> = if self.batch.len() >= 10 {
+            self.batch
+                .par_iter()
+                .map(|(key, instances)| {
+                    let mut hasher = DefaultHasher::new();
+                    instances.iter().for_each(|i| i.hash(&mut hasher));
+                    let hash = hasher.finish();
+                    let count = instances.len();
+                    let bytes = VertexInstance::bytes(instances);
+                    (*key, hash, count, bytes)
+                })
+                .collect()
+        } else {
+            self.batch
+                .iter()
+                .map(|(key, instances)| {
+                    let mut hasher = DefaultHasher::new();
+                    instances.iter().for_each(|i| i.hash(&mut hasher));
+                    let hash = hasher.finish();
+                    let count = instances.len();
+                    let bytes = VertexInstance::bytes(instances);
+                    (*key, hash, count, bytes)
+                })
+                .collect()
         };
 
-     if update_buffer { crate::log_debug!("created new buffer for {:?}", key); }
+        for (key, hash, count, byte_data) in updates {
+            let update_buffer = match self.buffers.get_mut(&key) {
+                Some(instance) => {
+                    if instance.hash != hash || instance.count != count {
+                        instance.dirty = true;
+                        instance.hash = hash;
+                        instance.count = count;
+                        instance.buffer.write_data(queue, device, &byte_data, None);
+                    }
+                    false
+                }
+                None => {
+                    self.buffers.insert(
+                        key,
+                        InstanceBuffer {
+                            buffer: WgpuBuffer::from_data(
+                                device,
+                                &byte_data,
+                                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                                Some(&format!("instance buffer {}", key.id())),
+                            ),
+                            count,
+                            hash,
+                            dirty: false,
+                        },
+                    );
+                    true
+                }
+            };
 
+            if update_buffer {
+                crate::log_debug!("created new buffer for {:?}", key);
+            }
+        }
 
+        self.batch = next_batch.clone();
+
+        let unused_keys: Vec<_> = self
+            .batch
+            .keys()
+            .filter(|k| !next_batch.contains_key(*k))
+            .cloned()
+            .collect();
+
+        for key in unused_keys {
+            self.buffers.remove(&key);
+        }
     }
-
-   self.batch = next_batch.clone();
-
-    let unused_keys: Vec<_> = self.batch.keys()
-        .filter(|k| !next_batch.contains_key(*k))
-        .cloned()
-        .collect();
-
-    for key in unused_keys {
-        self.buffers.remove(&key);
-    }
-
-}
 
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
         use rayon::prelude::*;
 
-        self.buffers
-            .par_iter_mut()
-            .for_each(|(key, buffer)| {
-                if buffer.dirty {
-                    if let Some(instances) = self.batch.get(key) {
-                        let byte_data = VertexInstance::bytes(instances);
-                        buffer.buffer.write_data(queue, device, &byte_data, Some(0));
-                        buffer.dirty = false;
-                    }
+        self.buffers.par_iter_mut().for_each(|(key, buffer)| {
+            if buffer.dirty {
+                if let Some(instances) = self.batch.get(key) {
+                    let byte_data = VertexInstance::bytes(instances);
+                    buffer.buffer.write_data(queue, device, &byte_data, Some(0));
+                    buffer.dirty = false;
                 }
-            });
+            }
+        });
     }
-
 
     pub fn draw(
         &self,
@@ -427,6 +430,6 @@ pub fn update(
 
 impl Default for InstanceBuffers {
     fn default() -> Self {
-    Self::new()
+        Self::new()
     }
-    }
+}

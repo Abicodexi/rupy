@@ -6,15 +6,14 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 pub struct TextureDescriptor {
-       pub size: wgpu::Extent3d,
-        pub format: wgpu::TextureFormat,
-        pub mip_level_count: u32,
-        pub view_dim: wgpu::TextureViewDimension,
-        pub usage: wgpu::TextureUsages,
-        pub address_mode: Option<wgpu::AddressMode>,
-        pub mag_filter: wgpu::FilterMode,
-        pub sampler: Option<wgpu::Sampler>,
-
+    pub size: wgpu::Extent3d,
+    pub format: wgpu::TextureFormat,
+    pub mip_level_count: u32,
+    pub view_dim: wgpu::TextureViewDimension,
+    pub usage: wgpu::TextureUsages,
+    pub address_mode: Option<wgpu::AddressMode>,
+    pub mag_filter: wgpu::FilterMode,
+    pub sampler: Option<wgpu::Sampler>,
 }
 #[derive(Debug)]
 pub struct Texture {
@@ -137,11 +136,11 @@ impl Texture {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
-                mip_level: 0 ,
+                mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-         rgba_image.as_bytes(), // &[u8]
+            rgba_image.as_bytes(), // &[u8]
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row.into()),
@@ -239,11 +238,7 @@ impl Texture {
         })
     }
 
-    pub fn new(
-        device: &wgpu::Device,
-        desc: TextureDescriptor,
-        label: Option<&str>,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, desc: TextureDescriptor, label: Option<&str>) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size: desc.size,
@@ -266,16 +261,18 @@ impl Texture {
             ..Default::default()
         });
 
-        let sampler = desc.sampler.unwrap_or(device.create_sampler(&wgpu::SamplerDescriptor {
-            label,
-            address_mode_u: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
-            address_mode_v: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
-            address_mode_w: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
-            mag_filter: desc.mag_filter,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        }));
+        let sampler = desc
+            .sampler
+            .unwrap_or(device.create_sampler(&wgpu::SamplerDescriptor {
+                label,
+                address_mode_u: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
+                address_mode_v: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
+                address_mode_w: desc.address_mode.unwrap_or(wgpu::AddressMode::ClampToEdge),
+                mag_filter: desc.mag_filter,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            }));
 
         Self {
             texture,
@@ -379,9 +376,9 @@ impl Texture {
 }
 
 impl From<Texture> for CacheKey {
- fn from(value: Texture) -> Self {
-     CacheKey::from(value.label)
- }
+    fn from(value: Texture) -> Self {
+        CacheKey::from(value.label)
+    }
 }
 
 pub struct TextureManager {
@@ -512,13 +509,8 @@ impl TextureManager {
             Ok((tex.clone(), cache_key))
         } else {
             let path = AssetLoader::resolve("textures").join(texture);
-            let tex = Texture::from_image(
-                device,
-                queue,
-                format,
-                &AssetLoader::image(path)?,
-                texture,
-            );
+            let tex =
+                Texture::from_image(device, queue, format, &AssetLoader::image(path)?, texture);
             let arc = Arc::new(tex);
             self.insert_resource(cache_key, arc.clone());
             Ok((arc, cache_key))
@@ -569,9 +561,9 @@ impl TextureManager {
     }
 }
 impl Default for TextureManager {
- fn default() -> Self {
-     Self::new()
- }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 pub fn fallback_diffuse(
     queue: &wgpu::Queue,
@@ -596,7 +588,7 @@ pub fn fallback_diffuse(
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format:Texture::DEFAULT_FORMAT, 
+                format: Texture::DEFAULT_FORMAT,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -632,7 +624,8 @@ pub fn fallback_normal(
 ) -> (Arc<crate::Texture>, crate::CacheKey) {
     let flat_normal = [128u8, 128, 255, 255];
 
-    let normal_cache_key = CacheKey::from("fallback_normal_texture"); if let Some(cached_normal_fallback) = textures.get_resource(&normal_cache_key) {
+    let normal_cache_key = CacheKey::from("fallback_normal_texture");
+    if let Some(cached_normal_fallback) = textures.get_resource(&normal_cache_key) {
         (cached_normal_fallback.clone(), normal_cache_key)
     } else {
         let normal = crate::Texture::from_desc(

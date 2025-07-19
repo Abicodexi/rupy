@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use super::{Physics, Position, Renderable, Rotation, Scale, Transform, Velocity};
 use crate::{
-    camera::Camera, log_error, log_info, BindGroupManager, CacheKey, EngineError, Entity,
-    Environment, Light, Material, MaterialManager, Medium, ModelManager, PipelineManager,
-    RenderBindGroupLayouts, ShaderManager, Terrain, TextureManager, Time,
+    camera::Camera, log_error, log_info, CacheKey, EngineError, Entity, Environment, Light,
+    Material, Medium, Terrain, Time,
 };
 use glam::Vec3;
 use pollster::FutureExt;
@@ -117,13 +116,13 @@ impl World {
         self.physics.position(entity)
     }
     pub fn positions(&self) -> &[Option<Position>] {
-        &self.physics.positions()
+        self.physics.positions()
     }
     pub fn velocity(&self, entity: Entity) -> Option<&Velocity> {
         self.physics.velocity(entity)
     }
     pub fn velocities(&self) -> &[Option<Velocity>] {
-        &self.physics.velocities()
+        self.physics.velocities()
     }
     // === Renderables ===
     pub fn renderable(&self, entity: Entity) -> Option<&Renderable> {
@@ -165,53 +164,41 @@ impl World {
         self.insert_renderable(entity, renderable);
         crate::log_debug!("Spawned model entity: {}", entity.0);
     }
+
     pub fn load_object(
-        queue: &wgpu::Queue,
-        device: &wgpu::Device,
-        model_manager: &mut ModelManager,
-        material_manager: &mut MaterialManager,
-        texture_manager: &mut TextureManager,
-        shader_manager: &mut ShaderManager,
-        pipeline_manager: &mut PipelineManager,
-        bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        file: &str,
-        v_shader: &str,
-        f_shader: &str,
-        buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
-        primitive: wgpu::PrimitiveState,
-        format: wgpu::TextureFormat,
-        depth_stencil: Option<wgpu::DepthStencilState>,
+        ctx: &mut crate::LoadObjContext,
+        desc: crate::ObjectDescriptor,
     ) -> Option<CacheKey> {
-        match model_manager
+        match ctx
+            .model_manager
             .load_obj(
-                queue,
-                device,
-                material_manager,
-                texture_manager,
-                shader_manager,
-                pipeline_manager,
-                bind_group_manager,
-                layouts,
-                file,
-                v_shader,
-                f_shader,
-                buffers,
-                bind_group_layouts,
-                primitive,
-                format,
-                depth_stencil,
+                ctx.queue,
+                ctx.device,
+                ctx.material_manager,
+                ctx.texture_manager,
+                ctx.shader_manager,
+                ctx.pipeline_manager,
+                ctx.bind_group_manager,
+                ctx.layouts,
+                desc.file,
+                desc.v_shader,
+                desc.f_shader,
+                desc.buffers,
+                desc.bind_group_layouts,
+                desc.primitive,
+                desc.format,
+                desc.depth_stencil,
             )
             .block_on()
         {
             Err(e) => {
-                log_error!("{}: {}", file, e.to_string());
+                log_error!("{}: {}", desc.file, e);
                 None
             }
-            _ => Some(CacheKey::from(file)),
+            _ => Some(CacheKey::from(desc.file)),
         }
     }
+
     pub fn spawn(&mut self) -> Entity {
         let id = self.entity_count;
         self.entity_count += 1;
@@ -317,7 +304,7 @@ impl World {
         device: &wgpu::Device,
         time: &Time,
         camera: &Camera,
-        bossman: Entity,
+        _bossman: Entity,
     ) {
         let dt = time.delta_time;
         self.environment.compute_sky_projection(queue, device);

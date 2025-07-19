@@ -85,7 +85,7 @@ impl Terrain {
         for ((cx, cy, cz), _chunk) in &self.chunk_stream {
             instances.push(
                 Transform::from_components(
-                   Some(&Position::new(*cx as f32, *cy as f32, *cz as f32)),
+                    Some(&Position::new(*cx as f32, *cy as f32, *cz as f32)),
                     &Rotation::zero(),
                     &Scale::one(),
                 )

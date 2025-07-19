@@ -1,6 +1,6 @@
 use crate::{
-  AssetService, BindGroup, CacheKey, EngineError,Texture,AssetLoader,Terrain,Light,Medium,WgpuBuffer
-   
+    AssetLoader, AssetService, BindGroup, CacheKey, EngineError, Light, Medium, Terrain, Texture,
+    WgpuBuffer,
 };
 use std::sync::Arc;
 
@@ -76,8 +76,7 @@ impl SkyProjection {
                     format: Texture::HDR_FORMAT,
                     mip_level_count: 1,
                     view_dim: wgpu::TextureViewDimension::D2,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                     address_mode: None,
                     mag_filter: wgpu::FilterMode::Nearest,
                     sampler: None,
@@ -227,7 +226,8 @@ impl Environment {
     }
 
     pub fn compute_sky_projection(&self, queue: &wgpu::Queue, device: &wgpu::Device) {
-        self.sky.compute_projection(queue, device, Some("compute sky projection"));
+        self.sky
+            .compute_projection(queue, device, Some("compute sky projection"));
     }
 
     pub fn render_skybox(&self, rpass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {

@@ -15,7 +15,7 @@ pub struct Time {
 }
 
 impl Time {
-    pub const TIME_STEP: f64 = 1.0 / 60.0;
+    pub const TIME_STEP: f64 = 1.0 / 144.0;
     pub const MAX_FRAME_TIME: f64 = 0.25;
     pub fn new() -> Self {
         let now = Instant::now();
@@ -61,7 +61,7 @@ impl Time {
     }
 
     pub fn text_region(&self, position: [f32; 2]) -> TextRegion {
-        let text_area = TextRegion::new(
+        TextRegion::new(
             format!(
                 "FPS: {:.1} Frame time: {:.3}ms",
                 self.fps,
@@ -69,7 +69,12 @@ impl Time {
             ),
             position,
             glyphon::Color::rgb(1, 1, 1),
-        );
-        text_area
+        )
+    }
+}
+
+impl Default for Time {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -1,8 +1,8 @@
-use crossbeam::channel::Sender;
 use crate::{
-    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Renderable, Scale, Texture, Rotation,
-    World, GROUND_Y,
+    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Renderable, Rotation, Scale,
+    Texture, World, GROUND_Y,
 };
+use crossbeam::channel::Sender;
 
 pub enum ScreenCorner {
     TopLeft,
@@ -27,9 +27,6 @@ impl ScreenCorner {
     }
 }
 
-
-
-
 pub fn debug_scene(
     asset_tx: &Sender<AssetRequest>,
     bind_group_layouts: &RenderBindGroupLayouts,
@@ -46,29 +43,31 @@ pub fn debug_scene(
 
     // === Goblin asset ===
     let goblin_obj = "goblin.obj";
-    let goblin_key = CacheKey::from(goblin_obj);
-    asset_tx.send(AssetRequest::LoadModel {
-        file: goblin_obj.to_string(),
-        v_shader: "normal.vert.wgsl".to_string(),
-        f_shader: "normal.frag.wgsl".to_string(),
-        bind_group_layouts: vec![
-            bind_group_layouts.uniform().clone(),
-            bind_group_layouts.equirect_dst().clone(),
-            bind_group_layouts.material_storage().clone(),
-            bind_group_layouts.normal().clone(),
-        ],
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        format,
-        depth_stencil: Some(depth_stencil.clone()),
-    }).ok();
+    let _goblin_key = CacheKey::from(goblin_obj);
+    asset_tx
+        .send(AssetRequest::LoadModel {
+            file: goblin_obj.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
+            bind_group_layouts: vec![
+                bind_group_layouts.uniform().clone(),
+                bind_group_layouts.equirect_dst().clone(),
+                bind_group_layouts.material_storage().clone(),
+                bind_group_layouts.normal().clone(),
+            ],
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            format,
+            depth_stencil: Some(depth_stencil.clone()),
+        })
+        .ok();
 
     let bossman = world.spawn();
     let renderable = Renderable::new(vec![
@@ -102,35 +101,37 @@ pub fn debug_scene(
         CacheKey::from("Cylinder.011_0"),
         CacheKey::from("Cube.019_0"),
     ]);
-    world.insert_scale(bossman, Scale::new(0.1, 0.1, 0.1));
+    world.insert_scale(bossman, Scale::new(2.0, 2.0, 2.0));
     world.insert_position(bossman, Position::new(4.5, 5.5, 5.0));
     world.insert_renderable(bossman, renderable);
 
     // === Cube wall objects ===
     let cube_obj = "cube.obj";
     let cube_key = CacheKey::from(cube_obj);
-    asset_tx.send(AssetRequest::LoadModel {
-        file: cube_obj.to_string(),
-        v_shader: "normal.vert.wgsl".to_string(),
-        f_shader: "normal.frag.wgsl".to_string(),
-        bind_group_layouts: vec![
-            bind_group_layouts.uniform().clone(),
-            bind_group_layouts.equirect_dst().clone(),
-            bind_group_layouts.material_storage().clone(),
-            bind_group_layouts.normal().clone(),
-        ],
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        format,
-        depth_stencil: Some(depth_stencil),
-    }).ok();
+    asset_tx
+        .send(AssetRequest::LoadModel {
+            file: cube_obj.to_string(),
+            v_shader: "normal.vert.wgsl".to_string(),
+            f_shader: "normal.frag.wgsl".to_string(),
+            bind_group_layouts: vec![
+                bind_group_layouts.uniform().clone(),
+                bind_group_layouts.equirect_dst().clone(),
+                bind_group_layouts.material_storage().clone(),
+                bind_group_layouts.normal().clone(),
+            ],
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            format,
+            depth_stencil: Some(depth_stencil),
+        })
+        .ok();
 
     // Use Position and Scale as struct types
     let mut cube_instances: Vec<(Position, Option<Rotation>, Option<Scale>)> = Vec::new();
@@ -182,7 +183,11 @@ pub fn debug_scene(
                 scale,
             ));
             cube_instances.push((
-                Position::new((size - 1) as f32, y as f32 + wall_y_offset + above_ground, z as f32),
+                Position::new(
+                    (size - 1) as f32,
+                    y as f32 + wall_y_offset + above_ground,
+                    z as f32,
+                ),
                 None,
                 scale,
             ));
@@ -193,12 +198,9 @@ pub fn debug_scene(
     let mut cube_renderable = Renderable::new(vec![cube_key]);
 
     // You must convert these into `Vec3` etc. in your renderer update loop
-    cube_renderable.instances = cube_instances
-        .into_iter()
-        .collect();
+    cube_renderable.instances = cube_instances.into_iter().collect();
 
     world.insert_renderable(wall_entity, cube_renderable);
 
     wall_entity
 }
-

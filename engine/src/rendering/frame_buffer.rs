@@ -33,7 +33,8 @@ impl FrameBuffer {
                 format,
                 mip_level_count: 1,
                 view_dim: wgpu::TextureViewDimension::D2,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 address_mode: Some(wgpu::AddressMode::ClampToEdge),
                 mag_filter: wgpu::FilterMode::Nearest,
                 sampler: None,
@@ -68,7 +69,8 @@ impl FrameBuffer {
                 format: depth_format,
                 mip_level_count: 1,
                 view_dim: wgpu::TextureViewDimension::D2,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 address_mode: Some(wgpu::AddressMode::ClampToEdge),
                 mag_filter: wgpu::FilterMode::Nearest,
                 sampler: Some(device.create_sampler(&wgpu::SamplerDescriptor {
@@ -109,14 +111,16 @@ impl FrameBuffer {
     }
 
     pub fn depth_attachment(&self) -> Option<wgpu::RenderPassDepthStencilAttachment> {
-        self.depth.as_ref().map(|d| wgpu::RenderPassDepthStencilAttachment {
-            view: &d.view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: wgpu::StoreOp::Store,
-            }),
-            stencil_ops: None,
-        })
+        self.depth
+            .as_ref()
+            .map(|d| wgpu::RenderPassDepthStencilAttachment {
+                view: &d.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            })
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: f32, height: f32) {
@@ -134,7 +138,8 @@ impl FrameBuffer {
                     format,
                     mip_level_count: 1,
                     view_dim: wgpu::TextureViewDimension::D2,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
                     address_mode: Some(wgpu::AddressMode::ClampToEdge),
                     mag_filter: wgpu::FilterMode::Nearest,
                     sampler: None,
@@ -155,7 +160,8 @@ impl FrameBuffer {
                         format,
                         mip_level_count: 1,
                         view_dim: wgpu::TextureViewDimension::D2,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
                         address_mode: Some(wgpu::AddressMode::ClampToEdge),
                         mag_filter: wgpu::FilterMode::Nearest,
                         sampler: None,

@@ -75,7 +75,7 @@ impl Physics {
         };
 
         let medium_props = medium.properties();
-        let delta =  dt as f32;
+        let delta = dt as f32;
         let drag_factor = medium_props.drag.powf(dt as f32);
         let max_fall_speed = -50.0;
         let delta_gravity_y = medium_props.gravity.y * delta;
@@ -99,7 +99,7 @@ impl Physics {
                             vel.0.z = 0.0;
                         }
 
-                        vel.0.y +=delta_gravity_y;
+                        vel.0.y += delta_gravity_y;
                         vel.0.y = vel.0.y.max(max_fall_speed);
 
                         pos.0 += vel.0 * delta;
@@ -125,7 +125,7 @@ impl Physics {
                         vel.0.z = 0.0;
                     }
 
-                    vel.0.y += delta_gravity_y; 
+                    vel.0.y += delta_gravity_y;
                     vel.0.y = vel.0.y.max(max_fall_speed);
 
                     pos.0 += vel.0 * delta;

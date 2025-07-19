@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     camera::{Camera, CameraUniform, OrthoUniform},
-    log_error, CacheKey, DebugUniform, EngineError, Light, LightUniform, Texture,
-    WgpuBuffer,
+    log_error, CacheKey, DebugUniform, EngineError, Light, LightUniform, Texture, WgpuBuffer,
 };
 
 use super::{CacheStorage, HashCache, TextureManager};

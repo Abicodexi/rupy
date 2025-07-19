@@ -94,89 +94,114 @@ impl Model {
             aabb,
         })
     }
-  
-pub fn from_tobj(
-    queue: &wgpu::Queue,
-    device: &wgpu::Device,
-    material_manager: &mut MaterialManager,
-    texture_manager: &mut TextureManager,
-    shader_manager: &mut ShaderManager,
-    pipeline_manager: &mut PipelineManager,
-    bind_group_manager: &mut BindGroupManager,
-    layouts: &RenderBindGroupLayouts,
-    model: &tobj::Model,
-    material: Option<&tobj::Material>,
-    v_shader: &str,
-    f_shader: &str,
-    buffers: &[wgpu::VertexBufferLayout<'_>],
-    primitive: wgpu::PrimitiveState,
-    depth_stencil: Option<wgpu::DepthStencilState>,
-    format: wgpu::TextureFormat,
-    bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
-) -> Result<Model, EngineError> {
-    let mesh = &model.mesh;
 
-    let positions: Vec<_> = mesh.positions.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
-    let normals: Vec<_> = mesh.normals.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
-    let tex_coords: Vec<_> = mesh.texcoords.chunks(2).map(|c| [c[0], c[1]]).collect();
-    let colors = (!mesh.vertex_color.is_empty()).then(|| {
-        mesh.vertex_color.chunks(3).map(|c| [c[0], c[1], c[2]]).collect::<Vec<_>>()
-    });
+    pub fn from_tobj(
+        queue: &wgpu::Queue,
+        device: &wgpu::Device,
+        material_manager: &mut MaterialManager,
+        texture_manager: &mut TextureManager,
+        shader_manager: &mut ShaderManager,
+        pipeline_manager: &mut PipelineManager,
+        bind_group_manager: &mut BindGroupManager,
+        layouts: &RenderBindGroupLayouts,
+        model: &tobj::Model,
+        material: Option<&tobj::Material>,
+        v_shader: &str,
+        f_shader: &str,
+        buffers: &[wgpu::VertexBufferLayout<'_>],
+        primitive: wgpu::PrimitiveState,
+        depth_stencil: Option<wgpu::DepthStencilState>,
+        format: wgpu::TextureFormat,
+        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+    ) -> Result<Model, EngineError> {
+        let mesh = &model.mesh;
 
-    let indices: Vec<u16> = mesh.indices.iter().map(|&i| i as u16).collect();
+        let positions: Vec<_> = mesh
+            .positions
+            .chunks(3)
+            .map(|c| [c[0], c[1], c[2]])
+            .collect();
+        let normals: Vec<_> = mesh.normals.chunks(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let tex_coords: Vec<_> = mesh.texcoords.chunks(2).map(|c| [c[0], c[1]]).collect();
+        let colors = (!mesh.vertex_color.is_empty()).then(|| {
+            mesh.vertex_color
+                .chunks(3)
+                .map(|c| [c[0], c[1], c[2]])
+                .collect::<Vec<_>>()
+        });
 
-    let vertices = MeshAsset::compute_vertex(&positions, &normals, &tex_coords, &indices, colors.as_deref());
+        let indices: Vec<u16> = mesh.indices.iter().map(|&i| i as u16).collect();
 
-    let mat_asset = material.map(|mat| {
-        let mut asset: MaterialAsset = mat.into();
-        asset.primitive = primitive;
-        asset.color_target = wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::ALL,
+        let vertices = MeshAsset::compute_vertex(
+            &positions,
+            &normals,
+            &tex_coords,
+            &indices,
+            colors.as_deref(),
+        );
+
+        let mat_asset = material.map(|mat| {
+            let mut asset: MaterialAsset = mat.into();
+            asset.primitive = primitive;
+            asset.color_target = wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            };
+            asset.depth_stencil = depth_stencil;
+            asset.v_shader = v_shader.to_string();
+            asset.f_shader = f_shader.to_string();
+
+            asset.diffuse_texture = mat
+                .diffuse_texture
+                .as_deref()
+                .and_then(|dt| {
+                    texture_manager
+                        .get_or_load_texture(queue, device, dt, format)
+                        .ok()
+                })
+                .map(|t| t.0)
+                .or_else(|| Some(fallback_diffuse(queue, device, texture_manager).0));
+
+            asset.normal_texture = mat
+                .normal_texture
+                .as_deref()
+                .and_then(|nt| {
+                    texture_manager
+                        .get_or_load_texture(queue, device, nt, format)
+                        .ok()
+                })
+                .map(|t| t.0)
+                .or_else(|| Some(fallback_normal(queue, device, texture_manager).0));
+
+            asset
+        });
+
+        let model_asset = ModelAsset {
+            name: model.name.clone(),
+            asset: (MeshAsset { vertices, indices }, mat_asset),
+            aabb: AABB::default(),
         };
-        asset.depth_stencil = depth_stencil;
-        asset.v_shader = v_shader.to_string();
-        asset.f_shader = f_shader.to_string();
 
-        asset.diffuse_texture = mat.diffuse_texture.as_deref()
-            .and_then(|dt| texture_manager.get_or_load_texture(queue, device, dt, format).ok())
-            .map(|t| t.0)
-            .or_else(|| Some(fallback_diffuse(queue, device, texture_manager).0));
+        let (instance, aabb) = model_asset.load_asset(
+            queue,
+            device,
+            material_manager,
+            texture_manager,
+            shader_manager,
+            pipeline_manager,
+            bind_group_manager,
+            layouts,
+            bind_group_layouts,
+            buffers,
+        )?;
 
-        asset.normal_texture = mat.normal_texture.as_deref()
-            .and_then(|nt| texture_manager.get_or_load_texture(queue, device, nt, format).ok())
-            .map(|t| t.0)
-            .or_else(|| Some(fallback_normal(queue, device, texture_manager).0));
-
-        asset
-    });
-
-    let model_asset = ModelAsset {
-        name: model.name.clone(),
-        asset: (MeshAsset { vertices, indices }, mat_asset),
-        aabb: AABB::default(),
-    };
-
-    let (instance, aabb) = model_asset.load_asset(
-        queue,
-        device,
-        material_manager,
-        texture_manager,
-        shader_manager,
-        pipeline_manager,
-        bind_group_manager,
-        layouts,
-        bind_group_layouts,
-        buffers,
-    )?;
-
-    Ok(Model {
-        name: model.name.clone(),
-        instance,
-        aabb,
-    })
-}
+        Ok(Model {
+            name: model.name.clone(),
+            instance,
+            aabb,
+        })
+    }
     pub fn from_gltf(
         queue: &wgpu::Queue,
         device: &wgpu::Device,
@@ -219,7 +244,8 @@ pub fn from_tobj(
 
                 let indices: Vec<u16> = reader
                     .read_indices()
-                   .map(|i| i.into_u32().map(|i| i as u16).collect()).unwrap_or_else(|| (0..positions.len() as u16).collect());
+                    .map(|i| i.into_u32().map(|i| i as u16).collect())
+                    .unwrap_or_else(|| (0..positions.len() as u16).collect());
 
                 let vertices =
                     MeshAsset::compute_vertex(&positions, &normals, &texcoords, &indices, None);
@@ -268,11 +294,11 @@ pub fn from_tobj(
                     v_shader: v_shader.to_string(),
                     f_shader: f_shader.to_string(),
                     primitive: primitive_state,
-                    color_target:   wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            },
+                    color_target: wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    },
 
                     depth_stencil: depth_stencil.clone(),
 

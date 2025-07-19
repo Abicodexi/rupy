@@ -240,7 +240,7 @@ impl AssetService {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-        format:wgpu::TextureFormat, 
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<Arc<Material>> {
         if let Some(mat_arc) = self.get_material(key) {
@@ -431,7 +431,7 @@ impl AssetService {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-       format: wgpu::TextureFormat, 
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         let mat_name = mat.name.clone();
@@ -463,7 +463,7 @@ impl AssetService {
                     &v_shader,
                     &f_shader,
                     primitive,
-                   format, 
+                    format,
                     &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                     depth_stencil,
                 )
@@ -658,7 +658,7 @@ impl AssetService {
         f_shader: String,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-       format: wgpu::TextureFormat,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         if let (

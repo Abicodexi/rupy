@@ -12,7 +12,6 @@ pub struct GPU {
     pub queue: std::sync::Arc<wgpu::Queue>,
 }
 
-
 pub fn select_best_backend() -> wgpu::Backends {
     #[cfg(target_os = "windows")]
     let preferred = wgpu::Backends::DX12 | wgpu::Backends::VULKAN;
@@ -30,27 +29,32 @@ pub fn select_best_backend() -> wgpu::Backends {
     preferred
 }
 
-
 pub fn select_available_backend() -> wgpu::Backends {
     // Try Vulkan first
     let vulkan_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            flags: wgpu::InstanceFlags::empty(),
-            ..Default::default()
-        });
-    if !vulkan_instance.enumerate_adapters(wgpu::Backends::VULKAN).is_empty() {
+        backends: wgpu::Backends::VULKAN,
+        flags: wgpu::InstanceFlags::empty(),
+        ..Default::default()
+    });
+    if !vulkan_instance
+        .enumerate_adapters(wgpu::Backends::VULKAN)
+        .is_empty()
+    {
         crate::log_debug!("✅ Vulkan available");
         return wgpu::Backends::VULKAN;
     }
 
     // Fallback to GL
-    let gl_instance =  wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN,
-            flags: wgpu::InstanceFlags::empty(),
-            ..Default::default()
-        });
+    let gl_instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
+        flags: wgpu::InstanceFlags::empty(),
+        ..Default::default()
+    });
 
-    if !gl_instance.enumerate_adapters(wgpu::Backends::GL).is_empty() {
+    if !gl_instance
+        .enumerate_adapters(wgpu::Backends::GL)
+        .is_empty()
+    {
         crate::log_debug!("⚠️ Vulkan missing, falling back to GL");
         return wgpu::Backends::GL;
     }
@@ -58,4 +62,3 @@ pub fn select_available_backend() -> wgpu::Backends {
     crate::log_debug!("No backends found, falling back to all()");
     wgpu::Backends::all()
 }
-

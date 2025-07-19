@@ -49,10 +49,11 @@ impl Rupy {
         asset_rx: Arc<Receiver<AssetRequest>>,
     ) -> Result<Rupy, EngineError> {
         engine::gpu_global::init_global_gpu(
-        engine::GpuBuilder::new()
-            .backends(engine::select_available_backend())
-            .power_preference(wgpu::PowerPreference::LowPower)
-            .features(wgpu::Features::default()));
+            engine::GpuBuilder::new()
+                .backends(engine::select_available_backend())
+                .power_preference(wgpu::PowerPreference::LowPower)
+                .features(wgpu::Features::default()),
+        );
 
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
@@ -74,15 +75,17 @@ impl Rupy {
                     "surface isn't supported by this adapter".into(),
                 ))?;
             let surface_caps = surface.get_capabilities(&gpu.adapter);
-   
-            let format = surface_caps.formats.iter()
+
+            let format = surface_caps
+                .formats
+                .iter()
                 .copied()
                 .find(|f| f.is_srgb())
                 .unwrap_or(Texture::DEFAULT_FORMAT);
             engine::log_debug!("Selected format: {:?}", format);
             surface_config.format = format;
             surface_config.view_formats = vec![];
-            surface_config.present_mode = wgpu::PresentMode::AutoVsync;
+            surface_config.present_mode = wgpu::PresentMode::Immediate;
             (surface, surface_config, gpu)
         };
 
@@ -102,7 +105,7 @@ impl Rupy {
             service.bind_group_layouts(),
             width as f32,
             height as f32,
-            5.0,
+            25.0,
             0.4,
         );
 
@@ -199,7 +202,7 @@ impl Rupy {
                 Some("cube-normal.png"),
             )
             .build(&service)?;
-       service.load_gltf(
+        service.load_gltf(
             "immith.glb".to_string(),
             "normal.vert.wgsl".to_string(),
             "normal.frag.wgsl".to_string(),
@@ -218,7 +221,7 @@ impl Rupy {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-          surface_config.format, 
+            surface_config.format,
             Some(wgpu::DepthStencilState {
                 format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
@@ -332,11 +335,11 @@ impl Rupy {
         self.time.update(Time::MAX_FRAME_TIME);
         let menu_visible = self.menu.is_visible();
         let clicked = self.camera.controller().mouse_pressed();
-        let mouse_pos = if let Some(pos) = self.camera.controller().last_mouse_pos() {
-            Some((pos.x, pos.y))
-        } else {
-            None
-        };
+        let mouse_pos = self
+            .camera
+            .controller()
+            .last_mouse_pos()
+            .map(|pos| (pos.x, pos.y));
         if menu_visible {
             let ui_events = self.menu.update(mouse_pos, clicked);
             for ev in ui_events {
@@ -384,15 +387,16 @@ impl Rupy {
                             self.world.insert_rotation(cam_update.entity, rot);
                         }
                     }
-                }
-                self.world.update(
-                    self.service.queue(),
-                    self.service.device(),
-                    &self.time,
-                    &self.camera,
-                    self.bossman,
-                );
+                    self.world.update(
+                        self.service.queue(),
+                        self.service.device(),
+                        &self.time,
+                        &self.camera,
+                        self.bossman,
+                    );
 
+
+                }
                 if let Ok(models) = self.service.models() {
                     self.render3d.instances.update(
                         self.service.device(),

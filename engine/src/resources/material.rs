@@ -80,7 +80,7 @@ impl From<tobj::Material> for MaterialAsset {
             normal_texture: None,
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            color_target:  wgpu::ColorTargetState {
+            color_target: wgpu::ColorTargetState {
                 format: Texture::DEFAULT_FORMAT,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
@@ -259,7 +259,9 @@ impl Material {
         asset.f_shader = f_shader.to_owned();
         asset.primitive = primitive;
         asset.color_target = wgpu::ColorTargetState {
-format,blend: Some( wgpu::BlendState::REPLACE), write_mask: wgpu::ColorWrites::ALL,
+            format,
+            blend: Some(wgpu::BlendState::REPLACE),
+            write_mask: wgpu::ColorWrites::ALL,
         };
         asset.diffuse_texture = if let Some(dt) = diffuse_tex {
             Some(
@@ -387,9 +389,8 @@ impl MaterialStorage {
 }
 impl Default for MaterialStorage {
     fn default() -> Self {
-Self::new()        
+        Self::new()
     }
-
 }
 pub struct MaterialManager {
     materials: HashCache<Arc<Material>>,
@@ -434,7 +435,7 @@ impl MaterialManager {
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
-      format:wgpu::TextureFormat, 
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
@@ -454,7 +455,7 @@ impl MaterialManager {
             v_shader,
             f_shader,
             primitive,
-      format, 
+            format,
             buffers,
             depth_stencil.clone(),
         )?;
@@ -477,7 +478,7 @@ impl MaterialManager {
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
-       format:wgpu::TextureFormat, 
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
@@ -594,9 +595,9 @@ impl MaterialManager {
     }
 }
 impl Default for MaterialManager {
-fn default() -> Self {
-    Self::new()
-}
+    fn default() -> Self {
+        Self::new()
+    }
 }
 impl crate::CacheStorage<std::sync::Arc<Material>> for MaterialManager {
     fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Material>> {
