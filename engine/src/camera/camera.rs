@@ -236,7 +236,7 @@ impl Camera {
 
         let rotation = {
             Some(Rotation::from(Quat::from_mat4(
-                &Mat4::look_at_rh(Vec3::ZERO, forward_vec, up).inverse(),
+                &Mat4::look_at_lh(Vec3::ZERO, forward_vec, up).inverse(),
             )))
         };
 
@@ -381,7 +381,7 @@ pub fn compute_target_from_quat(eye: Vec3, rotation: Quat, distance: f32) -> Vec
 pub fn rotation_to_face(forward: Vec3, up: Vec3) -> Quat {
     let f = forward.normalize();
     let u = up.normalize();
-    Quat::from_mat4(&Mat4::look_at_rh(Vec3::ZERO, f, u).inverse())
+    Quat::from_mat4(&Mat4::look_at_lh(Vec3::ZERO, f, u).inverse())
 }
 
 pub fn ray_intersects_ray_sphere(

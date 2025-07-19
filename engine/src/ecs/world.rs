@@ -181,7 +181,7 @@ impl World {
         buffers: &[wgpu::VertexBufferLayout<'_>],
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<CacheKey> {
         match model_manager
@@ -200,7 +200,7 @@ impl World {
                 buffers,
                 bind_group_layouts,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             )
             .block_on()
@@ -276,7 +276,7 @@ impl World {
                     self.rotations[i].as_ref(),
                     self.scales[i].as_ref(),
                 ) {
-                    *transform = Some(Transform::from_components(pos, rot, scale));
+                    *transform = Some(Transform::from_components(Some(pos), rot, scale));
                 }
             });
     }

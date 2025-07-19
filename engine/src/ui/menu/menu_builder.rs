@@ -82,11 +82,11 @@ impl MenuBuilder {
             self.screen_h,
             self.container,
         )?;
-        let mut images: Vec<image::RgbaImage> = Vec::new();
+        let mut images: Vec<image::DynamicImage> = Vec::new();
         for elem in self.elements {
             if let Some(tex) = elem.texture() {
                 let path = AssetLoader::resolve("textures").join(tex);
-                let img_rgba = AssetLoader::image(path)?.to_rgba8();
+                let img_rgba = AssetLoader::image(path)?;
                 images.push(img_rgba);
             }
             menu.add_element(elem);
@@ -96,7 +96,7 @@ impl MenuBuilder {
             service.device(),
             service.queue(),
             &images,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
             "ui_texture_array",
         );
         let array_tex_bg =

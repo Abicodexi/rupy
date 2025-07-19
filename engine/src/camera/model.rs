@@ -77,12 +77,6 @@ impl CameraModel {
             conservative: false,
         };
 
-        let color_target = wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-            write_mask: wgpu::ColorWrites::ALL,
-        };
-
         let depth_stencil = wgpu::DepthStencilState {
             format: Texture::DEPTH_FORMAT,
             depth_write_enabled: true,
@@ -97,7 +91,7 @@ impl CameraModel {
             f_shader.to_string(),
             bind_group_layouts,
             primitive,
-            color_target,
+            format,
             Some(depth_stencil),
         );
     }

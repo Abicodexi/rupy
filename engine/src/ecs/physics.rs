@@ -11,7 +11,7 @@ pub const GRAVITY: f32 = -9.81;
 
 pub const ENTITY_MIN_Y: f32 = GROUND_Y + 2.0;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Physics {
     positions: Vec<Option<Position>>,
     velocities: Vec<Option<Velocity>>,
@@ -75,13 +75,14 @@ impl Physics {
         };
 
         let medium_props = medium.properties();
+        let delta =  dt as f32;
         let drag_factor = medium_props.drag.powf(dt as f32);
         let max_fall_speed = -50.0;
+        let delta_gravity_y = medium_props.gravity.y * delta;
 
         let len = self.velocities.len();
 
         let use_parallel = len >= RAYON_PARALLEL_THRESHOLD;
-
         if use_parallel {
             self.positions
                 .par_iter_mut()
@@ -98,10 +99,10 @@ impl Physics {
                             vel.0.z = 0.0;
                         }
 
-                        vel.0.y += medium_props.gravity.y * dt as f32;
+                        vel.0.y +=delta_gravity_y;
                         vel.0.y = vel.0.y.max(max_fall_speed);
 
-                        pos.0 += vel.0 * dt as f32;
+                        pos.0 += vel.0 * delta;
 
                         if pos.0.y < ENTITY_MIN_Y {
                             pos.0.y = ENTITY_MIN_Y;
@@ -124,10 +125,10 @@ impl Physics {
                         vel.0.z = 0.0;
                     }
 
-                    vel.0.y += medium_props.gravity.y * dt as f32;
+                    vel.0.y += delta_gravity_y; 
                     vel.0.y = vel.0.y.max(max_fall_speed);
 
-                    pos.0 += vel.0 * dt as f32;
+                    pos.0 += vel.0 * delta;
 
                     if pos.0.y < ENTITY_MIN_Y {
                         pos.0.y = ENTITY_MIN_Y;

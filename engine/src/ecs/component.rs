@@ -6,7 +6,7 @@ use super::Entity;
 
 use glam::{Mat4, Quat, Vec3};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Position(pub Vec3);
 
 impl Position {
@@ -24,7 +24,7 @@ impl Position {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Velocity(pub Vec3);
 
 impl From<(f32, f32, f32)> for Velocity {
@@ -126,8 +126,8 @@ impl Default for Transform {
 }
 
 impl Transform {
-    pub fn from_components(pos: &Position, rot: &Rotation, scale: &Scale) -> Self {
-        let translation = Mat4::from_translation(pos.0);
+    pub fn from_components(pos: Option<&Position>, rot: &Rotation, scale: &Scale) -> Self {
+        let translation = Mat4::from_translation(pos.unwrap_or(&Position::default()).0);
         let rotation = Mat4::from_quat(rot.0);
         let scaling = Mat4::from_scale(scale.0);
 
@@ -145,10 +145,11 @@ impl Transform {
         instance
     }
 }
-impl Into<VertexInstance> for &Transform {
-    fn into(self) -> VertexInstance {
-        let model: [[f32; 4]; 4] = self.model_matrix.to_cols_array_2d();
-        let normal: [[f32; 4]; 4] = self.normal_matrix.to_cols_array_2d();
+
+impl From<&Transform> for VertexInstance {
+    fn from(transform: &Transform) -> Self {
+        let model = transform.model_matrix.to_cols_array_2d();
+        let normal = transform.normal_matrix.to_cols_array_2d();
 
         VertexInstance {
             model,
@@ -165,10 +166,11 @@ impl Into<VertexInstance> for &Transform {
         }
     }
 }
-impl Into<VertexInstance> for Transform {
-    fn into(self) -> VertexInstance {
-        let model: [[f32; 4]; 4] = self.model_matrix.to_cols_array_2d();
-        let normal: [[f32; 4]; 4] = self.normal_matrix.to_cols_array_2d();
+
+impl From<Transform> for VertexInstance {
+    fn from(transform: Transform) -> Self {
+        let model = transform.model_matrix.to_cols_array_2d();
+        let normal = transform.normal_matrix.to_cols_array_2d();
 
         VertexInstance {
             model,
@@ -190,21 +192,33 @@ impl Into<VertexInstance> for Transform {
 pub struct Renderable {
     pub model_keys: Vec<CacheKey>,
     pub visible: bool,
+    pub instances: Vec<(Position, Option<Rotation>, Option<Scale>)>,
 }
-
 impl Renderable {
     pub fn new(keys: Vec<CacheKey>) -> Self {
         Self {
             model_keys: keys,
+            instances: Vec::new(),
             visible: true,
         }
     }
+
+    pub fn add_instance(
+        &mut self,
+        position: Position,
+        rotation: Option<Rotation>,
+        scale: Option<Scale>,
+    ) {
+        self.instances.push((position, rotation, scale));
+    }
+
 }
 
 impl From<crate::Entity> for Renderable {
     fn from(value: crate::Entity) -> Self {
         Self {
             model_keys: vec![value.into()],
+            instances: Vec::new(),
             visible: true,
         }
     }
@@ -214,6 +228,7 @@ impl From<&crate::Entity> for Renderable {
     fn from(value: &crate::Entity) -> Self {
         Self {
             model_keys: vec![value.clone().into()],
+            instances: Vec::new(),
             visible: true,
         }
     }
@@ -281,3 +296,9 @@ impl<T> ComponentVec<T> {
             .zip(self.components.iter_mut())
     }
 }
+
+impl<T> Default for ComponentVec<T>{
+    fn default() -> Self {
+   Self::new() 
+    }
+    }

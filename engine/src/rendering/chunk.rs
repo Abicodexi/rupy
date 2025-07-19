@@ -146,7 +146,7 @@ impl Chunk {
     }
     pub fn build_flat_chunk_mesh(&self) -> MeshAsset {
         let mut vertices = Vec::new();
-        let mut indices = Vec::new();
+        let mut indices: Vec<u16> = Vec::new();
 
         let (normal, tangent, corners, uvs) = &CHUNK_FACES[2];
 
@@ -166,7 +166,7 @@ impl Chunk {
                     1 => [0.5, 0.5, 0.5],
                     _ => [1.0, 1.0, 1.0],
                 };
-                let base = vertices.len() as u32;
+                let base = vertices.len() as u16;
                 for i in 0..4 {
                     vertices.push(Vertex {
                         position: [
@@ -187,8 +187,7 @@ impl Chunk {
     }
     pub fn build_chunk_mesh(&self) -> MeshAsset {
         let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        let _index_offset = 0u32;
+        let mut indices: Vec<u16> = Vec::new();
 
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
@@ -237,7 +236,7 @@ impl Chunk {
                             _ => [1.0, 1.0, 1.0], // default
                         };
 
-                        let base = vertices.len() as u32;
+                        let base = vertices.len() as u16;
                         for i in 0..4 {
                             vertices.push(Vertex {
                                 position: [

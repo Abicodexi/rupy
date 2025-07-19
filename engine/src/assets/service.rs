@@ -28,7 +28,6 @@ use wgpu::ComputePipeline;
 use wgpu::DepthStencilState;
 use wgpu::RenderPipeline;
 use wgpu::ShaderModule;
-use wgpu::TextureFormat;
 use wgpu::VertexBufferLayout;
 
 static GLOBAL_ASSET_SERVICE: OnceCell<Arc<AssetService>> = OnceCell::new();
@@ -213,7 +212,7 @@ impl AssetService {
         f_shader: String,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<Arc<Model>> {
         if let Some(model) = self.get_model(key) {
@@ -225,7 +224,7 @@ impl AssetService {
                 f_shader,
                 bind_group_layouts,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             );
             self.get_model(key)
@@ -241,7 +240,7 @@ impl AssetService {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format:wgpu::TextureFormat, 
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Option<Arc<Material>> {
         if let Some(mat_arc) = self.get_material(key) {
@@ -253,7 +252,7 @@ impl AssetService {
                 v_shader,
                 f_shader,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             );
             self.get_material(key)
@@ -383,7 +382,7 @@ impl AssetService {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         let mat_name = mat.name.clone();
@@ -414,7 +413,7 @@ impl AssetService {
                 &v_shader,
                 &f_shader,
                 primitive,
-                color_target,
+                format,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                 depth_stencil,
             ) {
@@ -432,7 +431,7 @@ impl AssetService {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+       format: wgpu::TextureFormat, 
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         let mat_name = mat.name.clone();
@@ -464,7 +463,7 @@ impl AssetService {
                     &v_shader,
                     &f_shader,
                     primitive,
-                    color_target,
+                   format, 
                     &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                     depth_stencil,
                 )
@@ -565,7 +564,7 @@ impl AssetService {
         f_shader: String,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        color_target: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         if let (
@@ -612,7 +611,7 @@ impl AssetService {
         f_shader: String,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         if let (
@@ -644,9 +643,8 @@ impl AssetService {
                 &f_shader,
                 &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                 bind_group_layouts,
-                color_target.format,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             )) {
                 log_error!("Failed to load glTF: {}", e.to_string());
@@ -660,7 +658,7 @@ impl AssetService {
         f_shader: String,
         bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+       format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) {
         if let (
@@ -694,7 +692,7 @@ impl AssetService {
                     &[Vertex::LAYOUT, VertexInstance::LAYOUT],
                     bind_group_layouts,
                     primitive,
-                    color_target,
+                    format,
                     depth_stencil,
                 )
                 .await
@@ -933,7 +931,7 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                 v_shader,
                 f_shader,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             } => {
                 service.load_material(
@@ -942,7 +940,7 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                     v_shader,
                     f_shader,
                     primitive,
-                    color_target,
+                    format,
                     depth_stencil,
                 );
             }
@@ -964,7 +962,7 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                 f_shader,
                 bind_group_layouts,
                 primitive,
-                color_target,
+                format,
                 depth_stencil,
             } => {
                 service.load_model(
@@ -973,7 +971,7 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                     f_shader,
                     bind_group_layouts,
                     primitive,
-                    color_target,
+                    format,
                     depth_stencil,
                 );
             }

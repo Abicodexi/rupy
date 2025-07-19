@@ -22,7 +22,7 @@ pub enum AssetRequest {
         f_shader: String,
         bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     },
     LoadModelAsset {
@@ -35,7 +35,7 @@ pub enum AssetRequest {
         v_shader: String,
         f_shader: String,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     },
     LoadMaterialAsset {

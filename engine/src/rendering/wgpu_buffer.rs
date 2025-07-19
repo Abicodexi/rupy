@@ -93,7 +93,7 @@ impl WgpuBuffer {
         offset: Option<u64>,
     ) {
         let bytes = bytemuck::cast_slice(data);
-        let size = (std::mem::size_of::<T>() * data.len()) as u64;
+        let size = std::mem::size_of_val(data) as u64;
         if size > self.buffer.size() {
             self.buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&self.label),

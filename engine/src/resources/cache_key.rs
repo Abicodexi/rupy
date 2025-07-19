@@ -1,5 +1,7 @@
 use std::hash::{Hash, Hasher};
 
+use crate::Renderable;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct CacheKey {
     id: u64,
@@ -41,19 +43,9 @@ impl From<crate::Entity> for CacheKey {
         Self { id: value.0 as u64 }
     }
 }
-impl Into<crate::Renderable> for CacheKey {
-    fn into(self) -> crate::Renderable {
-        crate::Renderable {
-            model_keys: vec![self],
-            visible: true,
-        }
-    }
-}
-impl Into<crate::Renderable> for &CacheKey {
-    fn into(self) -> crate::Renderable {
-        crate::Renderable {
-            model_keys: vec![self.clone()],
-            visible: true,
-        }
-    }
+
+impl From<CacheKey> for Renderable {
+fn from(value: CacheKey) -> Self {
+    Self::new(vec![value])
+  }  
 }

@@ -1,6 +1,6 @@
 use crate::{
-    AssetLoader, AssetService, BindGroup, CacheKey, EngineError, Light, Medium, Terrain, Texture,
-    WgpuBuffer,
+  AssetService, BindGroup, CacheKey, EngineError,Texture,AssetLoader,Terrain,Light,Medium,WgpuBuffer
+   
 };
 use std::sync::Arc;
 
@@ -13,11 +13,12 @@ pub struct SkyProjection {
     pub src_bind_group: Arc<wgpu::BindGroup>,
     pub dst_bind_group: Arc<wgpu::BindGroup>,
 }
+use crate::TextureDescriptor;
 
 impl SkyProjection {
     pub const DEST_SIZE: u32 = 1080;
     pub const NUM_WORKGROUPS: u32 = (Self::DEST_SIZE + 15) / 16;
-    pub const DEPTH_OR_ARRAY_LAYERS: u32 = 6;
+
     pub fn new(
         service: &AssetService,
         config: &wgpu::SurfaceConfiguration,
@@ -33,21 +34,25 @@ impl SkyProjection {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
+
         let dst_texture = service.get_or_create_texture(dst_key, || {
             Ok(Texture::new(
                 service.device(),
-                wgpu::Extent3d {
-                    width: Self::DEST_SIZE,
-                    height: Self::DEST_SIZE,
-                    depth_or_array_layers: Self::DEPTH_OR_ARRAY_LAYERS,
+                TextureDescriptor {
+                    size: wgpu::Extent3d {
+                        width: Self::DEST_SIZE,
+                        height: Self::DEST_SIZE,
+                        depth_or_array_layers: 6,
+                    },
+                    format: Texture::HDR_FORMAT,
+                    mip_level_count: 1,
+                    view_dim: wgpu::TextureViewDimension::Cube,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    address_mode: Some(wgpu::AddressMode::ClampToEdge),
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    sampler: None,
                 },
-                crate::Texture::HDR_FORMAT,
-                1,
-                wgpu::TextureViewDimension::Cube,
-                wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                Some(wgpu::AddressMode::ClampToEdge),
-                wgpu::FilterMode::Nearest,
-                None,
                 Some("projection destination texture"),
             )
             .into())
@@ -62,18 +67,21 @@ impl SkyProjection {
             let (pixels, meta) = Texture::decode_hdr(&bytes)?;
             let src_tex = Texture::new(
                 service.device(),
-                wgpu::Extent3d {
-                    width: meta.width,
-                    height: meta.height,
-                    depth_or_array_layers: 1,
+                TextureDescriptor {
+                    size: wgpu::Extent3d {
+                        width: meta.width,
+                        height: meta.height,
+                        depth_or_array_layers: 1,
+                    },
+                    format: Texture::HDR_FORMAT,
+                    mip_level_count: 1,
+                    view_dim: wgpu::TextureViewDimension::D2,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST,
+                    address_mode: None,
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    sampler: None,
                 },
-                Texture::HDR_FORMAT,
-                1,
-                wgpu::TextureViewDimension::D2,
-                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                None,
-                wgpu::FilterMode::Linear,
-                None,
                 Some("projection source texture"),
             );
             service.queue().write_texture(
@@ -102,6 +110,7 @@ impl SkyProjection {
             )
             .into())
         })?;
+
         let src_bind_group = service.get_or_create_bind_group("projection_src".into(), || {
             Ok(BindGroup::equirect_src(
                 service.device(),
@@ -116,8 +125,8 @@ impl SkyProjection {
             service
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some(&format!("Equirect source pipeline layout")),
-                    bind_group_layouts: &[&service.bind_group_layouts().equirect_src()],
+                    label: Some("Equirect source pipeline layout"),
+                    bind_group_layouts: &[service.bind_group_layouts().equirect_src()],
                     push_constant_ranges: &[],
                 });
 
@@ -142,6 +151,7 @@ impl SkyProjection {
                     ],
                     push_constant_ranges: &[],
                 });
+
         let dst_pipeline = service
             .get_or_load_render_pipeline(
                 dst_shader,
@@ -186,6 +196,7 @@ impl SkyProjection {
         drop(pass);
         queue.submit([encoder.finish()]);
     }
+
     pub fn render(&self, rpass: &mut wgpu::RenderPass, uniform_bind_group: &wgpu::BindGroup) {
         rpass.set_bind_group(0, uniform_bind_group, &[]);
         rpass.set_bind_group(1, self.dst_bind_group.as_ref(), &[]);
@@ -193,7 +204,6 @@ impl SkyProjection {
         rpass.draw(0..3, 0..1);
     }
 }
-
 #[derive(Debug)]
 pub struct Environment {
     sky: SkyProjection,
@@ -209,28 +219,19 @@ impl Environment {
         dst_shader: &str,
         hdr_texture: &str,
     ) -> Result<Self, EngineError> {
-        let sky = SkyProjection::new(service, config, src_shader, dst_shader, hdr_texture)?;
-        let light = Light::new(service.device(), service.bind_group_layouts())?;
-        let terrain = Terrain::new(Medium::Ground);
-
         Ok(Self {
-            sky,
-            light,
-            terrain,
+            sky: SkyProjection::new(service, config, src_shader, dst_shader, hdr_texture)?,
+            light: Light::new(service.device(), service.bind_group_layouts())?,
+            terrain: Terrain::new(Medium::Ground),
         })
+    }
+
+    pub fn compute_sky_projection(&self, queue: &wgpu::Queue, device: &wgpu::Device) {
+        self.sky.compute_projection(queue, device, Some("compute sky projection"));
     }
 
     pub fn render_skybox(&self, rpass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
         self.sky.render(rpass, camera_bind_group);
-    }
-
-    pub fn compute_sky_projection(&self, queue: &wgpu::Queue, device: &wgpu::Device) {
-        self.sky
-            .compute_projection(queue, device, Some("compute sky projection"));
-    }
-
-    pub fn sky_texture(&self) -> &Arc<Texture> {
-        &self.sky.dst_texture
     }
 
     pub fn update_light(&mut self, time: f64) {
@@ -241,12 +242,8 @@ impl Environment {
         self.light.upload(queue, device);
     }
 
-    pub fn light_bind_group(&self) -> &wgpu::BindGroup {
-        self.light.bind_group()
-    }
-
-    pub fn light_buffer(&self) -> &WgpuBuffer {
-        self.light.buffer()
+    pub fn sky_texture(&self) -> &Arc<Texture> {
+        &self.sky.dst_texture
     }
 
     pub fn light(&self) -> &Light {
@@ -255,6 +252,14 @@ impl Environment {
 
     pub fn light_mut(&mut self) -> &mut Light {
         &mut self.light
+    }
+
+    pub fn light_bind_group(&self) -> &wgpu::BindGroup {
+        self.light.bind_group()
+    }
+
+    pub fn light_buffer(&self) -> &WgpuBuffer {
+        self.light.buffer()
     }
 
     pub fn terrain(&self) -> &Terrain {

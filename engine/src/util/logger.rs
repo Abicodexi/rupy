@@ -57,11 +57,11 @@ impl Default for LogFactory {
 impl LogFactory {
     pub fn new(level: LevelFilter) -> Self {
         let level_filters = LogLevelFilterFactory::new()
-            .set_default_level(LevelFilter::Info)
+            .set_default_level(LevelFilter::Warn)
             .add_filter("naga")
             .add_filter("cosmic_text")
             .add_filter("wgpu_core")
-            .set_default_level(LevelFilter::Debug)
+            .set_default_level(LevelFilter::Info)
             .add_filter("wgpu_hal");
         let mut env_logger_builder = env_logger::Builder::new();
         env_logger_builder.filter_level(level);

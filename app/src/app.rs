@@ -7,7 +7,7 @@ use engine::{
     ApplicationEvent, AssetRequest, AssetService, BindGroup, CacheKey, DebugMode, Dispatch,
     EngineError, Entity, Environment, FrameBuffer, GlyphonTextRenderer, Medium, Position,
     RenderPass, RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner,
-    SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World, GPU,
+    SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World,
 };
 use glam::Vec3;
 use std::sync::Arc;
@@ -48,7 +48,11 @@ impl Rupy {
         asset_tx: Arc<Sender<AssetRequest>>,
         asset_rx: Arc<Receiver<AssetRequest>>,
     ) -> Result<Rupy, EngineError> {
-        GPU::init();
+        engine::gpu_global::init_global_gpu(
+        engine::GpuBuilder::new()
+            .backends(engine::select_available_backend())
+            .power_preference(wgpu::PowerPreference::LowPower)
+            .features(wgpu::Features::default()));
 
         let win_attrs = WindowAttributes::default().with_title("RupyEngine");
         let window = Arc::new(event_loop.create_window(win_attrs)?);
@@ -57,23 +61,32 @@ impl Rupy {
             let inner_size = window.inner_size();
             (inner_size.width, inner_size.height)
         };
-        let binding = GPU::get();
+        let binding = engine::gpu_global::get_global_gpu();
         let (surface, surface_config, gpu) = {
             let gpu = binding
                 .read()
-                .map_err(|e| EngineError::GpuError(format!("{}", e.to_string())))?;
+                .map_err(|e| EngineError::GpuError(e.to_string()))?;
 
-            let surface = gpu.instance().create_surface(win_clone)?;
+            let surface = gpu.instance.create_surface(win_clone)?;
             let mut surface_config = surface
-                .get_default_config(&gpu.adapter(), width, height)
+                .get_default_config(&gpu.adapter, width, height)
                 .ok_or(EngineError::SurfaceConfigError(
                     "surface isn't supported by this adapter".into(),
                 ))?;
+            let surface_caps = surface.get_capabilities(&gpu.adapter);
+   
+            let format = surface_caps.formats.iter()
+                .copied()
+                .find(|f| f.is_srgb())
+                .unwrap_or(Texture::DEFAULT_FORMAT);
+            engine::log_debug!("Selected format: {:?}", format);
+            surface_config.format = format;
+            surface_config.view_formats = vec![];
             surface_config.present_mode = wgpu::PresentMode::AutoVsync;
             (surface, surface_config, gpu)
         };
 
-        AssetService::spawn_thread(gpu.queue().clone(), gpu.device().clone(), asset_rx);
+        AssetService::spawn_thread(gpu.queue.clone(), gpu.device.clone(), asset_rx);
 
         let service = asset_service();
         let device = service.device();
@@ -97,7 +110,7 @@ impl Rupy {
         render_targets.insert(
             FrameBuffer::new_with_depth(
                 device,
-                (surface_config.width, surface_config.height).into(),
+                (surface_config.width, surface_config.height),
                 surface_config.format,
                 Texture::DEPTH_FORMAT,
                 "scene buffer",
@@ -107,7 +120,7 @@ impl Rupy {
         render_targets.insert(
             FrameBuffer::new_color_only(
                 device,
-                (surface_config.width, surface_config.height).into(),
+                (surface_config.width, surface_config.height),
                 surface_config.format,
                 "hdr buffer",
             ),
@@ -156,7 +169,7 @@ impl Rupy {
                 &material,
             )?;
         }
-        let debug_mode = DebugMode::new(service, &camera, &world.light(), &surface_config)?;
+        let debug_mode = DebugMode::new(service, &camera, world.light(), &surface_config)?;
 
         let bossman = debug_scene(
             &asset_tx,
@@ -186,7 +199,7 @@ impl Rupy {
                 Some("cube-normal.png"),
             )
             .build(&service)?;
-        service.load_gltf(
+       service.load_gltf(
             "immith.glb".to_string(),
             "normal.vert.wgsl".to_string(),
             "normal.frag.wgsl".to_string(),
@@ -205,11 +218,7 @@ impl Rupy {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            wgpu::ColorTargetState {
-                format: surface_config.format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            },
+          surface_config.format, 
             Some(wgpu::DepthStencilState {
                 format: Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
@@ -294,7 +303,7 @@ impl Rupy {
             self.surface_config.height as f32,
         );
         self.menu.resize(
-            &self.service.queue(),
+            self.service.queue(),
             self.service.device(),
             self.surface_config.width as f32,
             self.surface_config.height as f32,
@@ -404,7 +413,7 @@ impl Rupy {
     pub fn upload(&mut self) {
         let queue = self.service.queue();
         let device = self.service.device();
-        self.camera.upload(&queue, &device);
+        self.camera.upload(queue, device);
         self.world.upload(queue, device);
         self.render3d.instances.upload(queue, device);
     }
@@ -468,7 +477,7 @@ impl Rupy {
                 self.service.device(),
                 self.service.bind_group_layouts(),
                 &mut encoder,
-                &scene_fb.color(),
+                scene_fb.color(),
                 hdr_fb,
             );
         }

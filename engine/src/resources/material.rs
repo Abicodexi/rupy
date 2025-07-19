@@ -80,9 +80,9 @@ impl From<tobj::Material> for MaterialAsset {
             normal_texture: None,
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            color_target: wgpu::ColorTargetState {
+            color_target:  wgpu::ColorTargetState {
                 format: Texture::DEFAULT_FORMAT,
-                blend: None,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             },
         }
@@ -247,11 +247,10 @@ impl Material {
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+        format: wgpu::TextureFormat,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Material, EngineError> {
-        let format = color_target.format.clone();
         let diffuse_tex = mat.diffuse_texture.as_ref().cloned();
         let normal_tex = mat.normal_texture.as_ref().cloned();
         let mut asset: MaterialAsset = mat.into();
@@ -259,7 +258,9 @@ impl Material {
         asset.v_shader = v_shader.to_owned();
         asset.f_shader = f_shader.to_owned();
         asset.primitive = primitive;
-        asset.color_target = color_target;
+        asset.color_target = wgpu::ColorTargetState {
+format,blend: Some( wgpu::BlendState::REPLACE), write_mask: wgpu::ColorWrites::ALL,
+        };
         asset.diffuse_texture = if let Some(dt) = diffuse_tex {
             Some(
                 textures
@@ -384,7 +385,12 @@ impl MaterialStorage {
         self.build(queue, device, layouts);
     }
 }
+impl Default for MaterialStorage {
+    fn default() -> Self {
+Self::new()        
+    }
 
+}
 pub struct MaterialManager {
     materials: HashCache<Arc<Material>>,
     storage: MaterialStorage,
@@ -428,11 +434,11 @@ impl MaterialManager {
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+      format:wgpu::TextureFormat, 
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
-        if let Some(mat) = self.materials.get(&CacheKey::from(format!("{}", mat.name))) {
+        if let Some(mat) = self.materials.get(&CacheKey::from(mat.name.to_string())) {
             return Ok(mat.clone());
         }
         let material = Material::from_tobj(
@@ -447,8 +453,8 @@ impl MaterialManager {
             mat,
             v_shader,
             f_shader,
-            primitive.clone(),
-            color_target.clone(),
+            primitive,
+      format, 
             buffers,
             depth_stencil.clone(),
         )?;
@@ -471,11 +477,11 @@ impl MaterialManager {
         v_shader: &'a str,
         f_shader: &'a str,
         primitive: wgpu::PrimitiveState,
-        color_target: wgpu::ColorTargetState,
+       format:wgpu::TextureFormat, 
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
         depth_stencil: Option<wgpu::DepthStencilState>,
     ) -> Result<Arc<Material>, EngineError> {
-        if let Some(mat) = self.materials.get(&CacheKey::from(format!("{}", mat.name))) {
+        if let Some(mat) = self.materials.get(&CacheKey::from(mat.name.to_string())) {
             return Ok(mat.clone());
         }
         let material = Material::from_tobj(
@@ -491,7 +497,7 @@ impl MaterialManager {
             v_shader,
             f_shader,
             primitive.clone(),
-            color_target.clone(),
+            format,
             buffers,
             depth_stencil.clone(),
         )?;
@@ -586,6 +592,11 @@ impl MaterialManager {
 
         Ok(material)
     }
+}
+impl Default for MaterialManager {
+fn default() -> Self {
+    Self::new()
+}
 }
 impl crate::CacheStorage<std::sync::Arc<Material>> for MaterialManager {
     fn get_resource(&self, key: &crate::CacheKey) -> Option<&std::sync::Arc<Material>> {

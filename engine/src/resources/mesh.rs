@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct MeshAsset {
     pub vertices: Vec<Vertex>,
-    pub indices: Vec<u32>,
+    pub indices: Vec<u16>,
 }
 impl MeshAsset {
     pub fn load_asset(
@@ -46,7 +46,7 @@ impl MeshAsset {
         positions: &[[f32; 3]],
         normals: &[[f32; 3]],
         tex_coords: &[[f32; 2]],
-        indices: &[u32],
+        indices: &[u16],
         vertex_colors: Option<&[[f32; 3]]>,
     ) -> Vec<Vertex> {
         let num_vertices = positions.len();

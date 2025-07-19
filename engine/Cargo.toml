@@ -24,6 +24,7 @@ tobj = "4.0.3"
 glam = "0.30.3"
 rayon = "1.10.0"
 gltf = "1.4.1"
+bitvec = "1.0.1"
 
 
 [features]

@@ -1,4 +1,4 @@
-use crate::{log_info, EngineError, Vertex2d, WgpuBuffer};
+use crate::{EngineError, Vertex2d, WgpuBuffer};
 
 pub struct Renderer2d {
     pub max_sprites: usize,
@@ -22,7 +22,7 @@ impl Renderer2d {
 
         let mut initial_indices = Vec::with_capacity(index_capacity);
         for i in 0..max_sprites {
-            let base = (i * 4) as u32;
+            let base = (i * 4) as u16;
             initial_indices.extend_from_slice(&[
                 base,
                 base + 1,
@@ -85,7 +85,7 @@ impl Renderer2d {
         );
 
         rpass.set_vertex_buffer(0, self.vertex_buffer.get().slice(..));
-        rpass.set_index_buffer(self.index_buffer.get().slice(..), wgpu::IndexFormat::Uint32);
+        rpass.set_index_buffer(self.index_buffer.get().slice(..), wgpu::IndexFormat::Uint16);
 
         let index_count = (num_verts as u32 / 4) * 6;
         rpass.draw_indexed(0..index_count, 0, 0..1);
