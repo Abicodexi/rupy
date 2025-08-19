@@ -1,7 +1,6 @@
-use super::{BindGroup, HashCache, Texture, TextureManager};
+use super::{HashCache, Texture, TextureManager};
 use crate::{
-    fallback_diffuse, fallback_normal, log_debug, BindGroupManager, CacheKey, CacheStorage,
-    EngineError, PipelineManager, RenderBindGroupLayouts, ShaderManager, WgpuBuffer,
+    fallback_diffuse, fallback_normal, gfx::{bind_group::{material_storage_group, material_storage_layout, normal_texture_layout, normal_textures_group, BindGroupManager}, buffer::WgpuBuffer, pipeline::PipelineManager}, log_debug, CacheKey, CacheStorage, EngineError, ShaderManager
 };
 use std::{collections::HashMap, sync::Arc};
 use wgpu::BufferUsages;
@@ -110,8 +109,7 @@ impl MaterialAsset {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<(Arc<wgpu::RenderPipeline>, Arc<wgpu::BindGroup>), EngineError> {
         let dt = self
@@ -131,7 +129,7 @@ impl MaterialAsset {
 
         let bind_group = bind_groups
             .get_or_create(cache_key, || {
-                Ok(BindGroup::normal(device, layouts, &dt, &nt, label.as_ref()).into())
+                Ok(normal_textures_group(device, &normal_texture_layout(device), &dt, &nt, label.as_ref()).into())
             })?
             .clone();
 
@@ -139,7 +137,7 @@ impl MaterialAsset {
             label: Some(&self.name),
             bind_group_layouts: &bind_group_layouts
                 .iter()
-                .map(|bgl| bgl.as_ref())
+                .map(|bgl| bgl)
                 .collect::<Vec<_>>(),
             push_constant_ranges: &[],
         });
@@ -210,8 +208,7 @@ impl Material {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: MaterialAsset,
     ) -> Result<Self, EngineError> {
@@ -222,7 +219,6 @@ impl Material {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             buffers,
         )?;
@@ -241,8 +237,7 @@ impl Material {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: &'a str,
         f_shader: &'a str,
@@ -291,7 +286,6 @@ impl Material {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             buffers,
             asset,
@@ -333,7 +327,6 @@ impl MaterialStorage {
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        layouts: &RenderBindGroupLayouts,
     ) {
         if self.storage.is_empty() {
             return;
@@ -359,9 +352,9 @@ impl MaterialStorage {
         };
 
         if recreate_bind_group {
-            self.bind_group = Some(BindGroup::material_storage(
+            self.bind_group = Some(material_storage_group(
                 device,
-                layouts,
+                &material_storage_layout(device),
                 self.buffer.as_ref().unwrap(),
                 Some("batched material storage buffer"),
             ));
@@ -375,7 +368,6 @@ impl MaterialStorage {
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        layouts: &RenderBindGroupLayouts,
         material: &mut Material,
     ) {
         material.storage_id = Some(self.id());
@@ -384,7 +376,7 @@ impl MaterialStorage {
             .storage
             .insert(material.asset.name.clone(), material.asset.data())
             .is_none();
-        self.build(queue, device, layouts);
+        self.build(queue, device);
     }
 }
 impl Default for MaterialStorage {
@@ -412,11 +404,10 @@ impl MaterialManager {
         &mut self,
         queue: &wgpu::Queue,
         device: &wgpu::Device,
-        layouts: &RenderBindGroupLayouts,
         mut material: Material,
     ) -> Arc<Material> {
         let key = material.asset.key;
-        self.storage.insert(queue, device, layouts, &mut material);
+        self.storage.insert(queue, device, &mut material);
         self.materials.insert(key, material.into());
         self.materials.get(&key).unwrap().clone()
     }
@@ -429,8 +420,7 @@ impl MaterialManager {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: &'a str,
         f_shader: &'a str,
@@ -449,7 +439,6 @@ impl MaterialManager {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             mat,
             v_shader,
@@ -460,7 +449,7 @@ impl MaterialManager {
             depth_stencil.clone(),
         )?;
 
-        let material = self.insert(queue, device, layouts, material);
+        let material = self.insert(queue, device,  material);
 
         Ok(material)
     }
@@ -472,8 +461,7 @@ impl MaterialManager {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: &'a str,
         f_shader: &'a str,
@@ -492,7 +480,6 @@ impl MaterialManager {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             mat,
             v_shader,
@@ -503,7 +490,7 @@ impl MaterialManager {
             depth_stencil.clone(),
         )?;
 
-        let material = self.insert(queue, device, layouts, material);
+        let material = self.insert(queue, device,  material);
 
         Ok(material)
     }
@@ -515,8 +502,7 @@ impl MaterialManager {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: MaterialAsset,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
@@ -531,7 +517,6 @@ impl MaterialManager {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             buffers,
         )?;
@@ -539,7 +524,6 @@ impl MaterialManager {
         let material = self.insert(
             queue,
             device,
-            layouts,
             Material {
                 asset,
                 pipeline,
@@ -558,8 +542,7 @@ impl MaterialManager {
         shaders: &mut ShaderManager,
         pipelines: &mut PipelineManager,
         bind_groups: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: MaterialAsset,
         buffers: &'a [wgpu::VertexBufferLayout<'a>],
     ) -> Result<Arc<Material>, EngineError> {
@@ -574,7 +557,6 @@ impl MaterialManager {
             shaders,
             pipelines,
             bind_groups,
-            layouts,
             bind_group_layouts,
             buffers,
         )?;
@@ -582,7 +564,6 @@ impl MaterialManager {
         let material = self.insert(
             queue,
             device,
-            layouts,
             Material {
                 asset,
                 pipeline,

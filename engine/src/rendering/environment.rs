@@ -1,6 +1,12 @@
 use crate::{
-    AssetLoader, AssetService, BindGroup, CacheKey, EngineError, Light, Medium, Terrain, Texture,
-    WgpuBuffer,
+    gfx::{
+        bind_group::{
+            global_uniform_layout, skybox_cubemap_group, skybox_cubemap_layout,
+            skybox_projection_input_group, skybox_projection_input_layout,
+        },
+        buffer::WgpuBuffer,
+    },
+    AssetLoader, AssetService, CacheKey, EngineError, Light, Medium, Terrain, Texture,
 };
 use std::sync::Arc;
 
@@ -101,31 +107,33 @@ impl SkyProjection {
             Arc::new(src_tex)
         };
 
-        let dst_bind_group = service.get_or_create_bind_group("projection_dst".into(), || {
-            Ok(BindGroup::equirect_dst(
-                service.device(),
-                service.bind_group_layouts(),
-                &dst_texture,
-            )
-            .into())
-        })?;
+        let dst_bind_group =
+            service.get_or_create_bind_group("skybox_cubemap_group".into(), || {
+                Ok(skybox_cubemap_group(
+                    service.device(),
+                    &skybox_cubemap_layout(service.device()),
+                    &dst_texture,
+                )
+                .into())
+            })?;
 
-        let src_bind_group = service.get_or_create_bind_group("projection_src".into(), || {
-            Ok(BindGroup::equirect_src(
-                service.device(),
-                service.bind_group_layouts(),
-                &src_texture,
-                &dst_texture,
-            )
-            .into())
-        })?;
+        let src_bind_group =
+            service.get_or_create_bind_group("skybox_projection_input_group".into(), || {
+                Ok(skybox_projection_input_group(
+                    service.device(),
+                    &skybox_projection_input_layout(service.device()),
+                    &src_texture,
+                    &dst_texture,
+                )
+                .into())
+            })?;
 
         let equirect_src_pipeline_layout =
             service
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Equirect source pipeline layout"),
-                    bind_group_layouts: &[service.bind_group_layouts().equirect_src()],
+                    bind_group_layouts: &[&skybox_projection_input_layout(service.device())],
                     push_constant_ranges: &[],
                 });
 
@@ -145,8 +153,8 @@ impl SkyProjection {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", dst_shader)),
                     bind_group_layouts: &[
-                        service.bind_group_layouts().uniform().as_ref(),
-                        service.bind_group_layouts().equirect_dst().as_ref(),
+                        &global_uniform_layout(service.device()),
+                        &skybox_cubemap_layout(service.device()),
                     ],
                     push_constant_ranges: &[],
                 });
@@ -220,7 +228,7 @@ impl Environment {
     ) -> Result<Self, EngineError> {
         Ok(Self {
             sky: SkyProjection::new(service, config, src_shader, dst_shader, hdr_texture)?,
-            light: Light::new(service.device(), service.bind_group_layouts())?,
+            light: Light::new(service.device())?,
             terrain: Terrain::new(Medium::Ground),
         })
     }

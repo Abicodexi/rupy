@@ -179,7 +179,6 @@ impl World {
                 ctx.shader_manager,
                 ctx.pipeline_manager,
                 ctx.bind_group_manager,
-                ctx.layouts,
                 desc.file,
                 desc.v_shader,
                 desc.f_shader,

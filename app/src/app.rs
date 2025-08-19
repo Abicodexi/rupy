@@ -2,12 +2,20 @@ use crossbeam::channel::{Receiver, Sender};
 use engine::{
     asset_service,
     camera::{Camera, Projection},
-    debug_scene, log_error, log_info, log_warning,
+    debug_scene,
+    gfx::{
+        bind_group::{
+            global_uniform_group, global_uniform_layout, material_storage_layout,
+            normal_texture_layout, skybox_cubemap_layout,
+        },
+        buffer::{FrameBuffer, RenderTargetKind},
+    },
+    log_error, log_info, log_warning,
     menu::{menu_element::MenuElement, Menu},
-    ApplicationEvent, AssetRequest, AssetService, BindGroup, CacheKey, DebugMode, Dispatch,
-    EngineError, Entity, Environment, FrameBuffer, GlyphonTextRenderer, Medium, Position,
-    RenderPass, RenderTargetKind, RenderTargetManager, Renderer2d, Renderer3d, ScreenCorner,
-    SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent, Velocity, World,
+    ApplicationEvent, AssetRequest, AssetService, CacheKey, DebugMode, Dispatch, EngineError,
+    Entity, Environment, GlyphonTextRenderer, Medium, Position, RenderPass, RenderTargetManager,
+    Renderer2d, Renderer3d, ScreenCorner, SurfaceExt, Terrain, TextRegion, Texture, Time, UiEvent,
+    Velocity, World,
 };
 use glam::Vec3;
 use std::sync::Arc;
@@ -100,14 +108,7 @@ impl Rupy {
         let rendertxt = GlyphonTextRenderer::new(device, service.queue(), surface_config.format);
 
         let projection = Projection::FirstPerson;
-        let mut camera = Camera::new(
-            device,
-            service.bind_group_layouts(),
-            width as f32,
-            height as f32,
-            25.0,
-            0.4,
-        );
+        let mut camera = Camera::new(device, width as f32, height as f32, 25.0, 0.4);
 
         let mut render_targets = RenderTargetManager::new();
         render_targets.insert(
@@ -145,9 +146,9 @@ impl Rupy {
 
         let mut world = World::new(environment, terrain)?;
         let uniform_bind_group = service.get_or_create_bind_group("uniform".into(), || {
-            Ok(BindGroup::uniform(
+            Ok(global_uniform_group(
                 device,
-                service.bind_group_layouts(),
+                &global_uniform_layout(service.device()),
                 camera.buffer(),
                 world.light().buffer(),
             )
@@ -176,9 +177,9 @@ impl Rupy {
 
         let bossman = debug_scene(
             &asset_tx,
-            service.bind_group_layouts(),
             &mut world,
             surface_config.format,
+            &device
         );
         let menu = Menu::builder(&surface_config, width, height)
             .with_position(200.0, 200.0)
@@ -207,10 +208,10 @@ impl Rupy {
             "normal.vert.wgsl".to_string(),
             "normal.frag.wgsl".to_string(),
             vec![
-                service.bind_group_layouts().uniform().clone(),
-                service.bind_group_layouts().equirect_dst().clone(),
-                service.bind_group_layouts().material_storage().clone(),
-                service.bind_group_layouts().normal().clone(),
+                global_uniform_layout(device),
+                skybox_cubemap_layout(device),
+                material_storage_layout(device),
+                normal_texture_layout(device),
             ],
             wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -288,7 +289,6 @@ impl Rupy {
     pub fn next_debug_mode(&mut self) {
         self.debug_mode.next_mode(
             self.service.device(),
-            self.service.bind_group_layouts(),
             &self.camera,
             self.world.light(),
         );
@@ -394,8 +394,6 @@ impl Rupy {
                         &self.camera,
                         self.bossman,
                     );
-
-
                 }
                 if let Ok(models) = self.service.models() {
                     self.render3d.instances.update(
@@ -479,7 +477,6 @@ impl Rupy {
         ) {
             self.render3d.hdr(
                 self.service.device(),
-                self.service.bind_group_layouts(),
                 &mut encoder,
                 scene_fb.color(),
                 hdr_fb,

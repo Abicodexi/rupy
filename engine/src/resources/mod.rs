@@ -1,6 +1,3 @@
-pub mod bind_group;
-pub use bind_group::*;
-
 pub mod material;
 pub use material::*;
 
@@ -26,9 +23,8 @@ pub struct LoadObjContext<'a> {
     pub material_manager: &'a mut MaterialManager,
     pub texture_manager: &'a mut TextureManager,
     pub shader_manager: &'a mut crate::ShaderManager,
-    pub pipeline_manager: &'a mut crate::PipelineManager,
-    pub bind_group_manager: &'a mut BindGroupManager,
-    pub layouts: &'a RenderBindGroupLayouts,
+    pub pipeline_manager: &'a mut crate::gfx::pipeline::PipelineManager,
+    pub bind_group_manager: &'a mut crate::gfx::bind_group::BindGroupManager,
 }
 
 pub struct ObjectDescriptor<'a> {
@@ -36,7 +32,7 @@ pub struct ObjectDescriptor<'a> {
     pub v_shader: &'a str,
     pub f_shader: &'a str,
     pub buffers: &'a [wgpu::VertexBufferLayout<'a>],
-    pub bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
+    pub bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     pub primitive: wgpu::PrimitiveState,
     pub format: wgpu::TextureFormat,
     pub depth_stencil: Option<wgpu::DepthStencilState>,

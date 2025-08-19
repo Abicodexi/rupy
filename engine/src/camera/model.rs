@@ -61,7 +61,7 @@ impl CameraModel {
     pub fn load_model(
         &mut self,
         service: &AssetService,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         format: wgpu::TextureFormat,
     ) {
         let file = &self.model;

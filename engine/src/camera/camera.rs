@@ -5,9 +5,7 @@ use winit::{
 };
 
 use crate::{
-    camera::{CameraControls, CameraModel, CameraTransform, CameraUniform, Frustum, Projection},
-    log_info, AssetService, BindGroup, CacheKey, Entity, Position, RenderBindGroupLayouts,
-    Renderable, Rotation, Scale, TextRegion, Velocity, WgpuBuffer,
+    camera::{CameraControls, CameraModel, CameraTransform, CameraUniform, Frustum, Projection}, gfx::{bind_group::{camera_group, camera_layout, global_uniform_layout, material_storage_layout, normal_texture_layout, skybox_cubemap_layout}, buffer::WgpuBuffer}, log_info, AssetService, CacheKey, Entity, Position, Renderable, Rotation, Scale, TextRegion, Velocity
 };
 
 use glam::{FloatExt, Mat4, Quat, Vec3};
@@ -40,7 +38,6 @@ impl Camera {
 
     pub fn new(
         device: &wgpu::Device,
-        bind_group_layouts: &RenderBindGroupLayouts,
         screen_w: f32,
         screen_h: f32,
         speed: f32,
@@ -54,7 +51,7 @@ impl Camera {
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             Some("camera uniform buffer"),
         );
-        let bind_group = BindGroup::camera(device, bind_group_layouts, &uniform_buffer);
+        let bind_group = camera_group(device, &camera_layout(device), &uniform_buffer);
 
         let model = CameraModel::new("goblin.obj", "normal.vert.wgsl", "normal.frag.wgsl");
         let controls = CameraControls::new(speed, sensitivity);
@@ -184,13 +181,14 @@ impl Camera {
         &self.bind_group
     }
     pub fn load_model(&mut self, service: &AssetService, cfg: &wgpu::SurfaceConfiguration) {
+        let device = service.device();
         self.model.load_model(
             service,
             vec![
-                service.bind_group_layouts().uniform().clone(),
-                service.bind_group_layouts().equirect_dst().clone(),
-                service.bind_group_layouts().material_storage().clone(),
-                service.bind_group_layouts().normal().clone(),
+               global_uniform_layout(device),
+               skybox_cubemap_layout(device),
+               material_storage_layout(device),
+               normal_texture_layout(device),
             ],
             cfg.format,
         );

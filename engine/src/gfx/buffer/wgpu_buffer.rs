@@ -21,7 +21,6 @@ impl WgpuBuffer {
         usage: wgpu::BufferUsages,
         label: Option<&str>,
     ) -> Self {
-        use wgpu::util::DeviceExt;
         let size = (std::mem::size_of::<T>() * data.len()) as u64;
         let contents = bytemuck::cast_slice(data);
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -29,16 +28,20 @@ impl WgpuBuffer {
             contents,
             usage,
         });
-        crate::WgpuBuffer {
+        WgpuBuffer {
             buffer,
             size: size as usize,
             usage,
             label: label.unwrap_or("unnamed").to_string(),
         }
     }
+
+    #[inline]
     pub fn get(&self) -> &wgpu::Buffer {
         &self.buffer
     }
+
+    #[inline]
     pub fn size(&self) -> usize {
         self.size
     }
@@ -64,17 +67,18 @@ impl WgpuBuffer {
             label: label.unwrap_or("unnamed").to_string(),
         }
     }
-    /// Create a new empty GPU buffer with given usage flags
+
+    /// Create a new empty GPU buffer with given usage flags (size = 0).
     pub fn new_empty(
         device: &wgpu::Device,
         usage: wgpu::BufferUsages,
         label: Option<&str>,
     ) -> Self {
-        use wgpu::util::DeviceExt;
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label,
-            contents: &[],
+            size: 0,
             usage,
+            mapped_at_creation: false,
         });
         WgpuBuffer {
             buffer,
@@ -84,7 +88,8 @@ impl WgpuBuffer {
         }
     }
 
-    /// Update the buffer with new data via queue write
+    /// Update the buffer with new data via queue write.
+    /// If the new data is larger than current capacity, the buffer is re-created.
     pub fn write_data<T: bytemuck::Pod>(
         &mut self,
         queue: &wgpu::Queue,
@@ -93,63 +98,20 @@ impl WgpuBuffer {
         offset: Option<u64>,
     ) {
         let bytes = bytemuck::cast_slice(data);
-        let size = std::mem::size_of_val(data) as u64;
+        let size = bytes.len() as u64;
+
         if size > self.buffer.size() {
+            // Reallocate to fit new contents.
             self.buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&self.label),
                 contents: bytes,
                 usage: self.usage,
-            })
+            });
+        } else {
+            queue.write_buffer(&self.buffer, offset.unwrap_or(0), bytes);
         }
+
         self.size = size as usize;
-        queue.write_buffer(&self.buffer, offset.unwrap_or(0), bytes);
     }
 }
 
-pub type WgpuBufferCacheType = crate::HashCache<Arc<WgpuBuffer>>;
-pub struct WgpuBufferManager {
-    inner: WgpuBufferCacheType,
-}
-
-impl WgpuBufferManager {
-    pub fn new() -> Self {
-        Self {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl crate::CacheStorage<Arc<WgpuBuffer>> for WgpuBufferManager {
-    fn get_resource(&self, key: &crate::CacheKey) -> Option<&Arc<WgpuBuffer>> {
-        self.inner.get(key)
-    }
-    fn contains_resource(&self, key: &crate::CacheKey) -> bool {
-        self.inner.contains_key(key)
-    }
-    fn get_mut(&mut self, key: &crate::CacheKey) -> Option<&mut Arc<WgpuBuffer>> {
-        self.inner.get_mut(key)
-    }
-    fn get_or_create<F>(
-        &mut self,
-        key: crate::CacheKey,
-        create_fn: F,
-    ) -> Result<Arc<WgpuBuffer>, EngineError>
-    where
-        F: FnOnce() -> Result<Arc<WgpuBuffer>, EngineError>,
-    {
-        self.inner.get_or_create(key, create_fn)
-    }
-    fn insert_resource(&mut self, key: crate::CacheKey, resource: Arc<WgpuBuffer>) {
-        self.inner.insert(key, resource);
-    }
-    fn remove_resource(&mut self, key: &crate::CacheKey) -> Option<Arc<WgpuBuffer>> {
-        self.inner.remove(key)
-    }
-
-    fn all<'a>(&'a self) -> impl Iterator<Item = &'a Arc<WgpuBuffer>>
-    where
-        WgpuBuffer: 'a,
-    {
-        self.inner.values()
-    }
-}

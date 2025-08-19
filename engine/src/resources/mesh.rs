@@ -1,5 +1,5 @@
 use super::Material;
-use crate::{Vertex, WgpuBuffer};
+use crate::{gfx::buffer::WgpuBuffer, Vertex };
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -16,7 +16,7 @@ impl MeshAsset {
     ) -> (WgpuBuffer, WgpuBuffer, u32) {
         let vertex_buffer = {
             let data: &[u8] = bytemuck::cast_slice(&self.vertices);
-            let vb = crate::WgpuBuffer::from_data(
+            let vb = WgpuBuffer::from_data(
                 device,
                 data,
                 wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -28,7 +28,7 @@ impl MeshAsset {
 
         let index_buffer = {
             let data: &[u8] = bytemuck::cast_slice(&self.indices);
-            let ib = crate::WgpuBuffer::from_data(
+            let ib = WgpuBuffer::from_data(
                 device,
                 data,
                 wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,

@@ -33,12 +33,16 @@ impl GlyphonBuffer {
             shape_opt,
         }
     }
+
+    #[inline]
     pub fn get(&self) -> &glyphon::Buffer {
         &self.buffer
     }
+    #[inline]
     pub fn get_mut(&mut self) -> &mut glyphon::Buffer {
         &mut self.buffer
     }
+
     /// Create a Glyphon buffer from explicit metrics and pre-populated lines
     pub fn from_data(
         font_system: &mut glyphon::FontSystem,
@@ -62,25 +66,31 @@ impl GlyphonBuffer {
         buffer.push_lines(lines);
         buffer
     }
-    /// Append lines into the buffer
+
+    /// Append multiple lines.
     pub fn push_lines(&mut self, lines: &Vec<glyphon::BufferLine>) {
         for line in lines.iter() {
             self.buffer.lines.push(line.clone());
         }
     }
-    /// Append lines into the buffer
+
+    /// Append one line.
     pub fn push_line(&mut self, line: glyphon::BufferLine) {
         self.buffer.lines.push(line);
     }
+
     pub fn set_lines(&mut self, lines: Vec<glyphon::BufferLine>) {
         self.buffer.lines = lines;
     }
-    /// Clear all lines from the buffer
+
+    /// Remove all lines.
     pub fn clear_lines(&mut self) {
         self.buffer.lines.clear();
     }
-    /// Clear all lines from the buffer
+
+    /// Shape text.
     pub fn shape(&mut self, font_system: &mut glyphon::FontSystem) {
         self.buffer.shape_until_scroll(font_system, false);
     }
 }
+

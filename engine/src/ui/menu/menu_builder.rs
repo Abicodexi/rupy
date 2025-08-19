@@ -1,7 +1,5 @@
 use crate::{
-    container::UiContainer,
-    menu::{menu_button::MenuButton, menu_element::MenuElement, Menu},
-    AssetLoader, AssetService, BindGroup, Dispatch, EngineError, Texture, UiElements,
+    container::UiContainer, gfx::bind_group::{sprite_2d_array_group, sprite_2d_array_layout}, menu::{menu_button::MenuButton, menu_element::MenuElement, Menu}, AssetLoader, AssetService, Dispatch, EngineError, Texture, UiElements
 };
 
 pub struct MenuBuilder {
@@ -100,7 +98,7 @@ impl MenuBuilder {
             "ui_texture_array",
         );
         let array_tex_bg =
-            BindGroup::sprite_2d_array(service.device(), service.bind_group_layouts(), &array_tex);
+            sprite_2d_array_group(service.device(), &sprite_2d_array_layout(service.device()), &array_tex);
 
         menu.set_texture_bind_group(array_tex_bg);
         Ok(menu)

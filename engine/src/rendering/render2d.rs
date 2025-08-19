@@ -1,4 +1,4 @@
-use crate::{EngineError, Vertex2d, WgpuBuffer};
+use crate::{gfx::buffer::WgpuBuffer, EngineError, Vertex2d};
 
 pub struct Renderer2d {
     pub max_sprites: usize,

@@ -1,8 +1,13 @@
 use crate::{
-    AssetRequest, CacheKey, Entity, Position, RenderBindGroupLayouts, Renderable, Rotation, Scale,
-    Texture, World, GROUND_Y,
+    gfx::bind_group::{
+        global_uniform_layout, material_storage_layout, normal_texture_layout,
+        skybox_cubemap_layout,
+    },
+    AssetRequest, CacheKey, Entity, Position, Renderable, Rotation, Scale, Texture, World,
+    GROUND_Y,
 };
 use crossbeam::channel::Sender;
+use wgpu::Device;
 
 pub enum ScreenCorner {
     TopLeft,
@@ -29,9 +34,9 @@ impl ScreenCorner {
 
 pub fn debug_scene(
     asset_tx: &Sender<AssetRequest>,
-    bind_group_layouts: &RenderBindGroupLayouts,
     world: &mut World,
     format: wgpu::TextureFormat,
+    device: &Device,
 ) -> Entity {
     let depth_stencil = wgpu::DepthStencilState {
         format: Texture::DEPTH_FORMAT,
@@ -50,10 +55,10 @@ pub fn debug_scene(
             v_shader: "normal.vert.wgsl".to_string(),
             f_shader: "normal.frag.wgsl".to_string(),
             bind_group_layouts: vec![
-                bind_group_layouts.uniform().clone(),
-                bind_group_layouts.equirect_dst().clone(),
-                bind_group_layouts.material_storage().clone(),
-                bind_group_layouts.normal().clone(),
+                global_uniform_layout(device),
+                skybox_cubemap_layout(device),
+                material_storage_layout(device),
+                normal_texture_layout(device),
             ],
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -114,10 +119,10 @@ pub fn debug_scene(
             v_shader: "normal.vert.wgsl".to_string(),
             f_shader: "normal.frag.wgsl".to_string(),
             bind_group_layouts: vec![
-                bind_group_layouts.uniform().clone(),
-                bind_group_layouts.equirect_dst().clone(),
-                bind_group_layouts.material_storage().clone(),
-                bind_group_layouts.normal().clone(),
+                global_uniform_layout(device),
+                skybox_cubemap_layout(device),
+                material_storage_layout(device),
+                normal_texture_layout(device),
             ],
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,

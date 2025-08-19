@@ -20,17 +20,17 @@ pub enum AssetRequest {
         file: String,
         v_shader: String,
         f_shader: String,
-        bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
     },
     LoadModelAsset {
-        bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: crate::ModelAsset,
     },
     LoadMaterial {
-        bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: String,
         f_shader: String,
@@ -39,7 +39,7 @@ pub enum AssetRequest {
         depth_stencil: Option<wgpu::DepthStencilState>,
     },
     LoadMaterialAsset {
-        bind_group_layouts: Vec<std::sync::Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: crate::MaterialAsset,
     },
     LoadRenderPipeline {

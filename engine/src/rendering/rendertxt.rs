@@ -1,4 +1,5 @@
-use super::{GlyphonBuffer, TextRegion};
+use super::TextRegion;
+use crate::gfx::buffer::GlyphonBuffer;
 use glyphon::{
     cosmic_text::{Align, LineEnding},
     Attrs, AttrsList, BufferLine, Color, FontSystem, Shaping, SwashCache, TextArea, TextAtlas,

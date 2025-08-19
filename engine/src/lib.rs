@@ -7,6 +7,7 @@ pub mod rendering;
 pub mod resources;
 pub mod ui;
 pub mod util;
+pub mod gfx;
 pub use prelude::*;
 
 #[cfg(feature = "logging")]

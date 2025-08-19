@@ -1,7 +1,6 @@
 use super::{InstanceBuffer, VertexInstance, CHUNK_SIZE};
 use crate::{
-    chunk::Chunk, EngineError, Material, Medium, MediumProperties, Mesh, MeshAsset, MeshInstance,
-    Position, Renderable, Rotation, Scale, Transform, WgpuBuffer,
+    chunk::Chunk, gfx::buffer::WgpuBuffer, EngineError, Material, Medium, MediumProperties, Mesh, MeshAsset, MeshInstance, Position, Renderable, Rotation, Scale, Transform
 };
 use glam::Vec3;
 use std::{collections::HashMap, sync::Arc};

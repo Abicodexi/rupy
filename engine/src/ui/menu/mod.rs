@@ -6,9 +6,13 @@ use winit::{
 use crate::{
     camera::OrthoUniform,
     container::UiContainer,
+    gfx::{
+        bind_group::{ortho_uniform_group, ortho_uniform_layout, sprite_2d_array_layout},
+        buffer::WgpuBuffer,
+    },
     menu::{menu_builder::MenuBuilder, menu_element::MenuElement},
-    AssetService, BindGroup, CacheKey, EngineError, GlyphonTextRenderer, Renderer2d, UiElement,
-    UiElements, UiEvent, Vertex2d, WgpuBuffer,
+    AssetService, CacheKey, EngineError, GlyphonTextRenderer, Renderer2d, UiElement, UiElements,
+    UiEvent, Vertex2d,
 };
 use std::sync::Arc;
 pub mod menu_builder;
@@ -43,10 +47,12 @@ impl Menu {
         );
 
         let bind_group = service.get_or_create_bind_group("orthographic".into(), || {
-            Ok(
-                BindGroup::ortho_uniform(service.device(), service.bind_group_layouts(), &buffer)
-                    .into(),
+            Ok(ortho_uniform_group(
+                service.device(),
+                &ortho_uniform_layout(service.device()),
+                &buffer,
             )
+            .into())
         })?;
 
         let pipeline_name = "sprite2d";
@@ -57,8 +63,8 @@ impl Menu {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", pipeline_name)),
                     bind_group_layouts: &[
-                        service.bind_group_layouts().ortho_uniform(),
-                        service.bind_group_layouts().sprite_2d_array(),
+                        &ortho_uniform_layout(service.device()),
+                        &sprite_2d_array_layout(service.device()),
                     ],
                     push_constant_ranges: &[],
                 });

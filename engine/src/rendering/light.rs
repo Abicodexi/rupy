@@ -1,6 +1,5 @@
 use wgpu::BindingType;
-
-use crate::{RenderBindGroupLayouts, WgpuBuffer};
+use crate::gfx::{bind_group::light_layout, buffer::WgpuBuffer};
 
 #[repr(C)]
 #[derive(
@@ -30,7 +29,7 @@ pub struct Light {
     color: cgmath::Vector3<f32>,
     speed: f32,
     bind_group: wgpu::BindGroup,
-    uniform_buffer: crate::WgpuBuffer,
+    uniform_buffer: WgpuBuffer,
 }
 
 impl Light {
@@ -40,18 +39,15 @@ impl Light {
     pub const BINDING: BindingType = wgpu::BindingType::Buffer {
         ty: wgpu::BufferBindingType::Uniform,
         has_dynamic_offset: false,
-        min_binding_size: std::num::NonZeroU64::new(
-            std::mem::size_of::<crate::LightUniform>() as u64
-        ),
+        min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<LightUniform>() as u64),
     };
 
     pub fn new(
         device: &wgpu::Device,
-        bind_group_layouts: &RenderBindGroupLayouts,
     ) -> Result<Self, crate::EngineError> {
         let position: cgmath::Vector3<f32> = Self::CENTER.into();
         let color: cgmath::Vector3<f32> = [1.0, 1.0, 1.0].into();
-        let bind_group_layout = bind_group_layouts.light();
+        let bind_group_layout = light_layout(device);
         let uniform_buffer = WgpuBuffer::from_data(
             device,
             &[LightUniform::new()],
@@ -93,7 +89,7 @@ impl Light {
         self.position.x = Light::CENTER.x + Light::RADIUS * cos as f32;
         self.position.z = Light::CENTER.z + Light::RADIUS * sin as f32;
     }
-    pub fn buffer(&self) -> &crate::WgpuBuffer {
+    pub fn buffer(&self) -> &WgpuBuffer {
         &self.uniform_buffer
     }
     pub fn upload(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {

@@ -32,17 +32,11 @@ pkgs.mkShell rec {
     # nice for developing wgpu itself
     typos
 
-    # if you don't already have rust installed through other means,
-    # this shell.nix can do that for you with this below
-    yq # for tomlq below
-    rustup
-
     # nice tools
     gdb
     rr
     evcxr
     valgrind
-    renderdoc
   ];
 
   shellHook = ''

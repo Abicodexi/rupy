@@ -1,6 +1,7 @@
+use crate::gfx::bind_group::BindGroupManager;
+use crate::gfx::pipeline::PipelineManager;
 use crate::log_info;
 use crate::AssetRequest;
-use crate::BindGroupManager;
 use crate::CacheKey;
 use crate::CacheStorage;
 use crate::EngineError;
@@ -9,12 +10,11 @@ use crate::MaterialAsset;
 use crate::Model;
 use crate::ModelAsset;
 use crate::OwnedVertexBufferLayout;
-use crate::RenderBindGroupLayouts;
 use crate::Texture;
 use crate::Vertex;
 use crate::VertexInstance;
 use crate::{
-    log_error, MaterialManager, ModelManager, PipelineManager, ShaderManager, TextureManager,
+    log_error, MaterialManager, ModelManager, ShaderManager, TextureManager,
 };
 use crossbeam::channel::{Receiver, Sender};
 use once_cell::sync::OnceCell;
@@ -37,7 +37,6 @@ pub struct AssetService {
     queue: Arc<wgpu::Queue>,
     device: Arc<wgpu::Device>,
     bind_groups: Arc<RwLock<BindGroupManager>>,
-    bind_group_layouts: Arc<RenderBindGroupLayouts>,
     materials: Arc<RwLock<MaterialManager>>,
     models: Arc<RwLock<ModelManager>>,
     textures: Arc<RwLock<TextureManager>>,
@@ -56,12 +55,10 @@ impl AssetService {
         shaders: ShaderManager,
         pipelines: PipelineManager,
     ) -> Self {
-        let bind_group_layouts = RenderBindGroupLayouts::new(&device);
         Self {
             queue,
             device,
             bind_groups: Arc::new(RwLock::new(bind_groups)),
-            bind_group_layouts: bind_group_layouts.into(),
             materials: Arc::new(RwLock::new(materials)),
             models: Arc::new(RwLock::new(models)),
             textures: Arc::new(RwLock::new(textures)),
@@ -76,9 +73,6 @@ impl AssetService {
         &self.device
     }
 
-    pub fn bind_group_layouts(&self) -> &RenderBindGroupLayouts {
-        &self.bind_group_layouts
-    }
     pub fn get_material(&self, key: &CacheKey) -> Option<Arc<Material>> {
         self.materials
             .read()
@@ -210,7 +204,7 @@ impl AssetService {
         file: String,
         v_shader: String,
         f_shader: String,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -235,7 +229,7 @@ impl AssetService {
     pub fn get_or_load_material(
         &self,
         key: &CacheKey,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: String,
         f_shader: String,
@@ -368,7 +362,7 @@ impl AssetService {
         if let (Ok(mut textures), Ok(mut bind_groups)) =
             (self.textures.write(), self.bind_groups.write())
         {
-            bind_groups.bind_group_for(&self.queue, &self.device, &mut textures, texture, layout)
+            bind_groups.texture_bind_group(&self.queue, &self.device, &mut textures, texture, layout)
         } else {
             None
         }
@@ -377,7 +371,7 @@ impl AssetService {
     pub fn load_material(
         &self,
 
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: String,
         f_shader: String,
@@ -407,7 +401,6 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
-                self.bind_group_layouts(),
                 bind_group_layouts,
                 mat,
                 &v_shader,
@@ -426,7 +419,7 @@ impl AssetService {
     pub async fn load_material_async(
         &self,
 
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         mat: tobj::Material,
         v_shader: String,
         f_shader: String,
@@ -457,7 +450,6 @@ impl AssetService {
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
-                    self.bind_group_layouts(),
                     bind_group_layouts,
                     mat,
                     &v_shader,
@@ -478,8 +470,7 @@ impl AssetService {
     pub fn load_material_asset(
         &self,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: MaterialAsset,
     ) {
         let asset_name = asset.name.clone();
@@ -504,7 +495,6 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
-                layouts,
                 bind_group_layouts,
                 asset,
                 buffers,
@@ -517,7 +507,7 @@ impl AssetService {
     }
     pub async fn load_material_asset_async(
         &self,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         asset: MaterialAsset,
         buffers: &[VertexBufferLayout<'_>],
     ) {
@@ -544,7 +534,6 @@ impl AssetService {
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
-                    self.bind_group_layouts(),
                     bind_group_layouts,
                     asset,
                     buffers,
@@ -562,7 +551,7 @@ impl AssetService {
         file: String,
         v_shader: String,
         f_shader: String,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -590,7 +579,6 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
-                self.bind_group_layouts(),
                 &file,
                 &v_shader,
                 &f_shader,
@@ -609,7 +597,7 @@ impl AssetService {
         file: String,
         v_shader: String,
         f_shader: String,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -637,7 +625,6 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
-                self.bind_group_layouts(),
                 &file,
                 &v_shader,
                 &f_shader,
@@ -656,7 +643,7 @@ impl AssetService {
         file: String,
         v_shader: String,
         f_shader: String,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -685,7 +672,6 @@ impl AssetService {
                     &mut shaders,
                     &mut pipelines,
                     &mut bind_groups,
-                    self.bind_group_layouts(),
                     &file,
                     &v_shader,
                     &f_shader,
@@ -703,7 +689,7 @@ impl AssetService {
     }
     pub fn load_model_asset(
         &self,
-        bind_group_layouts: Vec<Arc<BindGroupLayout>>,
+        bind_group_layouts: Vec<BindGroupLayout>,
         asset: ModelAsset,
         buffers: &[VertexBufferLayout<'_>],
     ) {
@@ -730,7 +716,6 @@ impl AssetService {
                 &mut shaders,
                 &mut pipelines,
                 &mut bind_groups,
-                self.bind_group_layouts(),
                 bind_group_layouts,
                 buffers,
                 asset,
@@ -951,7 +936,6 @@ fn asset_service_thread(service: Arc<AssetService>, rx: Arc<Receiver<AssetReques
                 let buffers = &[Vertex::LAYOUT, VertexInstance::LAYOUT];
                 service.load_material_asset(
                     buffers,
-                    service.bind_group_layouts(),
                     bind_group_layouts,
                     asset,
                 );

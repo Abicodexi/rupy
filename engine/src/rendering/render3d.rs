@@ -1,12 +1,15 @@
+use crate::gfx::{
+    bind_group::{diffuse_layout, hdr_group}, buffer::{FrameBuffer, WgpuBuffer}, pipeline::create_render_pipeline
+};
 use rayon::prelude::*;
 use std::collections::HashMap;
+
 use {
     super::{RenderPass, VertexInstance},
     crate::{
         camera::{self},
-        create_render_pipeline, AssetService, BindGroup, CacheKey, CacheStorage, DebugMode,
-        EngineError, FrameBuffer, MaterialManager, ModelManager, RenderBindGroupLayouts, Rotation,
-        Scale, Texture, Transform, WgpuBuffer, World,
+        AssetService, CacheKey, CacheStorage, DebugMode, EngineError, MaterialManager,
+        ModelManager, Rotation, Scale, Texture, Transform, World,
     },
     rayon::iter::{IntoParallelRefIterator, ParallelIterator},
     std::{
@@ -37,7 +40,7 @@ impl Renderer3d {
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some(&format!("{} layout", label)),
-                    bind_group_layouts: &[service.bind_group_layouts().texture()],
+                    bind_group_layouts: &[&diffuse_layout(service.device())],
                     push_constant_ranges: &[],
                 });
         let hdr_pipeline = create_render_pipeline(
@@ -73,9 +76,9 @@ impl Renderer3d {
     ) -> Result<(), EngineError> {
         let bind_group_key = CacheKey::from(hdr_texture.label.clone());
         let bind_group = service.get_or_create_bind_group(bind_group_key, || {
-            Ok(BindGroup::hdr(
+            Ok(hdr_group(
                 service.device(),
-                service.bind_group_layouts(),
+                &diffuse_layout(service.device()),
                 hdr_texture,
                 "final blit",
             )
@@ -105,13 +108,11 @@ impl Renderer3d {
     pub fn hdr(
         &self,
         device: &wgpu::Device,
-        bind_group_layouts: &RenderBindGroupLayouts,
-
         encoder: &mut wgpu::CommandEncoder,
         scene_texture: &Texture,
         hdr_fb: &FrameBuffer,
     ) {
-        let bind_group = BindGroup::hdr(device, bind_group_layouts, scene_texture, "hdr input");
+        let bind_group = hdr_group(device, &diffuse_layout(device), scene_texture, "hdr input");
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("HDR Pass"),
@@ -354,10 +355,6 @@ impl InstanceBuffers {
                     true
                 }
             };
-
-            if update_buffer {
-                crate::log_debug!("created new buffer for {:?}", key);
-            }
         }
 
         self.batch = next_batch.clone();

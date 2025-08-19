@@ -1,8 +1,6 @@
 use super::{CacheKey, HashCache, MaterialAsset, MaterialManager, Mesh, MeshAsset, MeshInstance};
 use crate::{
-    fallback_diffuse, fallback_normal, log_debug, log_info, log_warning, AssetLoader,
-    BindGroupManager, EngineError, PipelineManager, RenderBindGroupLayouts, ShaderManager,
-    TextureManager, AABB,
+    fallback_diffuse, fallback_normal, gfx::{bind_group::BindGroupManager, pipeline::PipelineManager}, log_debug, log_info, log_warning, AssetLoader, EngineError, ShaderManager, TextureManager, AABB
 };
 use std::{collections::HashMap, sync::Arc};
 #[derive(Clone, Debug)]
@@ -22,8 +20,7 @@ impl ModelAsset {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
     ) -> Result<(MeshInstance, AABB), EngineError> {
         let (_mesh_asset, material_asset) = &self.asset;
@@ -35,7 +32,6 @@ impl ModelAsset {
                 shader_manager,
                 pipeline_manager,
                 bind_group_manager,
-                layouts,
                 bind_group_layouts,
                 asset.clone(),
                 buffers,
@@ -70,9 +66,7 @@ impl Model {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
     ) -> std::result::Result<Self, EngineError> {
@@ -84,7 +78,6 @@ impl Model {
             shader_manager,
             pipeline_manager,
             bind_group_manager,
-            layouts,
             bind_group_layouts,
             buffers,
         )?;
@@ -103,7 +96,6 @@ impl Model {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
         model: &tobj::Model,
         material: Option<&tobj::Material>,
         v_shader: &str,
@@ -112,7 +104,7 @@ impl Model {
         primitive: wgpu::PrimitiveState,
         depth_stencil: Option<wgpu::DepthStencilState>,
         format: wgpu::TextureFormat,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     ) -> Result<Model, EngineError> {
         let mesh = &model.mesh;
 
@@ -191,7 +183,6 @@ impl Model {
             shader_manager,
             pipeline_manager,
             bind_group_manager,
-            layouts,
             bind_group_layouts,
             buffers,
         )?;
@@ -210,14 +201,13 @@ impl Model {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
         v_shader: &str,
         f_shader: &str,
         vertex_buffers: &[wgpu::VertexBufferLayout<'_>],
         primitive_state: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         path: &str,
     ) -> Result<Vec<Self>, EngineError> {
         let (doc, buffers, images) = gltf::import(path)?;
@@ -331,7 +321,6 @@ impl Model {
                     shader_manager,
                     pipeline_manager,
                     bind_group_manager,
-                    layouts,
                     bind_group_layouts.clone(),
                     vertex_buffers,
                 )?;
@@ -366,12 +355,11 @@ impl ModelManager {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
         file: &str,
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         format: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -390,7 +378,6 @@ impl ModelManager {
             shader_manager,
             pipeline_manager,
             bind_group_manager,
-            layouts,
             v_shader,
             f_shader,
             buffers,
@@ -419,12 +406,11 @@ impl ModelManager {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
         file: &str,
         v_shader: &str,
         f_shader: &str,
         buffers: &[wgpu::VertexBufferLayout<'_>],
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         primitive: wgpu::PrimitiveState,
         color_target: wgpu::TextureFormat,
         depth_stencil: Option<wgpu::DepthStencilState>,
@@ -464,7 +450,6 @@ impl ModelManager {
                 shader_manager,
                 pipeline_manager,
                 bind_group_manager,
-                layouts,
                 &m,
                 mat,
                 v_shader,
@@ -489,8 +474,7 @@ impl ModelManager {
         shader_manager: &mut ShaderManager,
         pipeline_manager: &mut PipelineManager,
         bind_group_manager: &mut BindGroupManager,
-        layouts: &RenderBindGroupLayouts,
-        bind_group_layouts: Vec<Arc<wgpu::BindGroupLayout>>,
+        bind_group_layouts: Vec<wgpu::BindGroupLayout>,
         buffers: &[wgpu::VertexBufferLayout<'_>],
         asset: ModelAsset,
     ) -> Result<Arc<Model>, EngineError> {
@@ -506,7 +490,6 @@ impl ModelManager {
             shader_manager,
             pipeline_manager,
             bind_group_manager,
-            layouts,
             bind_group_layouts,
             buffers,
             asset,

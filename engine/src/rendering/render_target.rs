@@ -1,5 +1,7 @@
+use crate::gfx::buffer::{FrameBuffer, RenderTargetKind};
+
 pub struct RenderTargetManager {
-    targets: std::collections::HashMap<crate::RenderTargetKind, crate::FrameBuffer>,
+    targets: std::collections::HashMap<RenderTargetKind, FrameBuffer>,
 }
 
 impl RenderTargetManager {
@@ -9,7 +11,7 @@ impl RenderTargetManager {
         }
     }
 
-    pub fn insert(&mut self, fb: crate::FrameBuffer, kind: crate::RenderTargetKind) {
+    pub fn insert(&mut self, fb: FrameBuffer, kind: RenderTargetKind) {
         self.targets.insert(kind, fb);
     }
 
@@ -19,17 +21,17 @@ impl RenderTargetManager {
         }
     }
 
-    pub fn get(&self, kind: &crate::RenderTargetKind) -> Option<&crate::FrameBuffer> {
+    pub fn get(&self, kind: &RenderTargetKind) -> Option<&FrameBuffer> {
         self.targets.get(kind)
     }
 
-    pub fn get_mut(&mut self, kind: &crate::RenderTargetKind) -> Option<&mut crate::FrameBuffer> {
+    pub fn get_mut(&mut self, kind: &RenderTargetKind) -> Option<&mut FrameBuffer> {
         self.targets.get_mut(kind)
     }
 
     pub fn get_attachment(
         &self,
-        kind: &crate::RenderTargetKind,
+        kind: &RenderTargetKind,
     ) -> Option<(
         wgpu::RenderPassColorAttachment,
         Option<wgpu::RenderPassDepthStencilAttachment>,
